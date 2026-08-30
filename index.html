@@ -258,7 +258,6 @@ main{ padding-top:var(--sp-5); padding-bottom:var(--sp-7); min-height:70vh; }
 .btn-quiet:hover{ background:var(--surface-2); color:var(--text); }
 .btn-big{ min-height:52px; font-size:var(--fs-md); padding:var(--sp-3) var(--sp-5); border-radius:8px; }
 .btn-sm{ min-height:30px; padding:3px var(--sp-3); font-size:var(--fs-xs); }
-.btn-block{ width:100%; }
 .btn .ic{ width:15px; height:15px; flex:none; }
 
 .field{ display:flex; flex-direction:column; gap:3px; min-width:0; }
@@ -278,10 +277,10 @@ input[type="number"]{ font-variant-numeric:tabular-nums; }
 input::placeholder,textarea::placeholder{ color:var(--muted); opacity:.7; }
 select{ appearance:none; padding-right:30px; background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%); background-position:calc(100% - 16px) 55%,calc(100% - 11px) 55%; background-size:5px 5px; background-repeat:no-repeat; }
 
-.form-grid{ display:grid; gap:var(--sp-3); }
 .form-row{ display:flex; gap:var(--sp-3); flex-wrap:wrap; align-items:flex-end; }
 .form-row .field{ flex:1; min-width:120px; }
 .form-actions{ display:flex; gap:var(--sp-2); align-items:center; flex-wrap:wrap; }
+.form-footer{ margin-top:var(--sp-5); padding-top:var(--sp-4); border-top:1px solid var(--border); }
 .error-text{ color:var(--danger); font-size:var(--fs-sm); font-weight:600; }
 .hint{ color:var(--muted); font-size:var(--fs-xs); }
 
@@ -291,22 +290,46 @@ kbd{
   border-radius:var(--radius-sm); padding:1px 6px; color:var(--text);
 }
 
+/* --- small layout utilities (used by the view templates) --- */
+.mt-2{ margin-top:var(--sp-2); }
+.mt-3{ margin-top:var(--sp-3); }
+.mt-4{ margin-top:var(--sp-4); }
+.mt-5{ margin-top:var(--sp-5); }
+.mb-3{ margin-bottom:var(--sp-3); }
+.mb-4{ margin-bottom:var(--sp-4); }
+.flex-2{ flex:2; }
+.flex-none{ flex:0 0 auto; }
+.push-right{ margin-left:auto; }
+.self-end{ justify-self:end; }
+.span-all{ grid-column:1 / -1; }
+.divider-top{ border-top:1px solid var(--border); }
+.panel-title{ font-family:var(--font-display); font-size:var(--fs-md); }
+.quote{ font-style:italic; }
+.key-hint{ opacity:.75; }
+.ic-xs{ width:11px; height:11px; display:inline-block; vertical-align:-1px; }
+.ic-inline{ display:inline-block; vertical-align:-2px; }
+
 /* ============================================================
    TODAY — PICKER
    ============================================================ */
-.routine-pick{ display:flex; flex-direction:column; }
+.routine-pick{ display:flex; flex-direction:column; gap:var(--sp-2); }
 .routine-pick-row{
-  display:flex; align-items:center; gap:var(--sp-3); width:100%; text-align:left;
+  display:flex; align-items:center; gap:var(--sp-3);
   background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
-  padding:var(--sp-3) var(--sp-4); cursor:pointer;
+  padding:var(--sp-2) var(--sp-3) var(--sp-2) 0;
   transition:border-color .12s ease, background .12s ease;
 }
-.routine-pick-row + .routine-pick-row{ margin-top:var(--sp-2); }
 .routine-pick-row:hover{ border-color:var(--border-strong); background:var(--surface-2); }
-.routine-pick-row[aria-pressed="true"]{ border-color:var(--accent); box-shadow:inset 3px 0 0 var(--accent); }
-.routine-pick-row .rp-name{ font-weight:650; }
-.routine-pick-row .rp-meta{ color:var(--muted); font-size:var(--fs-xs); }
-.routine-pick-row .rp-go{ margin-left:auto; flex:none; }
+.routine-pick-row.is-selected{ border-color:var(--accent); box-shadow:inset 3px 0 0 var(--accent); }
+/* the label fills the row so the whole card is a selection target */
+.rp-select{
+  flex:1; min-width:0; text-align:left; background:none; border:0; cursor:pointer;
+  padding:var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-4); border-radius:var(--radius);
+}
+.rp-name{ font-weight:650; display:block; }
+.rp-meta{ color:var(--muted); font-size:var(--fs-xs); display:block; }
+.rp-go{ flex:none; }
+.last-session-row{ display:flex; gap:var(--sp-3); align-items:baseline; flex-wrap:wrap; }
 .last-session{ border-left:3px solid var(--success); }
 
 /* ============================================================
@@ -348,7 +371,7 @@ kbd{
 .sets-head span{ font-size:10.5px; font-weight:650; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
 .set-row{ padding:var(--sp-2) 0; border-top:1px solid var(--border); }
 .set-row.is-current{ background:var(--accent-soft); margin:0 calc(-1 * var(--sp-3)); padding-left:var(--sp-3); padding-right:var(--sp-3); border-radius:var(--radius); border-top-color:transparent; }
-.set-row.is-done .num,.set-row.is-done input{ color:var(--muted); }
+.set-row.is-done .n,.set-row.is-done input{ color:var(--muted); }
 .set-row.is-done input{ background:var(--surface-2); border-color:var(--border); }
 .set-num{ display:flex; flex-direction:column; justify-content:center; gap:1px; padding-bottom:8px; }
 .set-num .n{ font-weight:700; font-variant-numeric:tabular-nums; font-size:var(--fs-md); line-height:1; }
@@ -424,7 +447,7 @@ kbd{
 .timer.is-done{ border-color:var(--success); }
 .timer-controls{ display:flex; gap:var(--sp-2); flex-wrap:wrap; }
 .timer-track{ height:6px; background:var(--surface-2); border:1px solid var(--border); border-radius:99px; overflow:hidden; margin-top:var(--sp-3); }
-.timer-fill{ height:100%; background:var(--accent); transition:width .25s linear; }
+.timer-fill{ height:100%; width:100%; background:var(--accent); transition:width .25s linear; }
 .timer.is-done .timer-fill{ background:var(--success); }
 .timer-status{ margin-top:var(--sp-2); font-size:var(--fs-sm); color:var(--muted); }
 @keyframes flash-done{ 0%,100%{ background:var(--surface);} 30%{ background:var(--success-soft);} }
@@ -446,13 +469,18 @@ kbd{
 .hist-row:hover{ background:var(--surface-2); }
 .hist-row:last-child{ border-bottom:0; }
 .hist-cell{ font-variant-numeric:tabular-nums; font-size:var(--fs-sm); }
-.hist-cell.k{ color:var(--muted); font-size:var(--fs-xs); }
+.hist-cell .k{ color:var(--muted); font-size:var(--fs-xs); }
 .hist-cell b{ font-weight:650; }
 .hist-detail{ border-bottom:1px solid var(--border); background:var(--surface-2); padding:var(--sp-4); }
 .hist-ex{ margin-bottom:var(--sp-3); }
 .hist-ex:last-child{ margin-bottom:0; }
 .hist-ex h4{ margin:0 0 var(--sp-1); font-size:var(--fs-sm); font-weight:650; }
 .hist-sets{ color:var(--muted); font-size:var(--fs-sm); font-variant-numeric:tabular-nums; }
+.hist-ex h4 .top-e1rm{ font-weight:400; }
+.hist-row .chev{ transition:transform .15s ease; }
+.hist-row .is-open .chev{ transform:rotate(90deg); }
+.hedit-name{ flex:1; min-width:160px; }
+.hedit-unit{ width:120px; }
 @media (max-width:680px){
   .hist-row{ grid-template-columns:1fr 24px; }
   .hist-row .hist-cell.hide-m{ display:none; }
@@ -467,6 +495,12 @@ kbd{
 .chart-panel{ padding:var(--sp-4); }
 .chart-panel svg{ width:100%; height:auto; display:block; }
 .chart-head{ display:flex; gap:var(--sp-3); align-items:center; justify-content:space-between; flex-wrap:wrap; margin-bottom:var(--sp-3); }
+.trend-picker{ min-width:180px; }
+.trend-foot{ display:flex; justify-content:space-between; gap:var(--sp-3); flex-wrap:wrap; margin-top:6px; }
+.trend-delta{ font-weight:650; }
+.trend-delta.up{ color:var(--success); }
+.trend-delta.down{ color:var(--danger); }
+.mb-2{ margin-bottom:var(--sp-2); }
 
 /* routine editor */
 .item-row{ display:grid; grid-template-columns:24px 1fr repeat(4,minmax(64px,86px)) 84px; gap:var(--sp-2); align-items:end; padding:var(--sp-3) 0; border-top:1px solid var(--border); }
@@ -490,6 +524,8 @@ kbd{
 
 /* exercises */
 .ex-edit-grid{ display:grid; grid-template-columns:2fr 1fr 120px; gap:var(--sp-3); align-items:end; }
+.list-row.is-editing{ background:var(--accent-soft); display:block; }
+.tag-plain{ border:0; background:var(--surface-2); }
 @media (max-width:640px){ .ex-edit-grid{ grid-template-columns:1fr 1fr; } }
 
 /* settings */
@@ -497,6 +533,8 @@ kbd{
 .setting-block:last-child{ border-bottom:0; }
 .setting-block h3{ margin-bottom:var(--sp-1); }
 .setting-block .desc{ color:var(--muted); font-size:var(--fs-sm); margin-bottom:var(--sp-3); }
+.setting-block .danger-heading{ color:var(--danger); }
+.rest-field{ max-width:220px; }
 .radio-row{ display:flex; gap:var(--sp-2); flex-wrap:wrap; }
 .radio-pill{ position:relative; }
 .radio-pill input{ position:absolute; opacity:0; pointer-events:none; }
@@ -575,8 +613,11 @@ dialog::backdrop{ background:rgb(15 17 20 / .5); }
 .empty h3{ color:var(--text); margin-bottom:var(--sp-1); font-family:var(--font-display); }
 .empty p{ margin-bottom:var(--sp-4); font-size:var(--fs-sm); }
 .empty .form-actions{ justify-content:center; }
+.empty.is-solid{ border-style:solid; }
+.empty-line{ padding:var(--sp-3) 0; }
 
 .ic{ width:16px; height:16px; }
+.noscript-note{ padding:var(--sp-5); font-family:var(--font-ui); }
 
 @media (max-width:640px){
   :root{ --fs-xl:24px; }
@@ -616,7 +657,7 @@ dialog::backdrop{ background:rgb(15 17 20 / .5); }
 
 <footer class="app-footer">
   <div class="wrap">
-    <span>Liftlog v1 · your data never leaves this browser</span>
+    <span><span id="app-version">Liftlog</span> · your data never leaves this browser</span>
     <span>Press <kbd>?</kbd> for shortcuts · <button type="button" class="footer-btn" data-action="help-open">keyboard help</button></span>
   </div>
 </footer>
@@ -635,29 +676,15 @@ dialog::backdrop{ background:rgb(15 17 20 / .5); }
 <dialog id="help-dlg" aria-labelledby="help-title">
   <div class="dlg-body">
     <h2 id="help-title">Keyboard shortcuts</h2>
-    <table class="shortcuts">
-      <tbody>
-        <tr><td><kbd>?</kbd></td><td>Open this help</td></tr>
-        <tr><td><kbd>/</kbd></td><td>Focus search (Exercises)</td></tr>
-        <tr><td><kbd>t</kbd></td><td>Go to Today</td></tr>
-        <tr><td><kbd>r</kbd></td><td>Go to Routines</td></tr>
-        <tr><td><kbd>h</kbd></td><td>Go to History</td></tr>
-        <tr><td><kbd>e</kbd></td><td>Go to Exercises</td></tr>
-        <tr><td><kbd>s</kbd></td><td>Start selected routine · save current edit</td></tr>
-        <tr><td><kbd>c</kbd></td><td>Complete the current set</td></tr>
-        <tr><td><kbd>n</kbd></td><td>Next exercise</td></tr>
-        <tr><td><kbd>space</kbd></td><td>Start / pause rest timer</td></tr>
-        <tr><td><kbd>esc</kbd></td><td>Cancel inline edit / close dialog</td></tr>
-      </tbody>
-    </table>
-    <p style="margin-top:12px">Shortcuts are disabled while you are typing in a field.</p>
+    <div id="help-shortcuts"></div>
+    <p class="mt-3">Shortcuts are disabled while you are typing in a field.</p>
   </div>
   <div class="dlg-actions">
     <button type="button" class="btn" data-action="help-close">Close</button>
   </div>
 </dialog>
 
-<noscript><p style="padding:24px;font-family:sans-serif">Liftlog needs JavaScript to run. Please enable it — everything stays on this device.</p></noscript>
+<noscript><p class="noscript-note">Liftlog needs JavaScript to run. Please enable it — everything stays on this device.</p></noscript>
 
 <script>
 (function(){
@@ -683,6 +710,7 @@ function fmtClock(sec){
   return Math.floor(sec/60) + ':' + String(sec%60).padStart(2,'0');
 }
 function fmtDuration(ms){
+  if (!isFinite(ms)) return '–';
   const m = Math.max(0, Math.round(ms/60000));
   if (m < 60) return m + ' min';
   return Math.floor(m/60) + ' h ' + String(m%60).padStart(2,'0') + ' min';
@@ -700,29 +728,66 @@ function fmtNum(n){
   if (n == null || isNaN(n)) return '–';
   return Number(n).toLocaleString(undefined,{ maximumFractionDigits:2 });
 }
-function fmtW(w, unit){
-  if (w == null || w === '') return '–';
-  return fmtNum(w) + (unit === 'bw' ? '' : ' ' + (unit || unitLabel()));
-}
 function unitLabel(){ return state.settings.unit === 'lb' ? 'lb' : 'kg'; }
+/* "3 sets" / "1 set" without an if at every call site */
+function plural(n, word, suffix){ return n + ' ' + word + (n === 1 ? '' : (suffix || 's')); }
 function relDays(ts){
   const d = Math.floor((Date.now() - ts) / 86400000);
   if (d <= 0) return 'today';
   if (d === 1) return 'yesterday';
   return d + ' days ago';
 }
-function epley(w, r){ return w > 0 && r > 0 ? w * (1 + r/30) : 0; }
+/* Epley 1RM estimate. A single completed rep is its own 1RM, so reps default
+   to 1 rather than 0 — every caller must agree or the "best" numbers diverge. */
+function epley(w, r){
+  const reps = Number(r) > 0 ? Number(r) : 1;
+  return w > 0 ? w * (1 + reps/30) : 0;
+}
 function roundHalf(n){ return Math.round(n*2)/2; }
-function deepCopy(o){ return JSON.parse(JSON.stringify(o)); }
+const deepCopy = typeof structuredClone === 'function'
+  ? (o => structuredClone(o))
+  : (o => JSON.parse(JSON.stringify(o)));
+/* Numeric coercion used by every form field and every importer:
+   blank / null / non-numeric all collapse to null. */
+function toNum(v){
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return isFinite(n) ? n : null;
+}
+function clamp(n, lo, hi){ return Math.min(hi, Math.max(lo, n)); }
 /* Volume = execution (completed) AND inclusion (countForVolume, default true).
    Warm-ups opt out with countForVolume:false instead of abusing completed:false. */
 const countsVolume = s => s.completed && s.countForVolume !== false;
 const countsPR     = s => s.completed && s.countForPR !== false;
+/* A set keeps the unit it was logged in forever; aggregates convert to whatever
+   unit is on display so totals stay comparable after a kg/lb switch. */
+const LB_PER_KG = 2.2046226218;
+function convertWeight(w, from, to){
+  if (w == null || from === to) return w;
+  if (from === 'kg' && to === 'lb') return w * LB_PER_KG;
+  if (from === 'lb' && to === 'kg') return w / LB_PER_KG;
+  return w;
+}
+/* Weight of a logged set expressed in the current display unit. */
+function setWeight(s){
+  const w = toNum(s.weight);
+  if (w == null) return 0;
+  return convertWeight(w, s.unit === 'lb' ? 'lb' : 'kg', unitLabel());
+}
 function sumVolume(sets){
-  return sets.reduce((a,s) => a + ((countsVolume(s) && s.weight > 0 && s.reps > 0) ? s.weight * s.reps : 0), 0);
+  return sets.reduce((a,s) => {
+    if (!countsVolume(s) || !(s.reps > 0)) return a;
+    const w = setWeight(s);
+    return w > 0 ? a + w * s.reps : a;
+  }, 0);
 }
 
-/* small inline icons (stroke inherits currentColor) */
+/* small inline icons (stroke inherits currentColor).
+   Use icon(name, extraClass) rather than string-patching the markup. */
+function icon(name, extraClass){
+  const svg = IC[name] || '';
+  return extraClass ? svg.replace('class="ic"', 'class="ic ' + extraClass + '"') : svg;
+}
 const IC = {
   check:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12.5l5 5L19.5 7"/></svg>',
   plus:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
@@ -742,30 +807,99 @@ const IC = {
 };
 
 /* ============================================================
+   DOMAIN CONSTANTS
+   Single source of truth for the small closed vocabularies that used to be
+   spelled out again in every template, validator and importer.
+   ============================================================ */
+/* How a set is measured. 'bw' and 'time' carry no weight. */
+const UNITS = ['kg','lb','bw','time'];
+const isUnit = u => UNITS.indexOf(u) !== -1;
+const UNIT_TEXT = {                       /* short form, used in lists */
+  kg:'kg', lb:'lb', bw:'bodyweight', time:'timed'
+};
+const UNIT_OPTION_TEXT = {                /* long form, used in <select> */
+  kg:'kg', lb:'lb', bw:'bodyweight', time:'time (seconds)'
+};
+function unitOptions(selected){
+  return UNITS.map(u => '<option value="' + u + '"' + (u === selected ? ' selected' : '') + '>' +
+    UNIT_OPTION_TEXT[u] + '</option>').join('');
+}
+
+const THEMES = [
+  { id:'system', label:'System' }, { id:'light', label:'Light' }, { id:'dark', label:'Dark' },
+  { id:'dracula', label:'Dracula' }, { id:'gruvbox', label:'Gruvbox' }, { id:'nord', label:'Nord' },
+  { id:'solarized', label:'Solarized' }, { id:'monokai', label:'Monokai' }
+];
+
+/* Rest timer bounds, shared by the settings field and the routine editor. */
+const REST_MIN = 15, REST_MAX = 600;
+const REST_PRESETS = [60, 90, 120, 180];
+
+/* Routine item bounds, applied on save and on import alike. */
+const ITEM_LIMITS = { sets:[1,12], reps:[0,999], rest:[0,900] };
+
+/* Single-key view switches, shared by the shortcut handler. */
+const NAV_KEYS = { t:'today', r:'routines', h:'history', e:'exercises' };
+
+/* One list drives both the help dialog and the Settings table. */
+const SHORTCUTS = [
+  { keys:['?'], text:'Open shortcut help' },
+  { keys:['/'], text:'Focus search (Exercises)' },
+  { keys:['t'], text:'Go to Today' },
+  { keys:['r'], text:'Go to Routines' },
+  { keys:['h'], text:'Go to History' },
+  { keys:['e'], text:'Go to Exercises' },
+  { keys:['s'], text:'Start selected routine · save current edit' },
+  { keys:['c'], text:'Complete the current set' },
+  { keys:['n'], text:'Next exercise' },
+  { keys:['space'], text:'Start / pause rest timer' },
+  { keys:['esc'], text:'Cancel inline edit / close dialog' }
+];
+
+/* ============================================================
    STORAGE
    ============================================================ */
+const APP_VERSION = '1.0.0';       /* shown in the footer */
 const LS_KEY = 'liftlog.v1';
+const LS_RESCUE_KEY = 'liftlog.v1.unreadable';  /* holds data we could not load, so nothing is lost silently */
 const SCHEMA_VERSION = 3;   /* v3: sets carry durationSeconds (time no longer overloads reps)
                                + countForVolume / countForPR split execution from analytics */
 const EXPORT_SCHEMA = '1.0.0'; /* version of the documented import/export contract */
+
+/* Set by load() when stored data could not be used, surfaced once after init. */
+let loadWarning = '';
 
 function save(){
   try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
   catch(e){ /* storage full or unavailable — app keeps working in memory */ }
 }
+/* Stored data we cannot read is never overwritten in place: it is moved aside
+   first so a bad parse or a downgrade can still be recovered by hand. */
+function rescueUnreadable(raw, why){
+  loadWarning = why;
+  try{ if (raw) localStorage.setItem(LS_RESCUE_KEY, raw); }catch(e){ /* nothing more we can do */ }
+}
 function load(){
-  try{
-    const raw = localStorage.getItem(LS_KEY);
-    if (raw){
-      const s = JSON.parse(raw);
-      if (s && s.version >= 1 && s.version <= SCHEMA_VERSION && Array.isArray(s.exercises)){
-        if (s.version === 1) migrateToV2(s);   /* old installs: swap in the program, keep history */
-        if (s.version === 2) migrateToV3(s);   /* v2 stored seconds in `reps` for timed sets */
-        return normalizeState(s);
-      }
-    }
-  }catch(e){ /* fall through to seed */ }
-  return seedState();
+  let raw = null;
+  try{ raw = localStorage.getItem(LS_KEY); }catch(e){ return seedState(); }
+  if (!raw) return seedState();
+  let parsed = null;
+  try{ parsed = JSON.parse(raw); }
+  catch(e){
+    rescueUnreadable(raw, 'Saved data could not be read and was set aside; starting fresh.');
+    return seedState();
+  }
+  if (!parsed || !Array.isArray(parsed.exercises) || !(parsed.version >= 1)){
+    rescueUnreadable(raw, 'Saved data was not in a recognizable shape and was set aside; starting fresh.');
+    return seedState();
+  }
+  if (parsed.version > SCHEMA_VERSION){
+    rescueUnreadable(raw, 'Saved data comes from a newer version of Liftlog and was set aside rather than downgraded.');
+    return seedState();
+  }
+  if (parsed.version === 1) migrateToV2(parsed);   /* old installs: swap in the program, keep history */
+  if (parsed.version === 2) migrateToV3(parsed);   /* v2 stored seconds in `reps` for timed sets */
+  return normalizeState(parsed);
 }
 /* v1 stored generic sample exercises/routines. v2 ships the real program,
    so replace the library and routines but keep logged workouts and prefs. */
@@ -792,17 +926,35 @@ function migrateToV3(s){
   fix(s.activeWorkout);
   s.version = 3;
 }
+/* Anything reachable from disk or an import file gets clamped to a known value
+   here, so the render layer never has to defend against stray strings. */
 function normalizeState(s){
   const d = defaultSettings();
-  s.settings = Object.assign(d, s.settings || {});
-  s.exercises = s.exercises || [];
+  const set = Object.assign(d, s.settings || {});
+  set.theme = THEMES.some(t => t.id === set.theme) ? set.theme : d.theme;
+  set.unit = set.unit === 'lb' ? 'lb' : 'kg';
+  set.defaultRest = clamp(Math.round(toNum(set.defaultRest) || d.defaultRest), REST_MIN, REST_MAX);
+  set.autoRest = !!set.autoRest;
+  set.sound = !!set.sound;
+  s.settings = set;
+  s.exercises = (s.exercises || []).map(e => Object.assign({}, e, {
+    category: typeof e.category === 'string' ? e.category : '',
+    unit: isUnit(e.unit) ? e.unit : 'kg',
+    notes: typeof e.notes === 'string' ? e.notes : ''
+  }));
   s.routines  = s.routines || [];
   s.workouts  = s.workouts || [];
   s.activeWorkout = s.activeWorkout || null;
+  sortWorkouts(s.workouts);
   return s;
 }
 function defaultSettings(){
   return { theme:'system', unit:'kg', defaultRest:90, autoRest:true, sound:true };
+}
+/* History is kept newest-first everywhere; every mutation that can change a
+   start time re-establishes that instead of sorting again at each read. */
+function sortWorkouts(list){
+  (list || state.workouts).sort((a,b) => b.startedAt - a.startedAt);
 }
 
 /* ============================================================
@@ -919,27 +1071,50 @@ function seedState(){
 let state = load();
 
 /* transient UI state — never persisted */
-const ui = {
-  view:'today',
-  prevView:null,
-  selectedRoutineId:null,
-  expandedWorkouts:new Set(),
-  expandedDone:new Set(),
-  routineDraft:null,          /* object while editing a routine */
-  routineError:'',
-  exerciseDraft:null,         /* object while editing one exercise row */
-  showExerciseForm:false,
-  exerciseFormError:'',
-  trendExId:null,
-  editWorkoutId:null,         /* history session currently being edited */
-  focus:null                  /* element id to focus after render */
-};
+function freshUI(){
+  return {
+    view:'today',
+    prevView:null,
+    selectedRoutineId:null,
+    expandedWorkouts:new Set(),
+    expandedDone:new Set(),     /* keyed by exercise index within the active workout */
+    routineDraft:null,          /* object while editing a routine */
+    routineError:'',
+    exerciseDraft:null,         /* object while editing one exercise row */
+    showExerciseForm:false,
+    exerciseFormError:'',
+    exerciseFilter:'',          /* Exercises search box, kept so re-renders don't drop it */
+    trendExId:null,
+    editWorkoutId:null,         /* history session currently being edited */
+    focus:null                  /* element id to focus after render */
+  };
+}
+const ui = freshUI();
+
+/* Wipe every in-flight editor without losing the current view. Used whenever
+   the data under the editors is replaced (import, clear, sample reload). */
+function resetUI(){
+  const view = ui.view;
+  Object.assign(ui, freshUI());
+  ui.view = view;
+}
+/* Editors are scoped to the view that owns them, so leaving a view closes them.
+   Every navigation path goes through here — nav buttons and shortcuts alike. */
+function navigate(view){
+  if (ui.view !== view){
+    ui.routineDraft = null; ui.routineError = '';
+    ui.exerciseDraft = null; ui.showExerciseForm = false; ui.exerciseFormError = '';
+    ui.editWorkoutId = null;
+    ui.view = view;
+  }
+  render();
+}
 
 const exerciseById = id => state.exercises.find(e => e.id === id);
 const routineById  = id => state.routines.find(r => r.id === id);
 
 function applyTheme(){
-  const t = state.settings.theme;
+  const t = THEMES.some(x => x.id === state.settings.theme) ? state.settings.theme : 'system';
   if (t === 'system') document.documentElement.removeAttribute('data-theme');
   else document.documentElement.setAttribute('data-theme', t);
 }
@@ -947,6 +1122,8 @@ function applyTheme(){
 /* ============================================================
    FEEDBACK: toast + live announcements + confirm dialog
    ============================================================ */
+/* #toast-region is aria-live, so a toast is already announced to screen
+   readers. announce() is only for feedback that has no visible toast. */
 function toast(msg){
   const region = $('#toast-region');
   const el = document.createElement('div');
@@ -961,7 +1138,6 @@ function announce(msg){
   el.textContent = '';
   setTimeout(() => { el.textContent = msg; }, 60);
 }
-let dlgResolve = null;
 function dialog(opts){
   /* opts: {title, body, buttons:[{label, value, cls, autofocus}]} -> Promise<value|null> */
   const dlg = $('#dlg');
@@ -979,13 +1155,11 @@ function dialog(opts){
     actions.appendChild(btn);
   });
   return new Promise(res => {
-    dlgResolve = res;
     dlg.addEventListener('close', function h(){
       dlg.removeEventListener('close', h);
       const v = dlg._val !== undefined ? dlg._val : null;
       dlg._val = undefined;
       res(v);
-      dlgResolve = null;
     });
     dlg.showModal();
     const af = $('[data-autofocus]', dlg) || $('button', actions);
@@ -1066,17 +1240,27 @@ function currentRestSeconds(){
   }
   return state.settings.defaultRest;
 }
+function timerRemaining(){
+  return timer.running ? Math.max(0, (timer.endsAt - Date.now())/1000) : timer.remaining;
+}
+/* Cheap path, runs four times a second: only the numbers that actually move. */
+function paintTimerTime(){
+  const timeEl = $('#timer-time');
+  if (!timeEl) return;
+  const rem = timerRemaining();
+  timeEl.textContent = fmtClock(rem);
+  const fill = $('#timer-fill');
+  if (fill) fill.style.width = (timer.seconds > 0 ? Math.min(100, rem/timer.seconds*100) : 0) + '%';
+}
+/* Full repaint, runs on state transitions and after every render. */
 function drawTimer(){
   const timeEl = $('#timer-time');
   if (!timeEl) return;
+  paintTimerTime();
+  const rem = timerRemaining();
   const panel = $('#timer-panel');
-  const fill = $('#timer-fill');
   const status = $('#timer-status');
   const toggle = $('#timer-toggle');
-  let rem = timer.remaining;
-  if (timer.running) rem = Math.max(0, (timer.endsAt - Date.now())/1000);
-  timeEl.textContent = fmtClock(rem);
-  if (fill) fill.style.width = (timer.seconds > 0 ? Math.min(100, rem/timer.seconds*100) : 0) + '%';
   if (panel){
     panel.classList.toggle('is-running', timer.running);
     panel.classList.toggle('is-done', timer.done);
@@ -1087,32 +1271,39 @@ function drawTimer(){
       : (rem < timer.seconds ? 'Paused.' : 'Ready. Timer starts after each completed set.');
   }
   if (toggle){
-    toggle.innerHTML = (timer.running ? IC.pause : IC.play) + '<span>' + (timer.running ? 'Pause' : (rem < timer.seconds && !timer.done ? 'Resume' : 'Start')) + '</span>';
+    toggle.innerHTML = (timer.running ? IC.pause : IC.play) + '<span>' +
+      (timer.running ? 'Pause' : (rem < timer.seconds && !timer.done ? 'Resume' : 'Start')) + '</span>';
     toggle.setAttribute('aria-label', timer.running ? 'Pause rest timer' : 'Start rest timer');
   }
   $$('.preset-btn').forEach(b =>
     b.setAttribute('aria-pressed', String(Number(b.dataset.sec) === timer.seconds)));
 }
 function tickTimer(){
+  if (!state.activeWorkout && !timer.running) return;
   if (timer.running){
-    const rem = (timer.endsAt - Date.now())/1000;
-    if (rem <= 0){
+    if ((timer.endsAt - Date.now())/1000 <= 0){
       timer.running = false; timer.remaining = 0; timer.done = true;
       persistTimer();
       announce('Rest complete.');
       beep();
+      drawTimer();          /* transition: repaint labels and panel state */
+    } else {
+      paintTimerTime();
     }
-    drawTimer();
   }
   /* keep elapsed workout time fresh */
   const el = $('#workout-elapsed');
   if (el && state.activeWorkout) el.textContent = fmtDuration(Date.now() - state.activeWorkout.startedAt);
 }
+let audioCtx = null;
 function beep(){
   if (!state.settings.sound) return;
   try{
     const Ctx = window.AudioContext || window.webkitAudioContext;
-    const ctx = new Ctx();
+    if (!Ctx) return;
+    if (!audioCtx) audioCtx = new Ctx();
+    const ctx = audioCtx;
+    if (ctx.state === 'suspended') ctx.resume();
     const blip = (t0, f) => {
       const o = ctx.createOscillator(), g = ctx.createGain();
       o.type = 'sine'; o.frequency.value = f;
@@ -1124,64 +1315,63 @@ function beep(){
     };
     blip(ctx.currentTime, 880);
     blip(ctx.currentTime + 0.28, 1175);
-    setTimeout(() => ctx.close(), 1200);
   }catch(e){ /* audio unavailable — visual announcement still happens */ }
 }
 
 /* ============================================================
    PERFORMANCE LOOKUPS (previous session, bests)
    ============================================================ */
-function sortedWorkouts(){
-  return state.workouts.slice().sort((a,b) => b.startedAt - a.startedAt);
-}
-function lastPerformance(exId){
+/* state.workouts is kept newest-first (see sortWorkouts), so this is just a
+   readable name for that guarantee rather than a re-sort at every call. */
+function sortedWorkouts(){ return state.workouts; }
+
+/* Every "best" figure and the previous-session line come from one pass over
+   history per exercise. The cache is per render — render() clears it — so the
+   Today screen no longer walks the whole log five times to draw one panel. */
+let statsCache = null;
+function clearStatsCache(){ statsCache = null; }
+function exerciseStats(exId){
+  if (!statsCache) statsCache = new Map();
+  const hit = statsCache.get(exId);
+  if (hit) return hit;
+  const out = { last:null, e1rm:0, duration:0, reps:0, volume:0 };
   for (const w of sortedWorkouts()){
-    const ex = w.exercises.find(x => x.exerciseId === exId);
-    if (ex && ex.sets.some(s => s.completed)) return { date:w.startedAt, sets:ex.sets.filter(s => s.completed) };
+    for (const ex of w.exercises){
+      if (ex.exerciseId !== exId) continue;
+      const completed = ex.sets.filter(s => s.completed);
+      if (!out.last && completed.length) out.last = { date:w.startedAt, sets:completed };
+      out.volume = Math.max(out.volume, sumVolume(ex.sets));
+      for (const s of ex.sets){
+        if (!countsPR(s)) continue;
+        const weight = setWeight(s);
+        if (weight > 0) out.e1rm = Math.max(out.e1rm, epley(weight, s.reps));
+        const d = setDuration(s);
+        if (d != null) out.duration = Math.max(out.duration, Number(d) || 0);
+        out.reps = Math.max(out.reps, Number(s.reps) || 0);
+      }
+    }
   }
-  return null;
+  statsCache.set(exId, out);
+  return out;
 }
-function bestE1RM(exId){
-  let best = 0;
-  for (const w of state.workouts)
-    for (const ex of w.exercises) if (ex.exerciseId === exId)
-      for (const s of ex.sets) if (countsPR(s) && s.weight > 0)
-        best = Math.max(best, epley(s.weight, s.reps || 1));
-  return best;
-}
-function bestDuration(exId){
-  let best = 0;
-  for (const w of state.workouts)
-    for (const ex of w.exercises) if (ex.exerciseId === exId)
-      for (const s of ex.sets) if (countsPR(s)){ const d = setDuration(s); if (d > best) best = d; }
-  return best;
-}
-function bestSessionVolume(exId){
-  let best = 0;
-  for (const w of state.workouts){
-    const ex = w.exercises.find(x => x.exerciseId === exId);
-    if (ex) best = Math.max(best, sumVolume(ex.sets));
-  }
-  return best;
-}
-function bestReps(exId){
-  let best = 0;
-  for (const w of state.workouts)
-    for (const ex of w.exercises) if (ex.exerciseId === exId)
-      for (const s of ex.sets) if (countsPR(s)) best = Math.max(best, Number(s.reps) || 0);
-  return best;
-}
+const lastPerformance = exId => exerciseStats(exId).last;
+
 const setDuration = s => s.durationSeconds != null ? s.durationSeconds : (s.unit === 'time' ? s.reps : null); /* reps fallback: pre-v3 data */
+/* Returns escaped HTML: distanceUnit and unit can originate in an import file. */
 function setSummary(s){
-  if (s.distance != null) return fmtNum(s.distance) + ' ' + (s.distanceUnit || 'm');
+  if (s.distance != null) return fmtNum(s.distance) + ' ' + esc(s.distanceUnit || 'm');
   const dur = setDuration(s);
   if (s.unit === 'time' || dur != null) return (dur != null ? dur + ' s' : '–');
   if (s.unit === 'bw') return (s.reps != null ? s.reps + ' reps' : '–') + ' BW';
-  return fmtNum(s.weight) + ' ' + (s.unit || 'kg') + ' × ' + (s.reps != null ? s.reps : '–');
+  return fmtNum(s.weight) + ' ' + esc(s.unit || 'kg') + ' × ' + (s.reps != null ? s.reps : '–');
 }
 function workoutVolume(w){ return w.exercises.reduce((a,ex) => a + sumVolume(ex.sets), 0); }
 function workoutSets(w){ return w.exercises.reduce((a,ex) => a + ex.sets.filter(s => s.completed).length, 0); }
 function workoutPlannedSets(w){ return w.exercises.reduce((a,ex) => a + ex.sets.length, 0); }
+/* An imported session may have no end time; report that rather than showing 0. */
+function workoutDuration(w){
+  return (w.finishedAt && w.startedAt && w.finishedAt >= w.startedAt) ? w.finishedAt - w.startedAt : NaN;
+}
 
 /* ============================================================
    ACTIONS — active workout
@@ -1198,24 +1388,27 @@ function newSetFrom(ex, copyFrom){
     unit: ex.unit === 'bw' ? 'bw' : (timed ? 'time' : state.settings.unit)
   };
 }
-function buildWorkoutExercise(itemId){
-  const exDef = exerciseById(itemId.exerciseId) || { name:'Unknown exercise', category:'', unit:state.settings.unit, notes:'' };
-  const prev = lastPerformance(itemId.exerciseId);
+/* item is a routine item ({exerciseId, sets, reps, weight, rest}); the returned
+   block is the workout-local copy that logging writes into. */
+function buildWorkoutExercise(item){
+  const exDef = exerciseById(item.exerciseId) || { name:'Unknown exercise', category:'', unit:state.settings.unit, notes:'' };
+  const prev = lastPerformance(item.exerciseId);
   const ex = {
-    exerciseId:itemId.exerciseId, name:exDef.name, category:exDef.category || '',
-    unit:exDef.unit || 'kg', plannedSets:itemId.sets || 3,
-    targetReps:itemId.reps != null ? itemId.reps : 8,
-    targetWeight:itemId.weight != null ? itemId.weight : null,
-    restSeconds:itemId.rest || state.settings.defaultRest,
+    exerciseId:item.exerciseId, name:exDef.name, category:exDef.category || '',
+    unit:exDef.unit || 'kg', plannedSets:item.sets || 3,
+    targetReps:item.reps != null ? item.reps : 8,
+    targetWeight:item.weight != null ? item.weight : null,
+    restSeconds:item.rest || state.settings.defaultRest,
     notes:exDef.notes || '', skipped:false, sets:[]
   };
-  const n = Math.max(1, itemId.sets || 3);
+  const n = Math.max(1, item.sets || 3);
   for (let i = 0; i < n; i++){
-    const s = newSetFrom(ex, null);
-    if (itemId.weight != null) s.weight = itemId.weight;
-    else if (prev && prev.sets[i] && prev.sets[i].weight != null) s.weight = prev.sets[i].weight;
-    else if (prev && prev.sets[0] && prev.sets[0].weight != null) s.weight = prev.sets[0].weight;
-    ex.sets.push(s);
+    const set = newSetFrom(ex, null);
+    /* seed the bar with the plan, else with what was lifted last time */
+    const prevSet = prev && (prev.sets[i] || prev.sets[0]);
+    if (item.weight != null) set.weight = item.weight;
+    else if (prevSet && prevSet.weight != null) set.weight = prevSet.weight;
+    ex.sets.push(set);
   }
   return ex;
 }
@@ -1223,51 +1416,54 @@ function beginWorkout(workout){
   state.activeWorkout = workout;
   save();
   restoreTimer();
-  ui.view = 'today'; ui.selectedRoutineId = null;
+  ui.view = 'today';
+  ui.selectedRoutineId = null;
+  ui.expandedDone.clear();   /* keys are indexes into the previous workout */
   ui.focus = 'workout-title';
   render();
+}
+/* startRoutine and startEmpty differ only in the workout they build and the
+   wording of the "you already have one running" prompt. */
+function startSession(build, replaceBody, started){
+  const go = () => { beginWorkout(build()); toast(started); };
+  if (!state.activeWorkout){ go(); return; }
+  confirmDlg('Replace current workout?', replaceBody, 'Discard & start', true)
+    .then(ok => { if (ok){ state.activeWorkout = null; go(); } });
+}
+function newWorkout(routine){
+  return {
+    id:uid(),
+    routineId:routine ? routine.id : null,
+    routineName:routine ? routine.name : 'Quick session',
+    startedAt:Date.now(), finishedAt:null, notes:'', currentExerciseIndex:0,
+    exercises:routine ? routine.items.map(buildWorkoutExercise) : [],
+    timer:null
+  };
 }
 function startRoutine(id){
   const r = routineById(id);
   if (!r) return;
-  const go = () => {
-    const w = {
-      id:uid(), routineId:r.id, routineName:r.name,
-      startedAt:Date.now(), finishedAt:null, notes:'', currentExerciseIndex:0,
-      exercises:r.items.map(buildWorkoutExercise), timer:null
-    };
-    beginWorkout(w);
-    toast('Workout started — ' + r.name);
-    announce('Workout started: ' + r.name);
-  };
-  if (state.activeWorkout){
-    confirmDlg('Replace current workout?',
-      'You already have a workout in progress. Starting “' + r.name + '” will discard it.',
-      'Discard & start', true).then(ok => { if (ok){ state.activeWorkout = null; go(); } });
-  } else go();
+  startSession(() => newWorkout(r),
+    'You already have a workout in progress. Starting “' + r.name + '” will discard it.',
+    'Workout started — ' + r.name);
 }
 function startEmpty(){
-  const go = () => {
-    const w = {
-      id:uid(), routineId:null, routineName:'Quick session',
-      startedAt:Date.now(), finishedAt:null, notes:'', currentExerciseIndex:0,
-      exercises:[], timer:null
-    };
-    beginWorkout(w);
-    toast('Quick session started');
-  };
-  if (state.activeWorkout){
-    confirmDlg('Replace current workout?','Starting a new session will discard the workout in progress.','Discard & start',true)
-      .then(ok => { if (ok){ state.activeWorkout = null; go(); } });
-  } else go();
+  startSession(() => newWorkout(null),
+    'Starting a new session will discard the workout in progress.',
+    'Quick session started');
+}
+/* Default plan for a freshly added exercise: timed work is measured in
+   seconds, everything else in reps. */
+function newRoutineItem(exId){
+  const def = exerciseById(exId);
+  return { id:uid(), exerciseId:exId, sets:3,
+    reps:(def && def.unit === 'time') ? 30 : 8, weight:null, rest:state.settings.defaultRest };
 }
 function addExerciseToWorkout(exId){
   const w = state.activeWorkout;
   if (!w || !exId) return;
   const def = exerciseById(exId);
-  const item = { id:uid(), exerciseId:exId, sets:3,
-    reps: def && def.unit === 'time' ? 30 : 8, weight:null, rest:state.settings.defaultRest };
-  w.exercises.push(buildWorkoutExercise(item));
+  w.exercises.push(buildWorkoutExercise(newRoutineItem(exId)));
   if (w.currentExerciseIndex >= w.exercises.length - 1 || allSetsDone(w.exercises[w.currentExerciseIndex]))
     w.currentExerciseIndex = w.exercises.length - 1;
   save(); render();
@@ -1279,27 +1475,26 @@ function currentExercise(){
 }
 function allSetsDone(ex){ return ex && ex.sets.length > 0 && ex.sets.every(s => s.completed); }
 
+/* A set left blank falls back to the target. Timed work must land in
+   durationSeconds — writing it to `reps` is exactly the v2 bug v3 undid. */
+function fillSetDefaults(ex, s){
+  const field = ex.unit === 'time' ? 'durationSeconds' : 'reps';
+  if (toNum(s[field]) == null) s[field] = ex.targetReps != null ? ex.targetReps : 0;
+  if (!s.unit) s.unit = ex.unit === 'time' ? 'time' : (ex.unit === 'bw' ? 'bw' : state.settings.unit);
+}
 function completeCurrentSet(){
   const w = state.activeWorkout; const ex = currentExercise();
   if (!w || !ex) return;
   const idx = ex.sets.findIndex(s => !s.completed);
   if (idx === -1) return;
   const s = ex.sets[idx];
-  if (s.reps == null || s.reps === '' || isNaN(s.reps))
-    s.reps = ex.targetReps != null ? ex.targetReps : 0;
+  fillSetDefaults(ex, s);
   s.completed = true; s.completedAt = Date.now();
-  if (s.unit !== 'bw' && s.unit !== 'time' && !s.unit) s.unit = state.settings.unit;
   save();
   announce('Set ' + (idx+1) + ' of ' + ex.sets.length + ' complete.');
+  const next = ex.sets.find(x => !x.completed);
+  ui.focus = next ? 'sw-' + next.id : 'btn-next-ex';
   render();
-  const next = ex.sets.findIndex(x => !x.completed);
-  if (next !== -1){
-    ui.focus = 'sw-' + ex.sets[next].id;
-    applyFocus();
-  } else {
-    ui.focus = 'btn-next-ex';
-    applyFocus();
-  }
   if (state.settings.autoRest){
     loadTimer(ex.restSeconds || state.settings.defaultRest);
     startTimer();
@@ -1309,32 +1504,31 @@ function toggleSet(setId){
   const ex = currentExercise(); if (!ex) return;
   const s = ex.sets.find(x => x.id === setId); if (!s) return;
   s.completed = !s.completed;
-  if (s.completed){
-    s.completedAt = Date.now();
-    if (s.reps == null || s.reps === '' || isNaN(s.reps))
-      s.reps = ex.targetReps != null ? ex.targetReps : 0;
-  } else s.completedAt = null;
-  save(); render();
-  ui.focus = 'sd-' + setId; applyFocus();
+  if (s.completed){ s.completedAt = Date.now(); fillSetDefaults(ex, s); }
+  else s.completedAt = null;
+  save();
+  ui.focus = 'sd-' + setId;
+  render();
 }
 function addSet(){
   const ex = currentExercise(); if (!ex) return;
-  const last = ex.sets[ex.sets.length - 1];
-  const s = newSetFrom(ex, last);
+  const s = newSetFrom(ex, ex.sets[ex.sets.length - 1]);
   ex.sets.push(s);
-  save(); render();
+  save();
+  ui.focus = (ex.unit === 'time' ? 'sr-' : 'sw-') + s.id;
+  render();
   toast('Set ' + ex.sets.length + ' added');
-  ui.focus = (ex.unit === 'time' ? 'sr-' : 'sw-') + s.id; applyFocus();
 }
 function advanceExercise(markSkipped){
   const w = state.activeWorkout; const ex = currentExercise();
   if (!w || !ex) return;
   if (markSkipped){ ex.skipped = true; announce(ex.name + ' skipped.'); }
   w.currentExerciseIndex = Math.min(w.exercises.length, w.currentExerciseIndex + 1);
-  save(); render();
+  save();
   if (!markSkipped && w.currentExerciseIndex < w.exercises.length)
     announce('Now: ' + w.exercises[w.currentExerciseIndex].name);
-  ui.focus = 'ex-panel-top'; applyFocus();
+  ui.focus = 'ex-panel-top';
+  render();
 }
 function reopenExercise(idx){
   const w = state.activeWorkout; if (!w) return;
@@ -1342,8 +1536,9 @@ function reopenExercise(idx){
   w.exercises[idx].skipped = false;
   w.currentExerciseIndex = idx;
   ui.expandedDone.delete(String(idx));
-  save(); render();
-  ui.focus = 'ex-panel-top'; applyFocus();
+  save();
+  ui.focus = 'ex-panel-top';
+  render();
 }
 function finishWorkout(){
   const w = state.activeWorkout; if (!w) return;
@@ -1354,17 +1549,19 @@ function finishWorkout(){
       toast('Workout discarded'); return;
     }
     w.finishedAt = Date.now();
+    /* drop rows never touched, then exercises left with nothing to show */
     w.exercises.forEach(ex => {
-      ex.sets = ex.sets.filter(s => s.completed || s.weight != null || s.reps != null);
+      ex.sets = ex.sets.filter(s => s.completed || s.weight != null || s.reps != null || s.durationSeconds != null);
     });
     w.exercises = w.exercises.filter(ex => ex.sets.length > 0 || ex.skipped);
     state.workouts.push(w);
+    sortWorkouts();
     state.activeWorkout = null;
     save(); loadTimer(state.settings.defaultRest);
-    ui.view = 'history'; ui.expandedWorkouts.add(w.id);
-    render(); window.scrollTo(0,0);
+    ui.expandedWorkouts.add(w.id);
+    navigate('history');
+    window.scrollTo(0,0);
     toast('Workout saved — ' + fmtNum(workoutVolume(w)) + ' ' + unitLabel() + ' total');
-    announce('Workout finished and saved to history.');
   };
   if (done === 0){
     dialog({ title:'No sets completed', body:'This workout has no completed sets. Do you want to save it anyway?',
@@ -1395,10 +1592,10 @@ function saveRoutineDraft(){
   if (!d.name.trim()){ ui.routineError = 'Give the routine a name.'; render(); return; }
   if (d.items.length === 0){ ui.routineError = 'Add at least one exercise.'; render(); return; }
   d.items.forEach(it => {
-    it.sets = Math.max(1, Math.min(12, parseInt(it.sets,10) || 1));
-    it.reps = Math.max(0, Math.min(999, parseInt(it.reps,10) || 0));
-    it.weight = (it.weight == null || it.weight === '' || isNaN(it.weight)) ? null : Number(it.weight);
-    it.rest = Math.max(0, Math.min(900, parseInt(it.rest,10) || state.settings.defaultRest));
+    it.sets   = clamp(parseInt(it.sets,10) || ITEM_LIMITS.sets[0], ITEM_LIMITS.sets[0], ITEM_LIMITS.sets[1]);
+    it.reps   = clamp(parseInt(it.reps,10) || 0, ITEM_LIMITS.reps[0], ITEM_LIMITS.reps[1]);
+    it.weight = toNum(it.weight);
+    it.rest   = clamp(parseInt(it.rest,10) || state.settings.defaultRest, ITEM_LIMITS.rest[0], ITEM_LIMITS.rest[1]);
   });
   if (d.id){
     const i = state.routines.findIndex(r => r.id === d.id);
@@ -1441,9 +1638,7 @@ function removeRoutineItem(idx){
 }
 function addRoutineItem(exId){
   const d = ui.routineDraft; if (!d || !exId) return;
-  const def = exerciseById(exId);
-  d.items.push({ id:uid(), exerciseId:exId, sets:3,
-    reps: def && def.unit === 'time' ? 30 : 8, weight:null, rest:state.settings.defaultRest });
+  d.items.push(newRoutineItem(exId));
   render();
 }
 
@@ -1495,13 +1690,20 @@ function setUnit(v){
   const from = state.settings.unit;
   if (v === from) return;
   state.settings.unit = v;
-  const f = v === 'lb' ? 2.2046226 : 1/2.2046226;
-  const conv = x => (x == null || isNaN(x)) ? x : roundHalf(Number(x) * f);
+  const conv = x => { const n = toNum(x); return n == null ? x : roundHalf(convertWeight(n, from, v)); };
+  /* Routine targets carry no unit of their own — they are always in the
+     display unit, so they are rewritten in place. */
   state.routines.forEach(r => r.items.forEach(it => { it.weight = conv(it.weight); }));
+  /* Sets in the running session are re-tagged as well as re-valued; leaving a
+     converted weight labelled with the old unit would convert it twice. */
   if (state.activeWorkout){
     state.activeWorkout.exercises.forEach(ex => {
       ex.targetWeight = conv(ex.targetWeight);
-      ex.sets.forEach(s => { if (s.unit === from) s.weight = conv(s.weight); });
+      ex.sets.forEach(set => {
+        if (set.unit !== from) return;
+        set.weight = conv(set.weight);
+        set.unit = v;
+      });
     });
   }
   save(); render();
@@ -1548,7 +1750,7 @@ function importData(file){
         if (obj.version === 2) migrateToV3(obj);   /* older backups: seconds move out of reps */
         state = normalizeState(obj);
         applyTheme(); save(); loadTimer(state.settings.defaultRest);
-        ui.routineDraft = null; ui.exerciseDraft = null;
+        resetUI();
         render(); toast('Import complete');
       });
   });
@@ -1587,24 +1789,25 @@ function importRoutines(file){
         const src = exIn.find(e => e.id === it.exerciseId);
         if (!local && src) local = byName(src.name);
         if (!local && src){
-          state.exercises.push({ id:uid(), name:src.name, category:src.category || 'General', unit:src.unit || 'kg', notes:src.notes || '' });
+          state.exercises.push({ id:uid(), name:String(src.name), category:String(src.category || 'General'),
+            unit:isUnit(src.unit) ? src.unit : 'kg', notes:String(src.notes || '') });
           local = state.exercises[state.exercises.length - 1]; addedEx++;
         }
         if (!local) return null;
         return { id:uid(), exerciseId:local.id,
-          sets:Math.max(1, Number(it.sets) || 3), reps:Math.max(0, Number(it.reps) || 8),
-          weight:(it.weight === null || it.weight === undefined || it.weight === '') ? null : Number(it.weight),
-          rest:Number(it.rest) || state.settings.defaultRest };
+          sets:clamp(Number(it.sets) || 3, ITEM_LIMITS.sets[0], ITEM_LIMITS.sets[1]),
+          reps:clamp(Number(it.reps) || 8, ITEM_LIMITS.reps[0], ITEM_LIMITS.reps[1]),
+          weight:toNum(it.weight),
+          rest:clamp(Number(it.rest) || state.settings.defaultRest, ITEM_LIMITS.rest[0], ITEM_LIMITS.rest[1]) };
       }).filter(Boolean);
       if (!items.length){ skippedR++; return; }
       state.routines.push({ id:uid(), name:String(r.name).trim(), items });
       addedR++;
     });
     save(); render();
-    const msg = 'Imported ' + addedR + ' routine' + (addedR === 1 ? '' : 's') +
+    toast('Imported ' + plural(addedR, 'routine') +
       (skippedR ? ' · skipped ' + skippedR + ' duplicate or invalid' : '') +
-      (addedEx ? ' · added ' + addedEx + ' new exercise' + (addedEx === 1 ? '' : 's') : '');
-    toast(msg); announce(msg);
+      (addedEx ? ' · added ' + plural(addedEx, 'new exercise', 's') : ''));
   });
 }
 
@@ -1627,9 +1830,8 @@ function exportHistory(){
    Legacy files without setType fall back to the exercise/set unit ("time" unit →
    seconds in `reps` are moved into durationSeconds). Numeric bounds are coerced,
    includeInVolume is accepted as an alias of countForVolume. */
-const UNITS = ['kg','lb','bw','time'];
 function normalizeImportedSet(s, exUnit){
-  const num = v => (v === null || v === undefined || v === '' || isNaN(Number(v))) ? null : Number(v);
+  const num = toNum;
   const o = { id:s.id || uid() };
   o.weight = num(s.weight);          if (o.weight != null && o.weight < 0) o.weight = null;
   o.reps = num(s.reps);              if (o.reps != null) o.reps = Math.max(0, Math.round(o.reps));
@@ -1637,7 +1839,9 @@ function normalizeImportedSet(s, exUnit){
   o.durationSeconds = num(s.durationSeconds);
   if (o.durationSeconds != null && o.durationSeconds < 0) o.durationSeconds = null;
   o.distance = num(s.distance);
-  if (o.distance != null && o.distance >= 0){ if (!s.distanceUnit) o.distanceUnit = 'm'; else o.distanceUnit = String(s.distanceUnit); }
+  /* distanceUnit is free text in the contract; keep it short and inert */
+  if (o.distance != null && o.distance >= 0)
+    o.distanceUnit = String(s.distanceUnit || 'm').replace(/[^\w/²³°.-]/g, '').slice(0, 8) || 'm';
   o.completed = !!s.completed;
   o.completedAt = (typeof s.completedAt === 'number' && s.completedAt > 0) ? s.completedAt : 0;
   /* execution (completed) is separate from analytics inclusion; only explicit opt-outs are stored */
@@ -1645,7 +1849,7 @@ function normalizeImportedSet(s, exUnit){
   if (cv === false) o.countForVolume = false;
   if (s.countForPR === false) o.countForPR = false;
   /* interpret by setType first, then by unit (legacy files) */
-  const unit = UNITS.includes(s.unit) ? s.unit : (UNITS.includes(exUnit) ? exUnit : 'kg');
+  const unit = isUnit(s.unit) ? s.unit : (isUnit(exUnit) ? exUnit : 'kg');
   if (s.setType === 'distance'){ o.unit = unit === 'time' ? 'kg' : unit; o.reps = null; }
   else if (s.setType === 'time' || s.setType === 'hold' || unit === 'time'){
     o.unit = 'time';
@@ -1671,9 +1875,9 @@ function normalizeImportedWorkout(w){
       exerciseId:ex.exerciseId != null ? String(ex.exerciseId) : null,
       name:typeof ex.name === 'string' && ex.name ? ex.name : 'Unknown exercise',
       category:typeof ex.category === 'string' ? ex.category : '',
-      unit:UNITS.includes(ex.unit) ? ex.unit : 'kg',
+      unit:isUnit(ex.unit) ? ex.unit : 'kg',
       plannedSets:Number(ex.plannedSets) > 0 ? Math.round(ex.plannedSets) : null,
-      targetReps:num0(ex.targetReps), targetWeight:num0(ex.targetWeight),
+      targetReps:toNum(ex.targetReps), targetWeight:toNum(ex.targetWeight),
       restSeconds:Number(ex.restSeconds) >= 0 ? Math.round(ex.restSeconds) : 0,
       notes:typeof ex.notes === 'string' ? ex.notes : '', skipped:!!ex.skipped,
       sets:(Array.isArray(ex.sets) ? ex.sets : []).map(s => s ? normalizeImportedSet(s, ex.unit) : null).filter(Boolean)
@@ -1683,7 +1887,6 @@ function normalizeImportedWorkout(w){
   o.currentExerciseIndex = Number.isInteger(w.currentExerciseIndex) ? w.currentExerciseIndex : o.exercises.length;
   return o;
 }
-const num0 = v => (v === null || v === undefined || isNaN(Number(v))) ? null : Number(v);
 
 function importHistory(file){
   readJSONFile(file, obj => {
@@ -1697,11 +1900,10 @@ function importHistory(file){
       if (!w || have.has(w.id)){ skipped++; return; }   /* dedupe by workout id: first write wins */
       state.workouts.push(w); have.add(w.id); added++;
     });
-    state.workouts.sort((a,b) => b.startedAt - a.startedAt);
+    sortWorkouts();
     save(); render();
-    const msg = 'Imported ' + added + ' workout' + (added === 1 ? '' : 's') +
-      (skipped ? ' · skipped ' + skipped + ' duplicate or invalid' : '');
-    toast(msg); announce(msg);
+    toast('Imported ' + plural(added, 'workout') +
+      (skipped ? ' · skipped ' + skipped + ' duplicate or invalid' : ''));
   });
 }
 
@@ -1714,7 +1916,7 @@ function clearAllData(){
     if (!ok) return;
     state = { version:SCHEMA_VERSION, settings:defaultSettings(), exercises:[], routines:[], workouts:[], activeWorkout:null };
     applyTheme(); save(); loadTimer(state.settings.defaultRest);
-    ui.routineDraft = null; ui.exerciseDraft = null; ui.expandedWorkouts.clear();
+    resetUI();
     render(); toast('All data cleared');
   });
 }
@@ -1724,6 +1926,7 @@ function loadSamples(){
       if (!ok) return;
       state.exercises = sampleExercises();
       state.routines = sampleRoutines(state.exercises);
+      resetUI();
       save(); render(); toast('Sample data loaded');
     });
 }
@@ -1732,6 +1935,8 @@ function loadSamples(){
    RENDERING
    ============================================================ */
 function render(){
+  clearStatsCache();
+  normalizeSelections();
   renderNav();
   const main = $('#main');
   const switched = ui.prevView !== ui.view;
@@ -1740,6 +1945,19 @@ function render(){
   if (switched) window.scrollTo(0,0);
   drawTimer();
   applyFocus();
+}
+/* Templates must not mutate ui while they build strings, so the two selections
+   that can dangle (a deleted routine, a deleted trend exercise) settle here. */
+function normalizeSelections(){
+  if (state.routines.length && !routineById(ui.selectedRoutineId))
+    ui.selectedRoutineId = state.routines[0].id;
+  const trendable = trendCandidates();
+  if (trendable.length && !trendable.some(e => e.id === ui.trendExId))
+    ui.trendExId = trendable[0].id;
+}
+function trendCandidates(){
+  return state.exercises.filter(e =>
+    state.workouts.some(w => w.exercises.some(x => x.exerciseId === e.id && x.sets.some(s => s.completed))));
 }
 function applyFocus(){
   if (!ui.focus) return;
@@ -1788,12 +2006,12 @@ function htmlPicker(){
   const last = sortedWorkouts()[0];
   if (last){
     html += '<section class="panel last-session" aria-label="Last session">' +
-      '<div class="pad" style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap">' +
+      '<div class="pad last-session-row">' +
         '<strong>Last session</strong>' +
         '<span class="small">' + esc(last.routineName) + '</span>' +
-        '<span class="muted small">' + fmtDate(last.startedAt) + ' · ' + workoutSets(last) + ' sets · ' + fmtNum(workoutVolume(last)) + ' ' + unitLabel() + '</span>' +
-        '<button type="button" class="btn btn-sm" style="margin-left:auto" data-action="go-history">Open history</button>' +
-      '</div></section><div style="height:16px"></div>';
+        '<span class="muted small">' + fmtDate(last.startedAt) + ' · ' + plural(workoutSets(last), 'set') + ' · ' + fmtNum(workoutVolume(last)) + ' ' + unitLabel() + '</span>' +
+        '<button type="button" class="btn btn-sm push-right" data-action="go-history">Open history</button>' +
+      '</div></section>';
   }
   html += '<section aria-labelledby="pick-title"><div class="section-title"><h2 id="pick-title">Start a workout</h2><span class="rule"></span></div>';
   if (state.routines.length === 0){
@@ -1801,25 +2019,24 @@ function htmlPicker(){
       '<div class="form-actions"><button type="button" class="btn btn-primary" data-action="nav" data-view="routines">Go to Routines</button>' +
       '<button type="button" class="btn" data-action="load-samples">Load sample data</button></div></div>';
   } else {
-    if (!ui.selectedRoutineId || !routineById(ui.selectedRoutineId))
-      ui.selectedRoutineId = state.routines[0].id;
     html += '<div class="routine-pick" role="group" aria-label="Choose a routine">';
     state.routines.forEach(r => {
       const sel = r.id === ui.selectedRoutineId;
       const planned = r.items.reduce((a,it) => a + (it.sets || 0), 0);
-      html += '<button type="button" class="routine-pick-row" data-action="select-routine" data-id="' + r.id + '" aria-pressed="' + sel + '">' +
-        '<span>' +
-          '<span class="rp-name">' + esc(r.name) + '</span><br>' +
-          '<span class="rp-meta">' + r.items.length + ' exercises · ' + planned + ' planned sets</span>' +
-        '</span>' +
-        '<span class="rp-go"><span class="btn btn-primary btn-sm">' + IC.play + '<span>Start</span></span></span>' +
-      '</button>';
+      html += '<div class="routine-pick-row' + (sel ? ' is-selected' : '') + '">' +
+        '<button type="button" class="rp-select" data-action="select-routine" data-id="' + r.id + '" aria-pressed="' + sel + '">' +
+          '<span class="rp-name">' + esc(r.name) + '</span>' +
+          '<span class="rp-meta">' + plural(r.items.length, 'exercise') + ' · ' + planned + ' planned sets</span>' +
+        '</button>' +
+        '<span class="rp-go"><button type="button" class="btn btn-primary btn-sm" data-action="routine-start" data-id="' + r.id + '" ' +
+          'aria-label="Start ' + esc(r.name) + '">' + IC.play + '<span>Start</span></button></span>' +
+      '</div>';
     });
     html += '</div>' +
-      '<p class="hint" style="margin-top:8px">Tip: press <kbd>s</kbd> to start the highlighted routine.</p>';
+      '<p class="hint mt-2">Tip: press <kbd>s</kbd> to start the highlighted routine.</p>';
   }
   html += '</section>';
-  html += '<div style="margin-top:12px"><button type="button" class="btn" data-action="start-empty">' + IC.plus + '<span>Start empty session</span></button></div>';
+  html += '<div class="mt-3"><button type="button" class="btn" data-action="start-empty">' + IC.plus + '<span>Start empty session</span></button></div>';
   return html;
 }
 
@@ -1856,7 +2073,7 @@ function htmlActiveWorkout(w){
     html += htmlCurrentExercise(w, ex);
   } else if (allDone && w.exercises.length){
     html += '<div class="pad" id="ex-panel-top" tabindex="-1">' +
-      '<div class="empty" style="border-style:solid"><h3>All exercises done</h3>' +
+      '<div class="empty is-solid"><h3>All exercises done</h3>' +
       '<p>' + doneSets + ' sets completed · ' + fmtNum(workoutVolume(w)) + ' ' + unitLabel() + ' total volume.</p>' +
       '<div class="form-actions">' +
         '<button type="button" class="btn btn-primary btn-big" data-action="finish-workout">' + IC.flag + '<span>Finish workout</span></button>' +
@@ -1867,7 +2084,7 @@ function htmlActiveWorkout(w){
   }
 
   /* session notes */
-  html += '<div class="pad" style="border-top:1px solid var(--border)">' +
+  html += '<div class="pad divider-top">' +
     '<label class="field"><span class="cap">Session notes</span>' +
     '<textarea data-bind="wnotes" rows="2" placeholder="Optional — how did it feel?">' + esc(w.notes || '') + '</textarea></label></div>';
 
@@ -1881,10 +2098,10 @@ function htmlActiveWorkout(w){
     const hasOpen = ex.sets.some(s => !s.completed);
     html += '<div class="sticky-actions">' +
       (hasOpen
-        ? '<button type="button" class="btn btn-primary btn-big" data-action="complete-current" id="btn-complete">' + IC.check + '<span>Complete set ' + (ex.sets.findIndex(s => !s.completed)+1) + '</span><span class="mono xs" style="opacity:.75">(c)</span></button>'
-        : '<button type="button" class="btn btn-primary btn-big" data-action="next-exercise" id="btn-next-ex">' + IC.skip + '<span>' + (w.currentExerciseIndex + 1 >= w.exercises.length ? 'Done — wrap up' : 'Next exercise') + '</span><span class="mono xs" style="opacity:.75">(n)</span></button>') +
-      '<button type="button" class="btn btn-big" data-action="add-set" style="flex:0 0 auto">' + IC.plus + '<span>Set</span></button>' +
-      '<button type="button" class="btn btn-big btn-quiet" data-action="skip-exercise" style="flex:0 0 auto" title="Skip this exercise">' + IC.skip + '<span class="sr-only">Skip exercise</span></button>' +
+        ? '<button type="button" class="btn btn-primary btn-big" data-action="complete-current" id="btn-complete">' + IC.check + '<span>Complete set ' + (ex.sets.findIndex(s => !s.completed)+1) + '</span><span class="mono xs key-hint">(c)</span></button>'
+        : '<button type="button" class="btn btn-primary btn-big" data-action="next-exercise" id="btn-next-ex">' + IC.skip + '<span>' + (w.currentExerciseIndex + 1 >= w.exercises.length ? 'Done — wrap up' : 'Next exercise') + '</span><span class="mono xs key-hint">(n)</span></button>') +
+      '<button type="button" class="btn btn-big flex-none" data-action="add-set">' + IC.plus + '<span>Set</span></button>' +
+      '<button type="button" class="btn btn-big btn-quiet flex-none" data-action="skip-exercise" title="Skip this exercise">' + IC.skip + '<span class="sr-only">Skip exercise</span></button>' +
     '</div>';
   }
 
@@ -1893,21 +2110,20 @@ function htmlActiveWorkout(w){
 }
 
 function htmlCurrentExercise(w, ex){
-  const prev = lastPerformance(ex.exerciseId);
-  const e1 = bestE1RM(ex.exerciseId);
-  const bv = bestSessionVolume(ex.exerciseId);
+  const stats = exerciseStats(ex.exerciseId);
+  const prev = stats.last;
   const showWeight = ex.unit !== 'bw' && ex.unit !== 'time';
   const repsLabel = ex.unit === 'time' ? 'sec' : 'reps';
-  const wLabel = ex.unit === 'bw' ? '+load' : unitLabel();
+  const wLabel = unitLabel();
 
   let prevHTML = '';
   const bits = [];
-  if (prev) bits.push('<span class="pp-item"><span class="pp-k">Last · ' + esc(relDays(prev.date)) + '</span><strong>' +
-    prev.sets.slice(0,4).map(setSummary).join(', ') + '</strong></span>');
-  if (showWeight && e1 > 0) bits.push('<span class="pp-item"><span class="pp-k">Best e1RM</span><strong>' + fmtNum(Math.round(e1*2)/2) + ' ' + unitLabel() + '</strong></span>');
-  if (showWeight && bv > 0) bits.push('<span class="pp-item"><span class="pp-k">Best volume</span><strong>' + fmtNum(bv) + ' ' + unitLabel() + '</strong></span>');
-  if (ex.unit === 'bw' && bestReps(ex.exerciseId) > 0) bits.push('<span class="pp-item"><span class="pp-k">Best set</span><strong>' + bestReps(ex.exerciseId) + ' reps</strong></span>');
-  if (ex.unit === 'time' && bestDuration(ex.exerciseId) > 0) bits.push('<span class="pp-item"><span class="pp-k">Best hold</span><strong>' + bestDuration(ex.exerciseId) + ' s</strong></span>');
+  const bit = (k, v) => bits.push('<span class="pp-item"><span class="pp-k">' + k + '</span><strong>' + v + '</strong></span>');
+  if (prev) bit('Last · ' + esc(relDays(prev.date)), prev.sets.slice(0,4).map(setSummary).join(', '));
+  if (showWeight && stats.e1rm > 0) bit('Best e1RM', fmtNum(roundHalf(stats.e1rm)) + ' ' + unitLabel());
+  if (showWeight && stats.volume > 0) bit('Best volume', fmtNum(stats.volume) + ' ' + unitLabel());
+  if (ex.unit === 'bw' && stats.reps > 0) bit('Best set', stats.reps + ' reps');
+  if (ex.unit === 'time' && stats.duration > 0) bit('Best hold', stats.duration + ' s');
   if (bits.length) prevHTML = '<div class="prev-perf">' + bits.join('') + '</div>';
 
   const currentIdx = ex.sets.findIndex(s => !s.completed);
@@ -1922,17 +2138,16 @@ function htmlCurrentExercise(w, ex){
 
   ex.sets.forEach((s, i) => {
     const isCur = i === currentIdx;
-    const prevSet = prev && prev.sets[i] ? setSummary(prev.sets[i]) : (prev && prev.sets[0] ? '' : '');
+    const prevSet = prev && prev.sets[i] ? setSummary(prev.sets[i]) : '';
     setsHTML += '<div class="set-row' + (isCur ? ' is-current' : '') + (s.completed ? ' is-done' : '') + '">' +
       '<div class="set-num"><span class="n">' + (i+1) + '</span>' +
-        (prevSet ? '<span class="prev" title="Previous session">' + esc(prevSet) + '</span>' : '') +
+        (prevSet ? '<span class="prev" title="Previous session">' + prevSet + '</span>' : '') +
       '</div>';
     if (showWeight){
       setsHTML += '<label class="field"><span class="cap">' + esc(wLabel) + '</span>' +
         '<input id="sw-' + s.id + '" type="number" inputmode="decimal" min="0" step="0.5" ' +
         'data-bind="set" data-id="' + s.id + '" data-field="weight" ' +
-        'value="' + (s.weight != null ? s.weight : '') + '" placeholder="0"' +
-        (isCur ? ' autofocus' : '') + '></label>';
+        'value="' + (s.weight != null ? s.weight : '') + '" placeholder="0"></label>';
     } else {
       setsHTML += '<label class="field"><span class="cap">' + (ex.unit === 'bw' ? 'BW' : 'type') + '</span>' +
         '<input type="text" disabled value="' + (ex.unit === 'bw' ? 'bodyweight' : 'timed') + '"></label>';
@@ -1942,8 +2157,7 @@ function htmlCurrentExercise(w, ex){
     setsHTML += '<label class="field"><span class="cap">' + esc(repsLabel) + '</span>' +
       '<input id="sr-' + s.id + '" type="number" inputmode="numeric" min="0" step="1" ' +
       'data-bind="set" data-id="' + s.id + '" data-field="' + (timedField ? 'durationSeconds' : 'reps') + '" ' +
-      'value="' + (midVal != null ? midVal : '') + '" placeholder="' + (ex.targetReps != null ? ex.targetReps : '0') + '"' +
-      (!showWeight && isCur ? ' autofocus' : '') + '></label>';
+      'value="' + (midVal != null ? midVal : '') + '" placeholder="' + (ex.targetReps != null ? ex.targetReps : '0') + '"></label>';
     setsHTML += '<label class="field"><span class="cap">RPE</span>' +
       '<input type="number" inputmode="decimal" min="1" max="10" step="0.5" ' +
       'data-bind="set" data-id="' + s.id + '" data-field="rpe" ' +
@@ -1954,19 +2168,19 @@ function htmlCurrentExercise(w, ex){
     setsHTML += '</div>';
   });
 
-  return '<div class="pad" style="border-top:1px solid var(--border)" id="ex-panel-top" tabindex="-1">' +
+  return '<div class="pad divider-top" id="ex-panel-top" tabindex="-1">' +
     '<div class="ex-head">' +
       '<h2 class="ex-name">' + esc(ex.name) + '</h2>' +
       '<span class="ex-tags">' +
         (ex.category ? '<span class="tag">' + esc(ex.category) + '</span>' : '') +
         '<span class="tag">target ' + ex.sets.length + ' × ' + (ex.targetReps != null ? ex.targetReps : '–') +
           (ex.targetWeight != null ? ' @ ' + fmtNum(ex.targetWeight) + ' ' + unitLabel() : '') + '</span>' +
-        '<span class="tag">' + IC.timer.replace('class="ic"','class="ic" style="display:inline-block;vertical-align:-2px"') + ' rest ' + fmtClock(ex.restSeconds || state.settings.defaultRest) + '</span>' +
+        '<span class="tag">' + icon('timer','ic-inline') + ' rest ' + fmtClock(ex.restSeconds || state.settings.defaultRest) + '</span>' +
       '</span>' +
     '</div>' +
     prevHTML +
     (ex.notes ? '<p class="ex-notes">“' + esc(ex.notes) + '”</p>' : '') +
-    '<div style="margin-top:16px" role="group" aria-label="Sets for ' + esc(ex.name) + '">' + setsHTML + '</div>' +
+    '<div class="mt-4" role="group" aria-label="Sets for ' + esc(ex.name) + '">' + setsHTML + '</div>' +
     '<div class="sets-foot">' +
       '<button type="button" class="btn" data-action="add-set">' + IC.plus + '<span>Add set</span></button>' +
       (currentIdx === -1 && w.currentExerciseIndex + 1 < w.exercises.length
@@ -1982,14 +2196,14 @@ function htmlDoneExercises(w){
     if (i < w.currentExerciseIndex || (allSetsDone(ex) && i !== w.currentExerciseIndex) || ex.skipped) doneIdxs.push(i);
   });
   if (!doneIdxs.length) return '';
-  let html = '<section class="panel" aria-label="Completed exercises" style="margin-top:16px"><div class="pad" style="padding-bottom:4px"><h2 style="font-family:var(--font-display);font-size:var(--fs-md)">Earlier in this workout</h2></div>';
+  let html = '<section class="panel mt-4" aria-label="Completed exercises"><div class="pad"><h2 class="panel-title">Earlier in this workout</h2></div>';
   doneIdxs.forEach(i => {
     const ex = w.exercises[i];
     const open = ui.expandedDone.has(String(i));
     const completed = ex.sets.filter(s => s.completed);
     const status = ex.skipped ? '<span class="status-chip skip">Skipped</span>'
-      : (allSetsDone(ex) ? '<span class="status-chip ok">' + IC.check.replace('class="ic"','class="ic" style="width:11px;height:11px;display:inline-block;vertical-align:-1px"') + ' ' + completed.length + '/' + ex.sets.length + '</span>'
-      : '<span class="status-chip ok">' + completed.length + '/' + ex.sets.length + '</span>');
+      : '<span class="status-chip ok">' + (allSetsDone(ex) ? icon('check','ic-xs') + ' ' : '') +
+        completed.length + '/' + ex.sets.length + '</span>';
     html += '<button type="button" class="done-ex-row" data-action="toggle-done-ex" data-idx="' + i + '" aria-expanded="' + open + '">' +
       status + '<strong>' + esc(ex.name) + '</strong>' +
       '<span class="muted small">' + completed.map(setSummary).join(', ') + '</span>' +
@@ -1999,7 +2213,7 @@ function htmlDoneExercises(w){
         (ex.sets.map((s, j) => '<div class="dset"><span class="muted">Set ' + (j+1) + '</span><span>' + setSummary(s) +
           (s.rpe != null ? ' <span class="muted">@ RPE ' + s.rpe + '</span>' : '') +
           (s.completed ? '' : ' <span class="status-chip skip">open</span>') + '</span></div>').join('')) +
-        '<div style="margin-top:8px"><button type="button" class="btn btn-sm" data-action="reopen-exercise" data-idx="' + i + '">Reopen exercise</button></div>' +
+        '<div class="mt-2"><button type="button" class="btn btn-sm" data-action="reopen-exercise" data-idx="' + i + '">Reopen exercise</button></div>' +
       '</div>';
     }
   });
@@ -2012,7 +2226,7 @@ function htmlTimerPanel(){
     '<div class="timer-top">' +
       '<span class="timer-label">' + IC.timer + ' Rest timer</span>' +
       '<span class="presets" role="group" aria-label="Timer presets">' +
-        [60,90,120,180].map(s =>
+        REST_PRESETS.map(s =>
           '<button type="button" class="preset-btn" data-action="timer-preset" data-sec="' + s + '" aria-pressed="false">' + fmtClock(s) + '</button>').join('') +
       '</span>' +
     '</div>' +
@@ -2024,29 +2238,30 @@ function htmlTimerPanel(){
         '<button type="button" class="btn btn-quiet" data-action="timer-reset" aria-label="Reset timer">Reset</button>' +
       '</span>' +
     '</div>' +
-    '<div class="timer-track"><div class="timer-fill" id="timer-fill" style="width:100%"></div></div>' +
+    '<div class="timer-track"><div class="timer-fill" id="timer-fill"></div></div>' +
     '<p class="timer-status" id="timer-status">Ready.</p>' +
   '</div></section>';
 }
 
 function htmlAddExercise(){
-  if (state.exercises.length === 0) return '';
-  const w = state.activeWorkout; if (!w) return '';
-  const ex = currentExercise();
-  return '<section class="panel" style="margin-top:16px"><div class="pad">' +
+  if (!state.activeWorkout || state.exercises.length === 0) return '';
+  return '<section class="panel mt-4"><div class="pad">' +
     '<form class="form-row" data-form="add-workout-exercise">' +
-      '<label class="field" style="flex:1"><span class="cap">Add exercise to session</span>' +
-      '<select id="add-ex-select">' +
-        state.exercises.map(e => '<option value="' + e.id + '"' + (ex && ex.exerciseId === e.id ? '' : '') + '>' + esc(e.name) + '</option>').join('') +
-      '</select></label>' +
+      '<label class="field"><span class="cap">Add exercise to session</span>' +
+      '<select id="add-ex-select">' + exerciseOptions() + '</select></label>' +
       '<button type="submit" class="btn">' + IC.plus + '<span>Add</span></button>' +
     '</form></div></section>';
+}
+/* the exercise library as <option>s — used by both "add" pickers */
+function exerciseOptions(selected){
+  return state.exercises.map(e =>
+    '<option value="' + e.id + '"' + (e.id === selected ? ' selected' : '') + '>' + esc(e.name) + '</option>').join('');
 }
 
 /* ---------- ROUTINES ---------- */
 function viewRoutines(){
   const head = '<div class="view-head"><div><h1>Routines</h1>' +
-    '<p class="view-sub">' + state.routines.length + ' routine' + (state.routines.length === 1 ? '' : 's') + ' · starting one begins today’s workout</p></div>' +
+    '<p class="view-sub">' + plural(state.routines.length, 'routine') + ' · starting one begins today’s workout</p></div>' +
     (ui.routineDraft ? '' : '<button type="button" class="btn btn-primary" data-action="routine-new">' + IC.plus + '<span>New routine</span></button>') +
   '</div>';
   if (ui.routineDraft) return head + htmlRoutineEditor();
@@ -2065,7 +2280,7 @@ function viewRoutines(){
     html += '<li class="list-row">' +
       '<div class="list-main">' +
         '<p class="list-name">' + esc(r.name) + '</p>' +
-        '<p class="list-meta">' + r.items.length + ' exercises · ' + planned + ' sets — ' + esc(names) + (r.items.length > 4 ? '…' : '') + '</p>' +
+        '<p class="list-meta">' + plural(r.items.length, 'exercise') + ' · ' + planned + ' sets — ' + esc(names) + (r.items.length > 4 ? '…' : '') + '</p>' +
       '</div>' +
       '<span class="list-actions">' +
         '<button type="button" class="btn btn-sm btn-primary" data-action="routine-start" data-id="' + r.id + '">' + IC.play + '<span>Start</span></button>' +
@@ -2082,16 +2297,16 @@ function htmlRoutineEditor(){
   const d = ui.routineDraft;
   let html = '<section class="panel"><div class="pad">' +
     '<form data-form="routine-save" id="routine-form">' +
-      '<div class="form-row" style="align-items:flex-end">' +
-        '<label class="field" style="flex:2"><span class="cap">Routine name</span>' +
+      '<div class="form-row">' +
+        '<label class="field flex-2"><span class="cap">Routine name</span>' +
         '<input type="text" data-bind="rdraft" data-field="name" value="' + esc(d.name) + '" placeholder="e.g. Upper Power" required></label>' +
       '</div>' +
-      (ui.routineError ? '<p class="error-text" role="alert" style="margin-top:8px">' + esc(ui.routineError) + '</p>' : '') +
-      '<div class="section-title" style="margin-top:20px"><h2>Exercises</h2><span class="rule"></span>' +
+      (ui.routineError ? '<p class="error-text mt-2" role="alert">' + esc(ui.routineError) + '</p>' : '') +
+      '<div class="section-title mt-5"><h2>Exercises</h2><span class="rule"></span>' +
         '<span class="muted xs">sets × reps · target weight · rest</span></div>';
 
   if (!d.items.length){
-    html += '<p class="muted small" style="padding:12px 0">No exercises yet — add the first one below.</p>';
+    html += '<p class="muted small empty-line">No exercises yet — add the first one below.</p>';
   }
   d.items.forEach((it, i) => {
     const e = exerciseById(it.exerciseId);
@@ -2112,14 +2327,14 @@ function htmlRoutineEditor(){
     '</div>';
   });
 
-  const options = state.exercises.map(e => '<option value="' + e.id + '">' + esc(e.name) + '</option>').join('');
-  html += '<div class="form-row" style="margin-top:16px">' +
-    '<label class="field" style="flex:2"><span class="cap">Add exercise from library</span>' +
-    '<select id="routine-add-select" ' + (state.exercises.length ? '' : 'disabled') + '>' +
-    (state.exercises.length ? options : '<option value="">Library is empty</option>') + '</select></label>' +
-    '<button type="button" class="btn" data-action="ritem-add" ' + (state.exercises.length ? '' : 'disabled') + '>' + IC.plus + '<span>Add</span></button>' +
+  const hasLibrary = state.exercises.length > 0;
+  html += '<div class="form-row mt-4">' +
+    '<label class="field flex-2"><span class="cap">Add exercise from library</span>' +
+    '<select id="routine-add-select"' + (hasLibrary ? '' : ' disabled') + '>' +
+    (hasLibrary ? exerciseOptions() : '<option value="">Library is empty</option>') + '</select></label>' +
+    '<button type="button" class="btn" data-action="ritem-add"' + (hasLibrary ? '' : ' disabled') + '>' + IC.plus + '<span>Add</span></button>' +
   '</div>' +
-  '<div class="form-actions" style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">' +
+  '<div class="form-actions form-footer">' +
     '<button type="submit" class="btn btn-primary">Save routine</button>' +
     '<button type="button" class="btn" data-action="routine-cancel">Cancel</button>' +
     '<span class="hint">Shortcut: <kbd>s</kbd> saves</span>' +
@@ -2141,7 +2356,7 @@ function findHSet(d){ const ex = findHEx(d); return ex ? (ex.sets.find(s => s.id
 
 function viewHistory(){
   const head = '<div class="view-head"><div><h1>History</h1>' +
-    '<p class="view-sub">' + state.workouts.length + ' logged workout' + (state.workouts.length === 1 ? '' : 's') + '</p></div></div>';
+    '<p class="view-sub">' + plural(state.workouts.length, 'logged workout') + '</p></div></div>';
   const ws = sortedWorkouts();
   if (!ws.length){
     return head + '<div class="empty"><h3>No workouts logged yet</h3><p>Finish a session and it will show up here with volume, duration and trends.</p>' +
@@ -2153,7 +2368,7 @@ function viewHistory(){
   const last7  = ws.filter(w => now - w.startedAt < 7*86400000);
   const last30 = ws.filter(w => now - w.startedAt < 30*86400000);
   const vol30  = last30.reduce((a,w) => a + workoutVolume(w), 0);
-  const time30 = last30.reduce((a,w) => a + (w.finishedAt - w.startedAt), 0);
+  const time30 = last30.reduce((a,w) => { const d = workoutDuration(w); return a + (isFinite(d) ? d : 0); }, 0);
   let html = '<div class="stats">' +
     '<div class="stat"><div class="v">' + last7.length + '</div><div class="k">Sessions · 7 days</div></div>' +
     '<div class="stat"><div class="v">' + last30.length + '</div><div class="k">Sessions · 30 days</div></div>' +
@@ -2172,16 +2387,16 @@ function viewHistory(){
   html += '<div class="list" role="list">';
   ws.forEach(w => {
     const open = ui.expandedWorkouts.has(w.id);
-    const dur = fmtDuration(w.finishedAt - w.startedAt);
+    const dur = fmtDuration(workoutDuration(w));
     const vol = workoutVolume(w);
     html += '<div role="listitem">' +
       '<button type="button" class="hist-row" data-action="history-toggle" data-id="' + w.id + '" aria-expanded="' + open + '" aria-label="' + esc(w.routineName) + ', ' + fmtDate(w.startedAt) + '">' +
         '<span class="hist-cell"><b>' + fmtDate(w.startedAt) + '</b><br><span class="k">' + relDays(w.startedAt) + '</span></span>' +
         '<span class="hist-cell"><b>' + esc(w.routineName) + '</b></span>' +
         '<span class="hist-cell hide-m">' + dur + '</span>' +
-        '<span class="hist-cell hide-m">' + workoutSets(w) + ' sets</span>' +
+        '<span class="hist-cell hide-m">' + plural(workoutSets(w), 'set') + '</span>' +
         '<span class="hist-cell hide-m"><b>' + fmtNum(vol) + '</b> ' + unitLabel() + '</span>' +
-        '<span class="muted" style="justify-self:end">' + IC.chev.replace('<svg','<svg style="transform:rotate(' + (open ? 90 : 0) + 'deg);transition:transform .15s ease"') + '</span>' +
+        '<span class="muted self-end' + (open ? ' is-open' : '') + '">' + IC.chev + '</span>' +
       '</button>';
     if (open) html += htmlWorkoutDetail(w);
     html += '</div>';
@@ -2193,28 +2408,32 @@ function htmlWorkoutDetail(w){
   if (ui.editWorkoutId === w.id) return htmlWorkoutEditor(w);
   let html = '<div class="hist-detail">' +
     '<div class="hedit-bar"><button type="button" class="btn" data-action="history-edit" data-id="' + w.id + '">' + IC.pen + '<span>Edit session</span></button></div>';
-  if (w.notes) html += '<p class="small" style="margin-bottom:12px;font-style:italic">“' + esc(w.notes) + '”</p>';
+  if (w.notes) html += '<p class="small quote mb-3">“' + esc(w.notes) + '”</p>';
+  let shown = 0;
   w.exercises.forEach(ex => {
-    const done = ex.sets.filter(countsPR);
+    /* every completed set is shown: countForPR only decides what counts as a
+       record, it is not a reason to hide work that was actually done */
+    const done = ex.sets.filter(s => s.completed);
     if (!done.length && !ex.skipped) return;
-    const top = done.reduce((a,s) => Math.max(a, epley(s.weight || 0, s.reps || 0)), 0);
+    shown++;
+    const top = done.filter(countsPR).reduce((a,s) => Math.max(a, epley(setWeight(s), s.reps)), 0);
     html += '<div class="hist-ex"><h4>' + esc(ex.name) +
       (ex.skipped ? ' <span class="status-chip skip">skipped</span>' : '') +
-      (top > 0 ? ' <span class="muted" style="font-weight:400">· top e1RM ' + fmtNum(Math.round(top*2)/2) + ' ' + (done[0] && done[0].unit ? done[0].unit : unitLabel()) + '</span>' : '') +
+      (top > 0 ? ' <span class="muted top-e1rm">· top e1RM ' + fmtNum(roundHalf(top)) + ' ' + unitLabel() + '</span>' : '') +
       '</h4>' +
       '<p class="hist-sets">' +
-      (done.length ? done.map(s => setSummary(s) + (s.rpe != null ? ' @' + s.rpe : '')).join(' · ') : 'No completed sets') +
+      (done.length
+        ? done.map(s => setSummary(s) + (s.rpe != null ? ' @' + s.rpe : '') +
+            (countsVolume(s) ? '' : ' <span class="status-chip skip">warm-up</span>')).join(' · ')
+        : 'No completed sets') +
       '</p></div>';
   });
-  if (!html.includes('hist-ex')) html += '<p class="muted small">No completed sets in this session.</p>';
+  if (!shown) html += '<p class="muted small">No completed sets in this session.</p>';
   html += '</div>';
   return html;
 }
 /* Inline editor for a logged session: edits save to localStorage as you type. */
 function htmlWorkoutEditor(w){
-  const unitOpts = cur => ['kg','lb','bw','time'].map(u =>
-    '<option value="' + u + '"' + (u === (cur || 'kg') ? ' selected' : '') + '>' +
-    (u === 'bw' ? 'bodyweight' : u === 'time' ? 'time (s)' : u) + '</option>').join('');
   let html = '<div class="hist-detail hedit" aria-label="Edit session">' +
     '<div class="hedit-bar"><strong>Edit session</strong>' +
       '<span class="hedit-hint muted xs">Changes save as you type</span>' +
@@ -2223,19 +2442,19 @@ function htmlWorkoutEditor(w){
       '<label class="field"><span class="cap">Session name</span>' +
         '<input type="text" data-bind="hwo" data-field="routineName" value="' + esc(w.routineName) + '"></label>' +
       '<label class="field"><span class="cap">Started</span>' +
-        '<input type="datetime-local" id="hstart" value="' + toLocalInput(w.startedAt) + '"></label>' +
+        '<input type="datetime-local" data-change="workout-time" data-field="startedAt" value="' + toLocalInput(w.startedAt) + '"></label>' +
       '<label class="field"><span class="cap">Finished</span>' +
-        '<input type="datetime-local" id="hfinish" value="' + toLocalInput(w.finishedAt) + '"></label>' +
-      '<label class="field" style="grid-column:1/-1"><span class="cap">Notes</span>' +
+        '<input type="datetime-local" data-change="workout-time" data-field="finishedAt" value="' + toLocalInput(w.finishedAt) + '"></label>' +
+      '<label class="field span-all"><span class="cap">Notes</span>' +
         '<textarea rows="2" data-bind="hwo" data-field="notes">' + esc(w.notes || '') + '</textarea></label>' +
     '</div>';
   w.exercises.forEach((ex, xi) => {
     html += '<div class="hedit-ex">' +
       '<div class="hedit-ex-head">' +
-        '<label class="field" style="flex:1;min-width:160px"><span class="cap">Exercise</span>' +
+        '<label class="field hedit-name"><span class="cap">Exercise</span>' +
           '<input type="text" data-bind="hex" data-idx="' + xi + '" data-field="name" value="' + esc(ex.name) + '"></label>' +
-        '<label class="field" style="width:120px"><span class="cap">Unit</span>' +
-          '<select data-bind="hexsel" data-idx="' + xi + '">' + unitOpts(ex.unit) + '</select></label>' +
+        '<label class="field hedit-unit"><span class="cap">Unit</span>' +
+          '<select data-bind="hexsel" data-idx="' + xi + '">' + unitOptions(isUnit(ex.unit) ? ex.unit : 'kg') + '</select></label>' +
         '<button type="button" class="btn hset-del" data-action="hex-del" data-idx="' + xi + '" aria-label="Remove ' + esc(ex.name) + ' from this session">' + IC.trash + '</button>' +
       '</div>';
     ex.sets.forEach((s, si) => {
@@ -2285,26 +2504,25 @@ function weeklyChart(ws){
     bars += '<rect x="' + x + '" y="' + (w.vol ? y : H-19) + '" width="' + Math.round(bw*0.64) + '" height="' + (w.vol ? h : 1) + '" rx="2" fill="' + (last ? 'var(--accent)' : 'var(--border-strong)') + '"><title>' + esc(w.label) + ' — ' + fmtNum(w.vol) + ' ' + unitLabel() + '</title></rect>';
     if (i % 2 === 0) bars += '<text x="' + Math.round(i*bw + bw/2) + '" y="' + (H-4) + '" text-anchor="middle" font-size="9.5" fill="var(--muted)">' + esc(w.label) + '</text>';
   });
-  return '<section class="panel chart-panel" style="margin-top:16px" aria-label="Weekly volume, last 8 weeks">' +
-    '<div class="chart-head"><h2 style="font-family:var(--font-display);font-size:var(--fs-md)">Weekly volume</h2>' +
+  return '<section class="panel chart-panel mt-4" aria-label="Weekly volume, last 8 weeks">' +
+    '<div class="chart-head"><h2 class="panel-title">Weekly volume</h2>' +
     '<span class="muted xs">total weight × reps per week</span></div>' +
     '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Bar chart of training volume for the last eight weeks">' + bars + '</svg>' +
   '</section>';
 }
 function trendPanel(){
-  const candidates = state.exercises.filter(e =>
-    state.workouts.some(w => w.exercises.some(x => x.exerciseId === e.id && x.sets.some(s => s.completed))));
+  const candidates = trendCandidates();
   if (!candidates.length) return '';
-  if (!ui.trendExId || !candidates.some(e => e.id === ui.trendExId)) ui.trendExId = candidates[0].id;
   const ex = exerciseById(ui.trendExId);
+  if (!ex) return '';
   const isWeighted = ex.unit !== 'bw' && ex.unit !== 'time';
-  const metric = s => isWeighted ? epley(s.weight || 0, s.reps || 0)
+  const metric = s => isWeighted ? epley(setWeight(s), s.reps)
     : (ex.unit === 'time' ? (Number(setDuration(s)) || 0) : (Number(s.reps) || 0));
   const metricName = isWeighted ? 'estimated 1RM' : (ex.unit === 'time' ? 'longest hold (s)' : 'best set (reps)');
   const unit = isWeighted ? unitLabel() : (ex.unit === 'time' ? 's' : 'reps');
 
   const sessions = [];
-  sortedWorkouts().slice().reverse().forEach(w => {
+  sortedWorkouts().slice().reverse().forEach(w => {   /* oldest → newest for the line */
     const b = w.exercises.find(x => x.exerciseId === ex.id);
     if (!b) return;
     const best = b.sets.filter(countsPR).reduce((a,s) => Math.max(a, metric(s)), 0);
@@ -2320,29 +2538,30 @@ function trendPanel(){
     const W = 560, H = 96, pad = 10;
     const x = i => pad + (i/(vals.length-1)) * (W - pad*2);
     const y = v => max === min ? H/2 : (H - pad - ((v - min)/(max - min)) * (H - pad*2));
-    const pts = vals.map((v,i) => Math.round(x(i)*10)/10 + ',' + Math.round(y(v)*10)/10).join(' ');
-    let dots = vals.map((v,i) =>
-      '<circle cx="' + Math.round(x(i)*10)/10 + '" cy="' + Math.round(y(v)*10)/10 + '" r="' + (i === vals.length-1 ? 4 : 2.5) + '" fill="' + (i === vals.length-1 ? 'var(--accent)' : 'var(--surface)') + '" stroke="var(--accent)" stroke-width="1.6"><title>' + fmtDate(sessions[i].date) + ' — ' + fmtNum(Math.round(v*2)/2) + ' ' + unit + '</title></circle>').join('');
+    const r1 = n => Math.round(n*10)/10;
+    const pts = vals.map((v,i) => r1(x(i)) + ',' + r1(y(v))).join(' ');
+    const dots = vals.map((v,i) =>
+      '<circle cx="' + r1(x(i)) + '" cy="' + r1(y(v)) + '" r="' + (i === vals.length-1 ? 4 : 2.5) + '" fill="' + (i === vals.length-1 ? 'var(--accent)' : 'var(--surface)') + '" stroke="var(--accent)" stroke-width="1.6"><title>' + fmtDate(sessions[i].date) + ' — ' + fmtNum(roundHalf(v)) + ' ' + esc(unit) + '</title></circle>').join('');
     const delta = vals[vals.length-1] - vals[0];
     body = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Trend of ' + metricName + ' for ' + esc(ex.name) + ' across ' + vals.length + ' sessions">' +
       '<polyline points="' + pts + '" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>' + dots + '</svg>' +
-      '<div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:6px">' +
-        '<span class="muted xs">' + fmtDate(sessions[0].date) + ' → ' + fmtDate(sessions[sessions.length-1].date) + ' · ' + sessions.length + ' sessions</span>' +
-        '<span class="xs" style="color:' + (delta >= 0 ? 'var(--success)' : 'var(--danger)') + ';font-weight:650">' +
-          (delta >= 0 ? '▲ +' : '▼ ') + fmtNum(Math.round(delta*2)/2) + ' ' + unit + '</span>' +
+      '<div class="trend-foot">' +
+        '<span class="muted xs">' + fmtDate(sessions[0].date) + ' → ' + fmtDate(sessions[sessions.length-1].date) + ' · ' + plural(sessions.length, 'session') + '</span>' +
+        '<span class="xs trend-delta ' + (delta >= 0 ? 'up' : 'down') + '">' +
+          (delta >= 0 ? '▲ +' : '▼ ') + fmtNum(roundHalf(delta)) + ' ' + esc(unit) + '</span>' +
       '</div>' +
-      '<p class="sr-only">' + metricName + ' went from ' + fmtNum(Math.round(vals[0]*2)/2) + ' to ' + fmtNum(Math.round(vals[vals.length-1]*2)/2) + ' ' + unit + '.</p>';
+      '<p class="sr-only">' + metricName + ' went from ' + fmtNum(roundHalf(vals[0])) + ' to ' + fmtNum(roundHalf(vals[vals.length-1])) + ' ' + esc(unit) + '.</p>';
   }
 
-  return '<section class="panel chart-panel" style="margin-top:16px" aria-label="Exercise trend">' +
+  return '<section class="panel chart-panel mt-4" aria-label="Exercise trend">' +
     '<div class="chart-head">' +
-      '<h2 style="font-family:var(--font-display);font-size:var(--fs-md)">Progress</h2>' +
-      '<label class="field" style="min-width:180px"><span class="cap">Exercise</span>' +
-      '<select data-action-select="trend">' +
+      '<h2 class="panel-title">Progress</h2>' +
+      '<label class="field trend-picker"><span class="cap">Exercise</span>' +
+      '<select data-change="trend">' +
       candidates.map(e => '<option value="' + e.id + '"' + (e.id === ui.trendExId ? ' selected' : '') + '>' + esc(e.name) + '</option>').join('') +
       '</select></label>' +
     '</div>' +
-    '<p class="muted xs" style="margin-bottom:8px">' + esc(metricName) + ' per session</p>' +
+    '<p class="muted xs mb-2">' + esc(metricName) + ' per session</p>' +
     body +
   '</section>';
 }
@@ -2350,12 +2569,13 @@ function trendPanel(){
 /* ---------- EXERCISES ---------- */
 function viewExercises(){
   const head = '<div class="view-head"><div><h1>Exercises</h1>' +
-    '<p class="view-sub">Your library · ' + state.exercises.length + ' movements</p></div>' +
+    '<p class="view-sub">Your library · ' + plural(state.exercises.length, 'movement') + '</p></div>' +
     '<button type="button" class="btn btn-primary" data-action="ex-form-toggle">' + IC.plus + '<span>New exercise</span></button></div>';
 
-  let html = '<div style="margin-bottom:16px">' +
+  let html = '<div class="mb-4">' +
     '<label class="field"><span class="cap">Search</span>' +
-    '<input type="search" id="ex-search" data-filter="exercises" placeholder="Filter by name or category…  ( / )" autocomplete="off"></label></div>';
+    '<input type="search" id="ex-search" data-bind="exfilter" value="' + esc(ui.exerciseFilter) + '" ' +
+    'placeholder="Filter by name or category…  ( / )" autocomplete="off"></label></div>';
 
   if (ui.showExerciseForm) html += htmlExerciseForm();
 
@@ -2366,51 +2586,59 @@ function viewExercises(){
     return head + html;
   }
 
-  const unitName = { kg:'kg', lb:'lb', bw:'bodyweight', time:'timed' };
+  const q = ui.exerciseFilter.trim().toLowerCase();
+  const matches = e => !q ||
+    e.name.toLowerCase().includes(q) || (e.category || '').toLowerCase().includes(q);
+  const shown = state.exercises.filter(matches);
+
   html += '<ul class="list" id="ex-list">';
-  state.exercises.forEach(e => {
+  shown.forEach(e => {
     if (ui.exerciseDraft && ui.exerciseDraft.id === e.id){
       html += htmlExerciseEditRow(e);
       return;
     }
     const usedBy = state.routines.filter(r => r.items.some(it => it.exerciseId === e.id)).length;
     const last = lastPerformance(e.id);
-    html += '<li class="list-row ex-row" data-name="' + esc(e.name.toLowerCase()) + '" data-cat="' + esc((e.category||'').toLowerCase()) + '">' +
+    html += '<li class="list-row ex-row">' +
       '<div class="list-main">' +
         '<p class="list-name">' + esc(e.name) + '</p>' +
         '<p class="list-meta">' +
-          '<span class="tag" style="border:0;background:var(--surface-2)">' + esc(e.category || 'General') + '</span> ' +
-          (unitName[e.unit] || e.unit) +
-          (usedBy ? ' · in ' + usedBy + ' routine' + (usedBy > 1 ? 's' : '') : '') +
+          '<span class="tag tag-plain">' + esc(e.category || 'General') + '</span> ' +
+          esc(UNIT_TEXT[e.unit] || e.unit) +
+          (usedBy ? ' · in ' + plural(usedBy, 'routine') : '') +
           (last ? ' · last ' + relDays(last.date) : '') +
         '</p>' +
-        (e.notes ? '<p class="list-meta" style="font-style:italic">“' + esc(e.notes) + '”</p>' : '') +
+        (e.notes ? '<p class="list-meta quote">“' + esc(e.notes) + '”</p>' : '') +
       '</div>' +
       '<span class="list-actions">' +
         '<button type="button" class="btn btn-sm" data-action="ex-edit" data-id="' + e.id + '" aria-label="Edit ' + esc(e.name) + '">Edit</button>' +
         '<button type="button" class="btn btn-sm btn-danger" data-action="ex-del" data-id="' + e.id + '" aria-label="Delete ' + esc(e.name) + '">' + IC.trash + '<span class="sr-only">Delete</span></button>' +
       '</span></li>';
   });
-  html += '</ul><p class="hint" id="ex-empty-filter" hidden>No exercises match your filter.</p>';
+  html += '</ul>';
+  if (!shown.length) html += '<p class="hint">No exercises match your filter.</p>';
   return head + html;
 }
-function htmlExerciseForm(){
+/* the muscle-group values already in the library, offered as autocomplete */
+function categoryDatalist(id){
   const cats = Array.from(new Set(state.exercises.map(e => e.category).filter(Boolean)));
-  return '<section class="panel" style="margin-bottom:16px"><div class="pad">' +
+  return '<datalist id="' + id + '">' + cats.map(c => '<option value="' + esc(c) + '">').join('') + '</datalist>';
+}
+function htmlExerciseForm(){
+  return '<section class="panel mb-4"><div class="pad">' +
     '<form data-form="ex-new">' +
-      '<h3 style="margin-bottom:12px;font-family:var(--font-display)">New exercise</h3>' +
+      '<h3 class="panel-title mb-3">New exercise</h3>' +
       '<div class="ex-edit-grid">' +
         '<label class="field"><span class="cap">Name</span><input type="text" name="exname" required placeholder="e.g. Incline Press"></label>' +
         '<label class="field"><span class="cap">Muscle group</span><input type="text" name="excat" list="ex-cats" placeholder="Chest, Back…">' +
-          '<datalist id="ex-cats">' + cats.map(c => '<option value="' + esc(c) + '">').join('') + '</datalist></label>' +
-        '<label class="field"><span class="cap">Default unit</span><select name="exunit">' +
-          '<option value="kg">kg</option><option value="lb">lb</option>' +
-          '<option value="bw">bodyweight</option><option value="time">time (seconds)</option></select></label>' +
+          categoryDatalist('ex-cats') + '</label>' +
+        '<label class="field"><span class="cap">Default unit</span>' +
+          '<select name="exunit">' + unitOptions('kg') + '</select></label>' +
       '</div>' +
-      '<label class="field" style="margin-top:12px"><span class="cap">Notes (optional)</span>' +
+      '<label class="field mt-3"><span class="cap">Notes (optional)</span>' +
         '<input type="text" name="exnotes" placeholder="Cues, tempo, grip…"></label>' +
-      (ui.exerciseFormError ? '<p class="error-text" role="alert" style="margin-top:8px">' + esc(ui.exerciseFormError) + '</p>' : '') +
-      '<div class="form-actions" style="margin-top:14px">' +
+      (ui.exerciseFormError ? '<p class="error-text mt-2" role="alert">' + esc(ui.exerciseFormError) + '</p>' : '') +
+      '<div class="form-actions mt-3">' +
         '<button type="submit" class="btn btn-primary">Add exercise</button>' +
         '<button type="button" class="btn" data-action="ex-form-close">Cancel</button>' +
       '</div>' +
@@ -2418,20 +2646,18 @@ function htmlExerciseForm(){
 }
 function htmlExerciseEditRow(e){
   const d = ui.exerciseDraft;
-  const cats = Array.from(new Set(state.exercises.map(x => x.category).filter(Boolean)));
-  return '<li class="list-row" style="background:var(--accent-soft);display:block">' +
+  return '<li class="list-row is-editing">' +
     '<form data-form="ex-save">' +
       '<div class="ex-edit-grid">' +
         '<label class="field"><span class="cap">Name</span><input type="text" data-bind="edraft" data-field="name" value="' + esc(d.name) + '" required></label>' +
         '<label class="field"><span class="cap">Muscle group</span><input type="text" data-bind="edraft" data-field="category" value="' + esc(d.category) + '" list="ex-cats-edit">' +
-          '<datalist id="ex-cats-edit">' + cats.map(c => '<option value="' + esc(c) + '">').join('') + '</datalist></label>' +
-        '<label class="field"><span class="cap">Default unit</span><select data-bind="edraft" data-field="unit">' +
-          ['kg','lb','bw','time'].map(u => '<option value="' + u + '"' + (d.unit === u ? ' selected' : '') + '>' +
-            (u === 'bw' ? 'bodyweight' : u === 'time' ? 'time (seconds)' : u) + '</option>').join('') + '</select></label>' +
+          categoryDatalist('ex-cats-edit') + '</label>' +
+        '<label class="field"><span class="cap">Default unit</span>' +
+          '<select data-bind="edraft" data-field="unit">' + unitOptions(d.unit) + '</select></label>' +
       '</div>' +
-      '<label class="field" style="margin-top:12px"><span class="cap">Notes</span>' +
+      '<label class="field mt-3"><span class="cap">Notes</span>' +
         '<input type="text" data-bind="edraft" data-field="notes" value="' + esc(d.notes) + '"></label>' +
-      '<div class="form-actions" style="margin-top:12px">' +
+      '<div class="form-actions mt-3">' +
         '<button type="submit" class="btn btn-primary btn-sm">Save</button>' +
         '<button type="button" class="btn btn-sm" data-action="ex-edit-cancel">Cancel</button>' +
       '</div>' +
@@ -2439,47 +2665,61 @@ function htmlExerciseEditRow(e){
 }
 
 /* ---------- SETTINGS ---------- */
+/* One shortcut list renders both here and in the help dialog. */
+function shortcutTable(){
+  return '<table class="shortcuts"><tbody>' +
+    SHORTCUTS.map(sc => '<tr><td>' + sc.keys.map(k => '<kbd>' + esc(k) + '</kbd>').join(' ') +
+      '</td><td>' + esc(sc.text) + '</td></tr>').join('') +
+    '</tbody></table>';
+}
+function storageSize(){
+  try{
+    const bytes = new Blob([localStorage.getItem(LS_KEY) || '']).size;
+    return (bytes < 1024) ? bytes + ' B' : Math.round(bytes/102.4)/10 + ' KB';
+  }catch(e){ return '–'; }
+}
 function viewSettings(){
   const s = state.settings;
-  const storage = (() => { try{ return Math.round((localStorage.getItem(LS_KEY) || '').length / 102.4)/10 + ' KB'; }catch(e){ return '–'; } })();
+  const storage = storageSize();
   return '<div class="view-head"><div><h1>Settings</h1><p class="view-sub">Preferences, data, shortcuts</p></div></div>' +
   '<section class="panel" aria-label="Preferences">' +
     '<div class="setting-block">' +
       '<h3>Appearance</h3><p class="desc">Theme follows your system by default. Color themes apply instantly and are remembered on this device.</p>' +
       '<div class="radio-row" role="radiogroup" aria-label="Theme">' +
-        [['system','System'],['light','Light'],['dark','Dark'],['dracula','Dracula'],['gruvbox','Gruvbox'],['nord','Nord'],['solarized','Solarized'],['monokai','Monokai']].map(([t, label]) =>
-          '<label class="radio-pill"><input type="radio" name="theme" value="' + t + '" data-action-radio="theme"' + (s.theme === t ? ' checked' : '') + '><span>' + label + '</span></label>').join('') +
+        THEMES.map(t =>
+          '<label class="radio-pill"><input type="radio" name="theme" value="' + t.id + '" data-change="theme"' + (s.theme === t.id ? ' checked' : '') + '><span>' + t.label + '</span></label>').join('') +
       '</div>' +
     '</div>' +
     '<div class="setting-block">' +
       '<h3>Weight unit</h3><p class="desc">Planned weights and the active workout are converted; logged history keeps the unit it was logged in.</p>' +
       '<div class="radio-row" role="radiogroup" aria-label="Unit">' +
         ['kg','lb'].map(u =>
-          '<label class="radio-pill"><input type="radio" name="unit" value="' + u + '" data-action-radio="unit"' + (s.unit === u ? ' checked' : '') + '><span>' + u + '</span></label>').join('') +
+          '<label class="radio-pill"><input type="radio" name="unit" value="' + u + '" data-change="unit"' + (s.unit === u ? ' checked' : '') + '><span>' + u + '</span></label>').join('') +
       '</div>' +
     '</div>' +
     '<div class="setting-block">' +
       '<h3>Rest timer</h3>' +
       '<div class="form-row">' +
-        '<label class="field" style="max-width:220px"><span class="cap">Default rest (seconds)</span>' +
-        '<input type="number" min="15" max="600" step="15" inputmode="numeric" id="rest-default" value="' + s.defaultRest + '"></label>' +
+        '<label class="field rest-field"><span class="cap">Default rest (seconds)</span>' +
+        '<input type="number" min="' + REST_MIN + '" max="' + REST_MAX + '" step="15" inputmode="numeric" ' +
+        'data-change="default-rest" value="' + s.defaultRest + '"></label>' +
       '</div>' +
       '<div class="switch-row">' +
         '<label for="sw-autorest"><strong>Auto-start after each set</strong><br><span class="hint">Uses the exercise’s rest time</span></label>' +
-        '<span class="switch"><input type="checkbox" id="sw-autorest" data-action-switch="autoRest"' + (s.autoRest ? ' checked' : '') + '><span class="track" aria-hidden="true"></span></span>' +
+        '<span class="switch"><input type="checkbox" id="sw-autorest" data-change="setting" data-field="autoRest"' + (s.autoRest ? ' checked' : '') + '><span class="track" aria-hidden="true"></span></span>' +
       '</div>' +
       '<div class="switch-row">' +
         '<label for="sw-sound"><strong>Sound when rest ends</strong><br><span class="hint">Two short blips; completion is always announced to screen readers</span></label>' +
-        '<span class="switch"><input type="checkbox" id="sw-sound" data-action-switch="sound"' + (s.sound ? ' checked' : '') + '><span class="track" aria-hidden="true"></span></span>' +
+        '<span class="switch"><input type="checkbox" id="sw-sound" data-change="setting" data-field="sound"' + (s.sound ? ' checked' : '') + '><span class="track" aria-hidden="true"></span></span>' +
       '</div>' +
     '</div>' +
   '</section>' +
-  '<section class="panel" style="margin-top:16px" aria-label="Data">' +
+  '<section class="panel mt-4" aria-label="Data">' +
     '<div class="setting-block">' +
       '<h3>Data</h3><p class="desc">Stored locally in this browser (' + storage + '). Nothing is uploaded anywhere.</p>' +
       '<div class="form-actions">' +
         '<button type="button" class="btn" data-action="export">' + IC.down + '<span>Export JSON</span></button>' +
-        '<label class="file-btn"><span>' + IC.up + ' Import JSON</span><input type="file" accept=".json,application/json" id="import-file" aria-label="Import data from a JSON file"></label>' +
+        '<label class="file-btn"><span>' + IC.up + ' Import JSON</span><input type="file" accept=".json,application/json" data-change="import-all" aria-label="Import data from a JSON file"></label>' +
         '<button type="button" class="btn" data-action="load-samples">Load sample data</button>' +
       '</div>' +
     '</div>' +
@@ -2488,29 +2728,21 @@ function viewSettings(){
       '<p class="desc">Move parts of your data between browsers. A routines file carries the exercises it needs — missing ones are added on import; duplicates are skipped.</p>' +
       '<div class="form-actions">' +
         '<button type="button" class="btn" data-action="export-routines">' + IC.down + '<span>Routines JSON</span></button>' +
-        '<label class="file-btn"><span>' + IC.up + ' Import routines</span><input type="file" accept=".json,application/json" id="import-routines-file" aria-label="Import routines from a JSON file"></label>' +
+        '<label class="file-btn"><span>' + IC.up + ' Import routines</span><input type="file" accept=".json,application/json" data-change="import-routines" aria-label="Import routines from a JSON file"></label>' +
         '<button type="button" class="btn" data-action="export-history">' + IC.down + '<span>History JSON</span></button>' +
-        '<label class="file-btn"><span>' + IC.up + ' Import history</span><input type="file" accept=".json,application/json" id="import-history-file" aria-label="Import workout history from a JSON file"></label>' +
+        '<label class="file-btn"><span>' + IC.up + ' Import history</span><input type="file" accept=".json,application/json" data-change="import-history" aria-label="Import workout history from a JSON file"></label>' +
       '</div>' +
     '</div>' +
     '<div class="setting-block">' +
-      '<h3 style="color:var(--danger)">Danger zone</h3>' +
+      '<h3 class="danger-heading">Danger zone</h3>' +
       '<p class="desc">Removes every exercise, routine, workout and preference from this browser.</p>' +
       '<button type="button" class="btn btn-danger" data-action="clear-all">' + IC.trash + '<span>Clear all data…</span></button>' +
     '</div>' +
   '</section>' +
-  '<section class="panel" style="margin-top:16px" aria-label="Keyboard shortcuts">' +
+  '<section class="panel mt-4" aria-label="Keyboard shortcuts">' +
     '<div class="setting-block">' +
       '<h3>Keyboard shortcuts</h3><p class="desc">Disabled while typing in a field.</p>' +
-      '<table class="shortcuts"><tbody>' +
-        '<tr><td><kbd>?</kbd></td><td>Shortcut help</td></tr>' +
-        '<tr><td><kbd>/</kbd></td><td>Focus search</td></tr>' +
-        '<tr><td><kbd>t</kbd> <kbd>r</kbd> <kbd>h</kbd> <kbd>e</kbd></td><td>Today · Routines · History · Exercises</td></tr>' +
-        '<tr><td><kbd>s</kbd></td><td>Start selected routine / save edit</td></tr>' +
-        '<tr><td><kbd>c</kbd></td><td>Complete current set</td></tr>' +
-        '<tr><td><kbd>n</kbd></td><td>Next exercise</td></tr>' +
-        '<tr><td><kbd>space</kbd></td><td>Start / pause rest timer</td></tr>' +
-      '</tbody></table>' +
+      shortcutTable() +
     '</div>' +
   '</section>';
 }
@@ -2519,8 +2751,8 @@ function viewSettings(){
    EVENT HANDLING (delegated)
    ============================================================ */
 const actions = {
-  nav(d){ ui.view = d.view; ui.routineDraft = ui.view === 'routines' ? ui.routineDraft : null; render(); },
-  'go-history'(){ ui.view = 'history'; render(); },
+  nav(d){ navigate(d.view); },
+  'go-history'(){ navigate('history'); },
   'select-routine'(d){ ui.selectedRoutineId = d.id; render(); },
   'routine-start'(d){ startRoutine(d.id); },
   'start-empty'(){ startEmpty(); },
@@ -2545,7 +2777,7 @@ const actions = {
   'timer-reset'(){ resetTimer(); },
   'timer-add30'(){ addThirty(); },
 
-  'routine-new'(){ ui.routineDraft = newRoutineDraft(null); ui.routineError = ''; render(); ui.focus = null; },
+  'routine-new'(){ ui.routineDraft = newRoutineDraft(null); ui.routineError = ''; render(); },
   'routine-edit'(d){ const r = routineById(d.id); if (r){ ui.routineDraft = newRoutineDraft(r); ui.routineError=''; render(); } },
   'routine-dup'(d){ duplicateRoutine(d.id); },
   'routine-del'(d){ deleteRoutine(d.id); },
@@ -2570,7 +2802,7 @@ const actions = {
     render();
   },
   'history-edit'(d){ ui.editWorkoutId = d.id; ui.expandedWorkouts.add(d.id); render(); },
-  'history-edit-done'(){ ui.editWorkoutId = null; save(); render(); toast('Session updated'); announce('Session updated'); },
+  'history-edit-done'(){ ui.editWorkoutId = null; save(); render(); toast('Session updated'); },
   'hset-toggle'(d){
     const s = findHSet(d); if (!s) return;
     s.completed = !s.completed; s.completedAt = s.completed ? Date.now() : 0;
@@ -2613,82 +2845,84 @@ const actions = {
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-action]');
   if (!el) return;
-  /* the routine picker row contains a decorative Start pill — row click selects,
-     but clicking the pill itself starts immediately */
   const fn = actions[el.dataset.action];
   if (fn) fn(el.dataset, el, e);
 });
-/* clicking the Start pill inside a picker row starts directly */
-document.addEventListener('click', e => {
-  const pill = e.target.closest('.rp-go');
-  if (!pill) return;
-  e.stopImmediatePropagation();
-  const row = pill.closest('[data-action="select-routine"]');
-  if (row) startRoutine(row.dataset.id);
-}, true);
 
-/* live field binding — updates state without losing focus */
-document.addEventListener('input', e => {
-  const t = e.target;
-  const bind = t.dataset && t.dataset.bind;
-  if (!bind) return;
-  const num = f => (t.value === '' || isNaN(Number(t.value))) ? null : Number(t.value);
-  if (bind === 'set'){
+/* Live field binding — writes straight to state so the field keeps focus and
+   the view is not rebuilt on every keystroke. Keyed by data-bind. */
+const binders = {
+  set(t){
     const ex = currentExercise(); if (!ex) return;
     const s = ex.sets.find(x => x.id === t.dataset.id); if (!s) return;
-    s[t.dataset.field] = num();
+    s[t.dataset.field] = toNum(t.value);
     save();
-  } else if (bind === 'wnotes'){
+  },
+  wnotes(t){
     if (state.activeWorkout){ state.activeWorkout.notes = t.value; save(); }
-  } else if (bind === 'rdraft' && ui.routineDraft){
-    ui.routineDraft[t.dataset.field] = t.value;
-  } else if (bind === 'ritem' && ui.routineDraft){
+  },
+  rdraft(t){ if (ui.routineDraft) ui.routineDraft[t.dataset.field] = t.value; },
+  ritem(t){
+    if (!ui.routineDraft) return;
     const it = ui.routineDraft.items[Number(t.dataset.idx)]; if (!it) return;
-    it[t.dataset.field] = (t.dataset.field === 'weight') ? num() : (t.value === '' ? 0 : Number(t.value));
-  } else if (bind === 'edraft' && ui.exerciseDraft){
-    ui.exerciseDraft[t.dataset.field] = t.value;
-  } else if (bind === 'hwo'){
-    const w = editingWorkout(); if (w){ w[t.dataset.field] = t.value; save(); }
-  } else if (bind === 'hex'){
-    const ex = findHEx(t.dataset); if (ex){ ex[t.dataset.field] = t.value; save(); }
-  } else if (bind === 'hset'){
-    const s = findHSet(t.dataset);
-    if (s){ s[t.dataset.field] = (t.value === '' || isNaN(Number(t.value))) ? null : Number(t.value); save(); }
-  } else if (t.dataset.filter === 'exercises'){
-    filterExercises(t.value);
-  }
-});
-document.addEventListener('change', e => {
+    /* weight is optional (null = "whatever is on the bar"); the rest are counts */
+    it[t.dataset.field] = t.dataset.field === 'weight' ? toNum(t.value) : (toNum(t.value) || 0);
+  },
+  edraft(t){ if (ui.exerciseDraft) ui.exerciseDraft[t.dataset.field] = t.value; },
+  hwo(t){ const w = editingWorkout(); if (w){ w[t.dataset.field] = t.value; save(); } },
+  hex(t){ const ex = findHEx(t.dataset); if (ex){ ex[t.dataset.field] = t.value; save(); } },
+  hset(t){ const s = findHSet(t.dataset); if (s){ s[t.dataset.field] = toNum(t.value); save(); } },
+  exfilter(t){ ui.exerciseFilter = t.value; ui.focus = 'ex-search'; render(); }
+};
+document.addEventListener('input', e => {
   const t = e.target;
-  if (t.dataset && t.dataset.bind === 'hexsel'){
-    const ex = findHEx(t.dataset); if (ex){ ex.unit = t.value; save(); }
-    return;
-  }
-  if (t.id === 'hstart' || t.id === 'hfinish'){
-    const w = editingWorkout(); if (!w) return;
-    const ts = new Date(t.value).getTime();
-    if (isNaN(ts)){ toast('Invalid date — change discarded'); t.value = toLocalInput(t.id === 'hstart' ? w.startedAt : w.finishedAt); return; }
-    if (t.id === 'hstart') w.startedAt = ts; else w.finishedAt = ts;
-    save(); render();
-    toast(t.id === 'hstart' ? 'Start time updated' : 'End time updated');
-    return;
-  }
-  if (t.id === 'import-file'){ if (t.files && t.files[0]) importData(t.files[0]); t.value=''; return; }
-  if (t.id === 'import-routines-file'){ if (t.files && t.files[0]) importRoutines(t.files[0]); t.value=''; return; }
-  if (t.id === 'import-history-file'){ if (t.files && t.files[0]) importHistory(t.files[0]); t.value=''; return; }
-  if (t.id === 'rest-default'){
-    const v = Math.max(15, Math.min(600, Number(t.value) || 90));
+  const fn = t.dataset && binders[t.dataset.bind];
+  if (fn) fn(t);
+});
+
+/* Controls that commit on change rather than per keystroke. Keyed by data-change. */
+const changeHandlers = {
+  hexsel(t){ const ex = findHEx(t.dataset); if (ex){ ex.unit = t.value; save(); } },
+  theme(t){ setTheme(t.value); },
+  unit(t){ setUnit(t.value); },
+  trend(t){ ui.trendExId = t.value; render(); },
+  setting(t){
+    const key = t.dataset.field;
+    state.settings[key] = t.checked;
+    save();
+    toast((key === 'autoRest' ? 'Auto-rest ' : 'Timer sound ') + (t.checked ? 'on' : 'off'));
+  },
+  'default-rest'(t){
+    const v = clamp(Math.round(toNum(t.value) || defaultSettings().defaultRest), REST_MIN, REST_MAX);
     state.settings.defaultRest = v; t.value = v; save();
     if (!state.activeWorkout) loadTimer(v);
     toast('Default rest: ' + fmtClock(v));
-    return;
-  }
-  const radio = t.dataset && t.dataset.actionRadio;
-  if (radio === 'theme') setTheme(t.value);
-  if (radio === 'unit') setUnit(t.value);
-  const sw = t.dataset && t.dataset.actionSwitch;
-  if (sw){ state.settings[sw] = t.checked; save(); toast(sw === 'autoRest' ? 'Auto-rest ' + (t.checked ? 'on' : 'off') : 'Timer sound ' + (t.checked ? 'on' : 'off')); }
-  if (t.dataset && t.dataset.actionSelect === 'trend'){ ui.trendExId = t.value; render(); }
+  },
+  'workout-time'(t){
+    const w = editingWorkout(); if (!w) return;
+    const field = t.dataset.field;                 /* startedAt | finishedAt */
+    const ts = new Date(t.value).getTime();
+    if (isNaN(ts)){ toast('Invalid date — change discarded'); t.value = toLocalInput(w[field]); return; }
+    w[field] = ts;
+    sortWorkouts();                                /* a new start time can reorder history */
+    save(); render();
+    toast(field === 'startedAt' ? 'Start time updated' : 'End time updated');
+  },
+  'import-all'(t){ withPickedFile(t, importData); },
+  'import-routines'(t){ withPickedFile(t, importRoutines); },
+  'import-history'(t){ withPickedFile(t, importHistory); }
+};
+/* file inputs are reset so re-picking the same file fires change again */
+function withPickedFile(input, fn){
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (file) fn(file);
+}
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (!t.dataset) return;
+  const fn = changeHandlers[t.dataset.change] || (t.dataset.bind === 'hexsel' ? changeHandlers.hexsel : null);
+  if (fn) fn(t);
 });
 document.addEventListener('submit', e => {
   const form = e.target;
@@ -2707,17 +2941,6 @@ document.addEventListener('submit', e => {
   else if (kind === 'ex-save'){ saveExerciseDraft(); }
 });
 
-function filterExercises(q){
-  q = q.trim().toLowerCase();
-  let visible = 0;
-  $$('#ex-list .ex-row').forEach(row => {
-    const hit = !q || row.dataset.name.includes(q) || row.dataset.cat.includes(q);
-    row.style.display = hit ? '' : 'none';
-    if (hit) visible++;
-  });
-  const empty = $('#ex-empty-filter');
-  if (empty) empty.hidden = visible !== 0;
-}
 
 /* ============================================================
    KEYBOARD SHORTCUTS
@@ -2738,15 +2961,12 @@ document.addEventListener('keydown', e => {
 
   if (e.key === '?'){ e.preventDefault(); $('#help-dlg').showModal(); return; }
   const k = e.key.toLowerCase();
+  if (NAV_KEYS[k]){ navigate(NAV_KEYS[k]); return; }
   switch(k){
-    case 't': ui.view = 'today'; render(); break;
-    case 'r': ui.view = 'routines'; render(); break;
-    case 'h': ui.view = 'history'; render(); break;
-    case 'e': ui.view = 'exercises'; render(); break;
     case '/':
       e.preventDefault();
-      if (ui.view !== 'exercises'){ ui.view = 'exercises'; render(); }
-      ui.focus = 'ex-search'; applyFocus();
+      ui.focus = 'ex-search';
+      navigate('exercises');
       break;
     case 's':
       if (ui.view === 'routines' && ui.routineDraft){ saveRoutineDraft(); }
@@ -2771,14 +2991,24 @@ document.addEventListener('keydown', e => {
 /* ============================================================
    INIT
    ============================================================ */
-applyTheme();
-loadTimer(state.settings.defaultRest);
-if (state.activeWorkout) restoreTimer();
-render();
-setInterval(tickTimer, 250);
-if (state.activeWorkout){
-  announce('Active workout restored: ' + state.activeWorkout.routineName);
+function init(){
+  applyTheme();
+  /* restoreTimer() reads activeWorkout.timer, and loadTimer() overwrites it —
+     so a running rest timer must be restored instead of, not after, a reset. */
+  if (state.activeWorkout) restoreTimer();
+  else loadTimer(state.settings.defaultRest);
+
+  $('#app-version').textContent = 'Liftlog v' + APP_VERSION;
+  $('#help-shortcuts').innerHTML = shortcutTable();
+
+  save();            /* persist the seed so a first visit survives a reload */
+  render();
+  setInterval(tickTimer, 250);
+
+  if (state.activeWorkout) announce('Active workout restored: ' + state.activeWorkout.routineName);
+  if (loadWarning) toast(loadWarning);
 }
+init();
 })();
 </script>
 </body>
