@@ -424,6 +424,25 @@ kbd{
 .status-chip{ font-size:var(--fs-xs); font-weight:650; padding:1px 8px; border-radius:99px; }
 .status-chip.ok{ background:var(--success-soft); color:var(--success); }
 .status-chip.skip{ background:var(--warning-soft); color:var(--warning); }
+.status-chip.current{ background:var(--accent-soft); color:var(--accent); }
+
+/* session overview drawer */
+.progress-foot{ display:flex; align-items:baseline; justify-content:space-between; gap:var(--sp-3); margin-top:var(--sp-1); }
+.progress-foot .progress-label{ margin-top:0; }
+.overview-toggle .chev{ transition:transform .15s ease; }
+.overview-toggle[aria-expanded="true"] .chev{ transform:rotate(90deg); }
+.done-ex-row.is-current-row{ cursor:default; }
+.done-ex-row.is-current-row:hover{ background:none; }
+.overview-row{
+  display:grid; grid-template-columns:24px 1fr auto; gap:var(--sp-2); align-items:center;
+  padding:var(--sp-3) var(--sp-2); border-bottom:1px solid var(--border);
+}
+.overview-row .item-idx{ padding-bottom:0; }
+@media (max-width:480px){
+  .overview-row{ grid-template-columns:1fr; gap:6px; }
+  .overview-row .item-idx{ display:none; }
+  .overview-row .item-actions{ justify-content:flex-end; }
+}
 
 /* ============================================================
    REST TIMER
@@ -1078,6 +1097,7 @@ function freshUI(){
     selectedRoutineId:null,
     expandedWorkouts:new Set(),
     expandedDone:new Set(),     /* keyed by exercise index within the active workout */
+    overviewOpen:false,         /* whether the session-overview drawer is expanded */
     routineDraft:null,          /* object while editing a routine */
     routineError:'',
     exerciseDraft:null,         /* object while editing one exercise row */
@@ -1419,6 +1439,7 @@ function beginWorkout(workout){
   ui.view = 'today';
   ui.selectedRoutineId = null;
   ui.expandedDone.clear();   /* keys are indexes into the previous workout */
+  ui.overviewOpen = false;
   ui.focus = 'workout-title';
   render();
 }
@@ -1538,6 +1559,28 @@ function reopenExercise(idx){
   ui.expandedDone.delete(String(idx));
   save();
   ui.focus = 'ex-panel-top';
+  render();
+}
+/* Swap two adjacent upcoming exercises (modeled on moveRoutineItem, but
+   persisted — this mutates the live active workout, not a draft — and
+   bounds-checked to the upcoming sub-range so a done or current exercise can
+   never move: that's what keeps every done/current index, and ui.expandedDone
+   which is keyed by index, stable while reordering. */
+function moveOverviewExercise(idx, dir){
+  const w = state.activeWorkout; if (!w) return;
+  const lo = w.currentExerciseIndex + 1, hi = w.exercises.length - 1;
+  const j = idx + dir;
+  if (idx < lo || idx > hi || j < lo || j > hi) return;
+  const tmp = w.exercises[idx]; w.exercises[idx] = w.exercises[j]; w.exercises[j] = tmp;
+  save();
+  /* Focus follows the moved row at its new position j. If that lands it on a
+     bound (its own button is now disabled), focus the other control instead —
+     the row always has at least one enabled button since lo===hi (a single
+     upcoming exercise) would have failed the bounds check above already. */
+  const sameDirStillEnabled = dir < 0 ? j > lo : j < hi;
+  const primary = dir < 0 ? 'ov-up-' : 'ov-down-';
+  const fallback = dir < 0 ? 'ov-down-' : 'ov-up-';
+  ui.focus = (sameDirStillEnabled ? primary : fallback) + j;
   render();
 }
 function finishWorkout(){
@@ -2065,7 +2108,13 @@ function htmlActiveWorkout(w){
       '</div>' +
       '<div class="progress-line">' +
         '<div class="progress-track"><div class="progress-fill" style="width:' + pct + '%"></div></div>' +
-        '<p class="progress-label">' + (w.exercises.length ? 'Exercise ' + Math.min(w.currentExerciseIndex+1, w.exercises.length) + ' of ' + w.exercises.length : 'No exercises yet') + ' · ' + pct + '% of sets done</p>' +
+        '<div class="progress-foot">' +
+          '<p class="progress-label">' + (w.exercises.length ? 'Exercise ' + Math.min(w.currentExerciseIndex+1, w.exercises.length) + ' of ' + w.exercises.length : 'No exercises yet') + ' · ' + pct + '% of sets done</p>' +
+          (w.exercises.length > 1
+            ? '<button type="button" id="overview-toggle-btn" class="btn btn-sm overview-toggle" data-action="toggle-overview" ' +
+              'aria-expanded="' + ui.overviewOpen + '" aria-controls="workout-overview"><span>Overview</span>' + IC.chev + '</button>'
+            : '') +
+        '</div>' +
       '</div>' +
     '</div>';
 
@@ -2105,7 +2154,7 @@ function htmlActiveWorkout(w){
     '</div>';
   }
 
-  html += htmlDoneExercises(w);
+  html += ui.overviewOpen ? htmlWorkoutOverview(w) : htmlDoneExercises(w);
   return html;
 }
 
@@ -2190,6 +2239,31 @@ function htmlCurrentExercise(w, ex){
   '</div>';
 }
 
+/* A completed/skipped exercise row, expandable via ui.expandedDone (keyed by
+   array index — safe because upcoming-only reordering never moves a done
+   exercise's index). Shared by the plain "earlier in this workout" list and
+   the session-overview drawer, which only differ in what the reopen button
+   does once the drawer needs to close itself too. */
+function htmlDoneRow(ex, i, reopenAction){
+  const open = ui.expandedDone.has(String(i));
+  const completed = ex.sets.filter(s => s.completed);
+  const status = ex.skipped ? '<span class="status-chip skip">Skipped</span>'
+    : '<span class="status-chip ok">' + (allSetsDone(ex) ? icon('check','ic-xs') + ' ' : '') +
+      completed.length + '/' + ex.sets.length + '</span>';
+  let html = '<button type="button" class="done-ex-row" data-action="toggle-done-ex" data-idx="' + i + '" aria-expanded="' + open + '">' +
+    status + '<strong>' + esc(ex.name) + '</strong>' +
+    '<span class="muted small">' + completed.map(setSummary).join(', ') + '</span>' +
+    IC.chev + '</button>';
+  if (open){
+    html += '<div class="done-ex-detail">' +
+      (ex.sets.map((s, j) => '<div class="dset"><span class="muted">Set ' + (j+1) + '</span><span>' + setSummary(s) +
+        (s.rpe != null ? ' <span class="muted">@ RPE ' + s.rpe + '</span>' : '') +
+        (s.completed ? '' : ' <span class="status-chip skip">open</span>') + '</span></div>').join('')) +
+      '<div class="mt-2"><button type="button" class="btn btn-sm" data-action="' + reopenAction + '" data-idx="' + i + '">Reopen exercise</button></div>' +
+    '</div>';
+  }
+  return html;
+}
 function htmlDoneExercises(w){
   const doneIdxs = [];
   w.exercises.forEach((ex, i) => {
@@ -2197,26 +2271,45 @@ function htmlDoneExercises(w){
   });
   if (!doneIdxs.length) return '';
   let html = '<section class="panel mt-4" aria-label="Completed exercises"><div class="pad"><h2 class="panel-title">Earlier in this workout</h2></div>';
-  doneIdxs.forEach(i => {
-    const ex = w.exercises[i];
-    const open = ui.expandedDone.has(String(i));
-    const completed = ex.sets.filter(s => s.completed);
-    const status = ex.skipped ? '<span class="status-chip skip">Skipped</span>'
-      : '<span class="status-chip ok">' + (allSetsDone(ex) ? icon('check','ic-xs') + ' ' : '') +
-        completed.length + '/' + ex.sets.length + '</span>';
-    html += '<button type="button" class="done-ex-row" data-action="toggle-done-ex" data-idx="' + i + '" aria-expanded="' + open + '">' +
-      status + '<strong>' + esc(ex.name) + '</strong>' +
-      '<span class="muted small">' + completed.map(setSummary).join(', ') + '</span>' +
-      IC.chev + '</button>';
-    if (open){
-      html += '<div class="done-ex-detail">' +
-        (ex.sets.map((s, j) => '<div class="dset"><span class="muted">Set ' + (j+1) + '</span><span>' + setSummary(s) +
-          (s.rpe != null ? ' <span class="muted">@ RPE ' + s.rpe + '</span>' : '') +
-          (s.completed ? '' : ' <span class="status-chip skip">open</span>') + '</span></div>').join('')) +
-        '<div class="mt-2"><button type="button" class="btn btn-sm" data-action="reopen-exercise" data-idx="' + i + '">Reopen exercise</button></div>' +
+  doneIdxs.forEach(i => { html += htmlDoneRow(w.exercises[i], i, 'reopen-exercise'); });
+  html += '</section>';
+  return html;
+}
+
+/* The session-overview drawer: every exercise in the workout, done first,
+   then the one in progress, then what's left — with reorder/jump controls
+   on the upcoming ones. Reordering is scoped to indexes strictly after
+   currentExerciseIndex so done/current indexes (and ui.expandedDone, which
+   is keyed by index) never shift underneath the user. */
+function htmlWorkoutOverview(w){
+  const lo = w.currentExerciseIndex + 1, hi = w.exercises.length - 1;
+  let html = '<section class="panel mt-4" aria-label="Session overview" id="workout-overview"><div class="pad">' +
+    '<h2 class="panel-title" id="overview-title" tabindex="-1">All exercises</h2></div>';
+
+  w.exercises.forEach((ex, i) => {
+    if (i < w.currentExerciseIndex || (allSetsDone(ex) && i !== w.currentExerciseIndex) || ex.skipped){
+      html += htmlDoneRow(ex, i, 'overview-jump');
+    } else if (i === w.currentExerciseIndex){
+      const completed = ex.sets.filter(s => s.completed);
+      html += '<div class="done-ex-row is-current-row" aria-current="step">' +
+        '<span class="status-chip current">Now</span><strong>' + esc(ex.name) + '</strong>' +
+        '<span class="muted small">' + completed.length + '/' + ex.sets.length + ' sets</span>' +
+      '</div>';
+    } else {
+      html += '<div class="overview-row" data-idx="' + i + '">' +
+        '<span class="item-idx">' + (i+1) + '</span>' +
+        '<span class="item-name">' + esc(ex.name) + ' <span class="muted xs">· ' + plural(ex.sets.length, 'set') + ' planned</span></span>' +
+        '<span class="item-actions">' +
+          '<button type="button" class="icon-btn" id="ov-up-' + i + '" data-action="overview-up" data-idx="' + i + '" ' +
+            'aria-label="Move ' + esc(ex.name) + ' earlier"' + (i === lo ? ' disabled' : '') + '>' + IC.up + '</button>' +
+          '<button type="button" class="icon-btn" id="ov-down-' + i + '" data-action="overview-down" data-idx="' + i + '" ' +
+            'aria-label="Move ' + esc(ex.name) + ' later"' + (i === hi ? ' disabled' : '') + '>' + IC.down + '</button>' +
+          '<button type="button" class="btn btn-sm" data-action="overview-jump" data-idx="' + i + '">Start now</button>' +
+        '</span>' +
       '</div>';
     }
   });
+
   html += '</section>';
   return html;
 }
@@ -2769,6 +2862,16 @@ const actions = {
     ui.expandedDone.has(k) ? ui.expandedDone.delete(k) : ui.expandedDone.add(k);
     render();
   },
+  'toggle-overview'(){
+    ui.overviewOpen = !ui.overviewOpen;
+    ui.focus = ui.overviewOpen ? 'overview-title' : 'overview-toggle-btn';
+    render();
+  },
+  'overview-up'(d){ moveOverviewExercise(Number(d.idx), -1); },
+  'overview-down'(d){ moveOverviewExercise(Number(d.idx), 1); },
+  /* same underlying jump as "Reopen exercise" — the drawer just also closes,
+     since the point of jumping is to get back to the main logging flow */
+  'overview-jump'(d){ ui.overviewOpen = false; reopenExercise(Number(d.idx)); },
   'finish-workout'(){ finishWorkout(); },
   'discard-workout'(){ discardWorkout(); },
 
