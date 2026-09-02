@@ -1554,16 +1554,23 @@ function beep(){
    A phone propped against a rack turns its screen off mid-set. The lock is
    held for exactly as long as a workout is active, and the browser drops it
    whenever the page is hidden, so it is re-requested on the way back. */
-let wakeLock = null, wakeLockPending = false;
+let wakeLock = null, wakeLockPending = false, wakeLockDenied = false;
 function acquireWakeLock(){
-  if (wakeLock || wakeLockPending || !('wakeLock' in navigator)) return;
+  if (wakeLock || wakeLockPending || wakeLockDenied || !('wakeLock' in navigator)) return;
   if (document.visibilityState !== 'visible') return;
   wakeLockPending = true;
   navigator.wakeLock.request('screen').then(lock => {
     wakeLockPending = false;
     wakeLock = lock;
     lock.addEventListener('release', () => { wakeLock = null; });
-  }).catch(() => { wakeLockPending = false; wakeLock = null; });
+  }).catch(() => {
+    wakeLockPending = false; wakeLock = null;
+    /* syncWakeLock() runs on every render, so a platform that will never grant
+       this (no screen to keep awake, or the user said no) would otherwise get
+       one rejected request per set logged. Ask again at most once per return
+       to the foreground, which is the one reason a refusal is temporary. */
+    wakeLockDenied = true;
+  });
 }
 function releaseWakeLock(){
   if (!wakeLock) return;
@@ -3731,6 +3738,7 @@ function init(){
      ended while backgrounded needs settling on the way back */
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
+    wakeLockDenied = false;
     syncWakeLock();
     if (timer.running && (timer.endsAt - Date.now()) / 1000 <= 0) completeRest();
     else drawTimer();
