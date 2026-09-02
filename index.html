@@ -622,6 +622,7 @@ dialog::backdrop{ background:rgb(15 17 20 / .5); }
 
 .app-footer{ border-top:1px solid var(--border); padding:var(--sp-5) 0 var(--sp-6); color:var(--muted); font-size:var(--fs-xs); }
 .app-footer .wrap{ display:flex; justify-content:space-between; gap:var(--sp-3); flex-wrap:wrap; align-items:center; }
+.build-ref{ font-size:11px; opacity:.75; letter-spacing:-.01em; }
 .footer-btn{ background:none; border:0; color:var(--muted); font-size:var(--fs-xs); cursor:pointer; text-decoration:underline; padding:2px; }
 .footer-btn:hover{ color:var(--text); }
 
@@ -676,7 +677,7 @@ dialog::backdrop{ background:rgb(15 17 20 / .5); }
 
 <footer class="app-footer">
   <div class="wrap">
-    <span><span id="app-version">Liftlog</span> · your data never leaves this browser</span>
+    <span>Liftlog · <span id="app-build" class="mono build-ref">unstamped</span> · your data never leaves this browser</span>
     <span>Press <kbd>?</kbd> for shortcuts · <button type="button" class="footer-btn" data-action="help-open">keyboard help</button></span>
   </div>
 </footer>
@@ -878,7 +879,12 @@ const SHORTCUTS = [
 /* ============================================================
    STORAGE
    ============================================================ */
-const APP_VERSION = '1.0.0';       /* shown in the footer */
+/* Which source this file was built from, shown in the footer. There is no
+   build step (see README), so it is stamped in by tools/stamp-build.sh rather
+   than computed: a file cannot contain the hash of the commit it lands in, so
+   the stamp names the commit the working tree was built from. Left as
+   'unstamped' when the script has never run. */
+const BUILD = { branch:'claude/timer-ui-mobile-optimize-vdzpau', commit:'34ad07d', date:'2026-09-02' };
 const LS_KEY = 'liftlog.v1';
 const LS_RESCUE_KEY = 'liftlog.v1.unreadable';  /* holds data we could not load, so nothing is lost silently */
 const SCHEMA_VERSION = 3;   /* v3: sets carry durationSeconds (time no longer overloads reps)
@@ -3339,6 +3345,19 @@ document.addEventListener('keydown', e => {
 /* ============================================================
    INIT
    ============================================================ */
+/* One-shot: the build stamp never changes while the page is open. Written with
+   textContent so a branch name never has to be trusted as markup. */
+function paintBuildRef(){
+  const el = $('#app-build');
+  if (!el) return;
+  const stamped = BUILD.commit && BUILD.commit !== 'unstamped';
+  el.textContent = stamped ? BUILD.branch + '@' + BUILD.commit : 'unstamped build';
+  el.setAttribute('title', stamped
+    ? 'Built from commit ' + BUILD.commit + ' on branch ' + BUILD.branch +
+      (BUILD.date ? ', ' + BUILD.date : '')
+    : 'This copy was not stamped with a branch or commit.');
+}
+
 function init(){
   applyTheme();
   /* restoreTimer() reads activeWorkout.timer, and loadTimer() overwrites it —
@@ -3346,7 +3365,7 @@ function init(){
   if (state.activeWorkout) restoreTimer();
   else loadTimer(state.settings.defaultRest);
 
-  $('#app-version').textContent = 'Liftlog v' + APP_VERSION;
+  paintBuildRef();
   $('#help-shortcuts').innerHTML = shortcutTable();
 
   save();            /* persist the seed so a first visit survives a reload */

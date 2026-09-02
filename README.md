@@ -14,6 +14,23 @@ dependencies**. That is a deliberate constraint: it has to work from a
 — see [ENHANCEMENTS.md](ENHANCEMENTS.md) for how to relax it if the file ever
 outgrows a single document.
 
+### Which build am I running?
+
+The footer shows a build reference — `branch@commit` — instead of a version
+number, so a copy on a phone can be traced back to source. There is no build
+step to compute it, so it is stamped in by hand:
+
+```sh
+tools/stamp-build.sh            # write the current branch/commit into index.html
+tools/stamp-build.sh --reset    # restore the 'unstamped' placeholders
+```
+
+Run it on the checked-out tree before copying `index.html` to a host and the
+stamp is exact for what you ship. If you deploy by committing instead, the
+stamp names the commit you ran it on — the parent of the commit it lands in —
+because a file cannot contain the hash of the commit it becomes part of. An
+unstamped copy says so rather than claiming a version it cannot verify.
+
 By default the app also makes **no network calls at all** — the only exception
 is the optional remote storage feature below, and even then every request goes
 directly from your browser to storage you configure, never through any server.
