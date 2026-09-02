@@ -1,17 +1,22 @@
 # Liftlog
 
 A quiet, local-first gym workout tracker. Log sets, time rests, review progress.
-Everything lives in `localStorage` — nothing is uploaded anywhere.
+Everything lives in `localStorage` by default — nothing is uploaded anywhere
+unless you deliberately configure remote storage yourself (see below).
 
 ## Running it
 
 Open `index.html` in a browser. That is the whole install step.
 
-The app is a single self-contained file with **no build step, no dependencies and
-no network calls**. That is a deliberate constraint: it has to work from a
+The app is a single self-contained file with **no build step and no
+dependencies**. That is a deliberate constraint: it has to work from a
 `file://` URL, from a USB stick, or from any static host. Please keep it that way
 — see [ENHANCEMENTS.md](ENHANCEMENTS.md) for how to relax it if the file ever
 outgrows a single document.
+
+By default the app also makes **no network calls at all** — the only exception
+is the optional remote storage feature below, and even then every request goes
+directly from your browser to storage you configure, never through any server.
 
 ## Architecture
 
@@ -26,6 +31,7 @@ holding an IIFE. Within each part, sections are marked by banner comments
 | `UTILITIES` | Formatting, escaping, numeric coercion, unit conversion, icons |
 | `DOMAIN CONSTANTS` | The closed vocabularies: units, themes, bounds, shortcuts |
 | `STORAGE` | `localStorage` read/write, schema migrations, normalization |
+| `REMOTE STORAGE` | Optional S3-compatible backup/restore, config, request signing |
 | `SEED / SAMPLE DATA` | The starting exercise library and program routines |
 | `STATE` | `state` (persisted) and `ui` (transient), navigation |
 | `FEEDBACK` | Toasts, screen-reader announcements, the confirm dialog |
@@ -141,6 +147,99 @@ Three separate flows, all plain JSON (`EXPORT_SCHEMA = '1.0.0'`):
 Legacy files without `setType` fall back to the exercise/set unit, and
 `includeInVolume` is accepted as an alias of `countForVolume`.
 
+## Remote storage (optional)
+
+Local storage is still the only place data lives by default. Settings →
+**Remote storage** lets you additionally back up to, and restore from, a
+bucket you configure yourself. It is off until you fill in the form (or load a
+config file); nothing changes about local-first behaviour if you never touch
+it.
+
+### Why S3, not WebDAV
+
+The app has no server, so any remote protocol has to be one the *browser* can
+call directly — there is nothing to proxy the request through. That rules out
+protocols where the browser's own CORS enforcement is the practical blocker:
+
+- **WebDAV** servers (Apache `mod_dav`, Nextcloud, ownCloud, …) mostly assume a
+  same-origin client (a desktop sync client, a mounted drive) and inconsistently
+  send `Access-Control-Allow-*` headers on `PUT`/`PROPFIND`. A browser-only
+  client would work against some installs and silently fail CORS preflight
+  against others, with little the app can do about it.
+- **S3's REST API**, by contrast, treats direct browser access as a first-class
+  case — bucket CORS configuration is a standard, documented feature that
+  exists specifically so browsers can upload/download directly. It's also a
+  de facto standard: AWS S3, Cloudflare R2, Backblaze B2, MinIO, Wasabi and
+  DigitalOcean Spaces (among others) all speak it, so "S3-compatible" covers
+  both managed and self-hosted options rather than locking in one vendor.
+- A vendor API with OAuth (Dropbox, Google Drive) would also work CORS-wise,
+  but needs app registration, a redirect flow and per-provider code — a much
+  larger surface for a single-file, dependency-free app, and it ties the
+  feature to one vendor.
+
+So the app implements a minimal **AWS Signature V4** signer for plain
+`PUT`/`GET` object requests, using only the browser's native Web Crypto API
+(`crypto.subtle` — SHA-256 and HMAC). No SDK, no dependency.
+
+### Setting it up
+
+In Settings → Remote storage, fill in:
+
+| Field | Meaning |
+| --- | --- |
+| Endpoint URL | Your provider's S3 endpoint, e.g. `https://s3.us-east-1.amazonaws.com`, `https://<account id>.r2.cloudflarestorage.com`, or your own MinIO URL. Must be `https://` — credentials are never sent over plain HTTP. |
+| Region | e.g. `us-east-1`. Cloudflare R2 uses `auto`. |
+| Bucket | The bucket to back up into. |
+| Object key / path | Where the backup is stored inside the bucket. Defaults to `liftlog-backup.json`. |
+| Access key ID / Secret access key | Credentials for that bucket. Scope them to just this bucket, and to just `GetObject`/`PutObject`, if your provider supports it. |
+| Path-style addressing | Turn on for MinIO and most self-hosted endpoints; leave off for AWS S3, R2, B2 and Spaces. |
+
+Instead of the form, you can load a JSON config file with the same fields
+(`endpoint`, `region`, `bucket`, `accessKeyId`, `secretAccessKey`, `objectKey`,
+`pathStyle`) via **Load config file** — handy if you keep the setup elsewhere
+and don't want to retype it. Treat that file like a credential: it contains
+your secret key in plain text.
+
+Once configured, **Backup now** and **Restore from remote** are manual,
+on-demand actions — there is no background sync, and restore always confirms
+before it overwrites what's on this device (the same confirmation as a local
+file import).
+
+### Bucket CORS policy
+
+The bucket needs to allow this app's origin to call it directly. Example (AWS
+S3 CORS configuration):
+
+```json
+[
+  {
+    "AllowedOrigins": ["https://your-liftlog-host.example"],
+    "AllowedMethods": ["GET", "PUT"],
+    "AllowedHeaders": ["*"],
+    "MaxAgeSeconds": 3000
+  }
+]
+```
+
+If the app is opened from `file://` or a variety of hosts, use `"*"` for
+`AllowedOrigins` instead — but note that widens who can call the bucket
+(assuming they also have valid credentials), so prefer naming an origin when
+you can.
+
+### Limits, honestly
+
+- **Credentials sit in `localStorage` in plain text.** There is no server-side
+  vault to put them in; that's the trade-off of a server-less app. Anyone with
+  access to this browser profile can read them. Use a bucket/credentials you
+  are comfortable with at that exposure level, and scope the access key as
+  narrowly as your provider allows.
+- **Requires a secure context.** `crypto.subtle` (used for request signing) is
+  only available under `https://` or `localhost`. Remote storage disables
+  itself with an explanatory message otherwise (e.g. plain `file://` in some
+  browsers).
+- **Manual, not sync.** There's no conflict resolution because there's no
+  automatic sync — each Backup/Restore fully overwrites one side, on request.
+
 ## Conventions
 
 - **Styling goes in the stylesheet.** Templates use classes (including the small
@@ -169,4 +268,6 @@ theme is one `:root[data-theme="…"]` block plus an entry in `THEMES`.
 There is no automated suite yet — see [ENHANCEMENTS.md](ENHANCEMENTS.md). When
 changing behaviour, exercise at least: start a routine, log and un-log a set,
 the rest timer across a reload, finish a workout, edit a logged session, a kg/lb
-switch, and an export/import round trip.
+switch, an export/import round trip, and (if touching remote storage) saving a
+config, a failed connection test, and a backup/restore round trip against a
+real S3-compatible bucket.
