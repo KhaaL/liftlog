@@ -1106,7 +1106,10 @@ function freshUI(){
     exerciseFilter:'',          /* Exercises search box, kept so re-renders don't drop it */
     trendExId:null,
     editWorkoutId:null,         /* history session currently being edited */
-    focus:null                  /* element id to focus after render */
+    focus:null,                 /* element id to focus after render */
+    remoteFormOpen:false,       /* remote-storage config form expanded in Settings */
+    remoteError:'',
+    remoteBusy:false            /* a remote backup/restore/test request is in flight */
   };
 }
 const ui = freshUI();
@@ -1782,20 +1785,197 @@ function exportData(){
   toast('Data exported');
 }
 function importData(file){
+  readJSONFile(file, applyFullBackup);
+}
+/* Shared by file import and remote restore: validate a full-backup object,
+   confirm, then replace the in-memory state with it. */
+function applyFullBackup(obj){
+  if (!obj || !(obj.version >= 1 && obj.version <= SCHEMA_VERSION) || !Array.isArray(obj.exercises)){
+    toast('Unrecognized data — expected a Liftlog export'); return;
+  }
+  confirmDlg('Import data?','This replaces everything currently stored (exercises, routines, history, settings) with the imported file.','Import & replace',true)
+    .then(ok => {
+      if (!ok) return;
+      if (obj.version === 1) migrateToV2(obj);
+      if (obj.version === 2) migrateToV3(obj);   /* older backups: seconds move out of reps */
+      state = normalizeState(obj);
+      applyTheme(); save(); loadTimer(state.settings.defaultRest);
+      resetUI();
+      render(); toast('Import complete');
+    });
+}
+
+/* ============================================================
+   REMOTE STORAGE (optional, user-configured, S3-compatible)
+   Off by default: nothing leaves this browser unless the user fills in the
+   form below with their own bucket and credentials. Every request goes
+   straight from this browser to the storage provider — this app has no
+   server of its own, so there is nothing to relay through. Credentials are
+   kept in this browser's localStorage in plain text (there is no other
+   place to put them in a server-less, dependency-free app); anyone with
+   access to this browser profile can read them. See README for why the
+   S3 API was chosen over WebDAV, and the bucket CORS policy it needs.
+   ============================================================ */
+const LS_REMOTE_KEY = 'liftlog.v1.remote';
+const REMOTE_OBJECT_KEY_DEFAULT = 'liftlog-backup.json';
+
+function loadRemoteConfig(){
+  try{
+    const raw = localStorage.getItem(LS_REMOTE_KEY);
+    const cfg = raw ? JSON.parse(raw) : null;
+    return (cfg && cfg.endpoint && cfg.bucket && cfg.accessKeyId && cfg.secretAccessKey) ? cfg : null;
+  }catch(e){ return null; }
+}
+function saveRemoteConfig(cfg){
+  try{ localStorage.setItem(LS_REMOTE_KEY, JSON.stringify(cfg)); }
+  catch(e){ toast('Could not save remote configuration — storage unavailable'); }
+}
+function clearRemoteConfig(){
+  try{ localStorage.removeItem(LS_REMOTE_KEY); }catch(e){ /* nothing more we can do */ }
+}
+function remoteCryptoAvailable(){
+  return !!(window.crypto && window.crypto.subtle);
+}
+
+/* ---- minimal AWS SigV4 request signer, zero dependencies (Web Crypto only) ----
+   Enough to PUT/GET a single object — the whole of what a manual backup needs. */
+function toHex(buf){
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+async function sha256Hex(text){
+  return toHex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
+}
+async function hmacRaw(keyBytes, msg){
+  const key = await crypto.subtle.importKey('raw', keyBytes, { name:'HMAC', hash:'SHA-256' }, false, ['sign']);
+  return new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(msg)));
+}
+async function signingKey(secret, dateStamp8, region, service){
+  let key = new TextEncoder().encode('AWS4' + secret);
+  key = await hmacRaw(key, dateStamp8);
+  key = await hmacRaw(key, region);
+  key = await hmacRaw(key, service);
+  return hmacRaw(key, 'aws4_request');
+}
+function amzNow(){
+  const amz = new Date().toISOString().replace(/[:-]|\.\d{3}/g, ''); /* YYYYMMDDTHHMMSSZ */
+  return { amz, stamp:amz.slice(0,8) };
+}
+/* RFC 3986 path-segment encoding; S3 wants "/" left alone in the object key. */
+function uriEncode(s){
+  return encodeURIComponent(s).replace(/[!'()*]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+}
+function remoteUrl(cfg){
+  const ep = cfg.endpoint.replace(/\/+$/, '');
+  const key = (cfg.objectKey || REMOTE_OBJECT_KEY_DEFAULT).replace(/^\/+/, '').split('/').map(uriEncode).join('/');
+  if (cfg.pathStyle) return ep + '/' + cfg.bucket + '/' + key;
+  return ep.replace('://', '://' + cfg.bucket + '.') + '/' + key;
+}
+async function s3Request(cfg, method, bodyText){
+  const url = new URL(remoteUrl(cfg));
+  const payloadHash = await sha256Hex(bodyText || '');
+  const { amz, stamp } = amzNow();
+  /* signed only, never sent as-is: the browser sets the real Host header itself */
+  const headers = { host:url.host, 'x-amz-content-sha256':payloadHash, 'x-amz-date':amz };
+  if (method === 'PUT') headers['content-type'] = 'application/json';
+  const names = Object.keys(headers).sort();
+  const canonicalHeaders = names.map(h => h + ':' + headers[h] + '\n').join('');
+  const signedHeaders = names.join(';');
+  const canonicalRequest = [method, url.pathname, '', canonicalHeaders, signedHeaders, payloadHash].join('\n');
+  const scope = stamp + '/' + cfg.region + '/s3/aws4_request';
+  const stringToSign = ['AWS4-HMAC-SHA256', amz, scope, await sha256Hex(canonicalRequest)].join('\n');
+  const signature = toHex(await hmacRaw(await signingKey(cfg.secretAccessKey, stamp, cfg.region, 's3'), stringToSign));
+  const authorization = 'AWS4-HMAC-SHA256 Credential=' + cfg.accessKeyId + '/' + scope +
+    ', SignedHeaders=' + signedHeaders + ', Signature=' + signature;
+  return fetch(url.toString(), {
+    method,
+    headers:{ 'x-amz-content-sha256':payloadHash, 'x-amz-date':amz, 'content-type':headers['content-type'] || '', Authorization:authorization },
+    body: method === 'PUT' ? bodyText : undefined
+  });
+}
+function remoteBackupPayload(){
+  return JSON.stringify(Object.assign(
+    { schemaVersion:EXPORT_SCHEMA, source:'liftlog-web', exportedAt:new Date().toISOString() },
+    deepCopy(state)));
+}
+async function remoteRunAction(fn){
+  ui.remoteBusy = true; render();
+  try{ await fn(); }
+  catch(e){ toast(e && e.message ? e.message : 'Remote storage request failed'); }
+  finally{ ui.remoteBusy = false; render(); }
+}
+function remoteBackup(){
+  const cfg = loadRemoteConfig();
+  if (!cfg) return;
+  return remoteRunAction(async () => {
+    const res = await s3Request(cfg, 'PUT', remoteBackupPayload());
+    if (!res.ok) throw new Error('Backup failed: HTTP ' + res.status);
+    cfg.lastBackupAt = Date.now();
+    saveRemoteConfig(cfg);
+    toast('Backed up to remote storage');
+  });
+}
+function remoteRestore(){
+  const cfg = loadRemoteConfig();
+  if (!cfg) return;
+  return remoteRunAction(async () => {
+    const res = await s3Request(cfg, 'GET', '');
+    if (res.status === 404) throw new Error('No backup found at that location yet');
+    if (!res.ok) throw new Error('Restore failed: HTTP ' + res.status);
+    let obj;
+    try{ obj = JSON.parse(await res.text()); }
+    catch(e){ throw new Error('Remote file is not valid JSON'); }
+    applyFullBackup(obj);
+  });
+}
+function remoteTestConnection(){
+  const cfg = loadRemoteConfig();
+  if (!cfg) return;
+  return remoteRunAction(async () => {
+    const res = await s3Request(cfg, 'GET', '');
+    if (res.ok) toast('Connected — remote backup found');
+    else if (res.status === 404) toast('Connected — no backup there yet');
+    else throw new Error('Connection failed: HTTP ' + res.status);
+  });
+}
+function saveRemoteConfigForm(form){
+  const g = n => { const el = form.elements.namedItem(n); return el ? el.value.trim() : ''; };
+  const existing = loadRemoteConfig();
+  const endpoint = g('endpoint').replace(/\/+$/, '');
+  const region = g('region'), bucket = g('bucket'), accessKeyId = g('accessKeyId');
+  if (!/^https:\/\/.+/.test(endpoint)){
+    ui.remoteError = 'Endpoint must be a full https:// URL, e.g. https://s3.us-east-1.amazonaws.com'; render(); return;
+  }
+  if (!region || !bucket || !accessKeyId){
+    ui.remoteError = 'Region, bucket and access key ID are required.'; render(); return;
+  }
+  const secretAccessKey = g('secretAccessKey') || (existing ? existing.secretAccessKey : '');
+  if (!secretAccessKey){ ui.remoteError = 'Secret access key is required.'; render(); return; }
+  saveRemoteConfig({
+    endpoint, region, bucket, accessKeyId, secretAccessKey,
+    objectKey: g('objectKey') || REMOTE_OBJECT_KEY_DEFAULT,
+    pathStyle: !!form.elements.namedItem('pathStyle').checked,
+    lastBackupAt: existing ? existing.lastBackupAt : null
+  });
+  ui.remoteError = ''; ui.remoteFormOpen = false;
+  render(); toast('Remote storage configured');
+}
+function loadRemoteConfigFile(file){
   readJSONFile(file, obj => {
-    if (!obj || !(obj.version >= 1 && obj.version <= SCHEMA_VERSION) || !Array.isArray(obj.exercises)){
-      toast('Unrecognized file — expected a Liftlog export'); return;
+    if (!obj || typeof obj !== 'object' || !obj.endpoint || !obj.bucket || !obj.accessKeyId || !obj.secretAccessKey){
+      toast('That file is missing required remote storage fields'); return;
     }
-    confirmDlg('Import data?','This replaces everything currently stored (exercises, routines, history, settings) with the imported file.','Import & replace',true)
-      .then(ok => {
-        if (!ok) return;
-        if (obj.version === 1) migrateToV2(obj);
-        if (obj.version === 2) migrateToV3(obj);   /* older backups: seconds move out of reps */
-        state = normalizeState(obj);
-        applyTheme(); save(); loadTimer(state.settings.defaultRest);
-        resetUI();
-        render(); toast('Import complete');
-      });
+    saveRemoteConfig({
+      endpoint:String(obj.endpoint).replace(/\/+$/, ''),
+      region:String(obj.region || 'us-east-1'),
+      bucket:String(obj.bucket),
+      accessKeyId:String(obj.accessKeyId),
+      secretAccessKey:String(obj.secretAccessKey),
+      objectKey:String(obj.objectKey || REMOTE_OBJECT_KEY_DEFAULT),
+      pathStyle:!!obj.pathStyle,
+      lastBackupAt:null
+    });
+    ui.remoteFormOpen = false;
+    render(); toast('Remote configuration loaded from file');
   });
 }
 
@@ -2771,6 +2951,59 @@ function storageSize(){
     return (bytes < 1024) ? bytes + ' B' : Math.round(bytes/102.4)/10 + ' KB';
   }catch(e){ return '–'; }
 }
+/* Manual, user-initiated backup/restore against a bucket the user configures
+   themselves. Nothing here runs unless a config exists; see the comment on
+   the REMOTE STORAGE section above for what stays local vs. what is sent. */
+function remoteStorageHTML(){
+  const cfg = loadRemoteConfig();
+  const cryptoOk = remoteCryptoAvailable();
+  let html = '<div class="setting-block">' +
+    '<h3>Remote storage <span class="hint">(optional, S3-compatible)</span></h3>' +
+    '<p class="desc">Off by default — everything stays in this browser. Configure a bucket below to back up or ' +
+    'restore on demand; requests go straight from this device to your storage provider using your own credentials — ' +
+    'this app has no server to relay them through. Credentials are stored in this browser’s local storage in plain text.</p>';
+  if (!cryptoOk){
+    html += '<p class="error-text">Remote storage needs the Web Crypto API, only available in a secure context (https:// or localhost). It is unavailable here.</p></div>';
+    return html;
+  }
+  html += '<p class="desc">Status: ' + (cfg
+      ? 'Configured — <strong>' + esc(cfg.bucket) + '</strong>' + (cfg.lastBackupAt ? ' · last backup ' + esc(new Date(cfg.lastBackupAt).toLocaleString()) : ' · never backed up yet')
+      : 'Not configured') + '</p>';
+  if (cfg){
+    html += '<div class="form-actions">' +
+      '<button type="button" class="btn" data-action="remote-test"' + (ui.remoteBusy ? ' disabled' : '') + '>Test connection</button>' +
+      '<button type="button" class="btn btn-primary" data-action="remote-backup"' + (ui.remoteBusy ? ' disabled' : '') + '>' + IC.up + '<span>Backup now</span></button>' +
+      '<button type="button" class="btn" data-action="remote-restore"' + (ui.remoteBusy ? ' disabled' : '') + '>' + IC.down + '<span>Restore from remote</span></button>' +
+      '<button type="button" class="btn" data-action="remote-form-toggle">' + (ui.remoteFormOpen ? 'Hide configuration' : 'Edit configuration') + '</button>' +
+      '<button type="button" class="btn btn-danger" data-action="remote-forget">Forget configuration</button>' +
+    '</div>';
+  }
+  if (!cfg || ui.remoteFormOpen){
+    html += '<form data-form="remote-config" class="mt-3">' +
+      '<div class="form-row">' +
+        '<label class="field flex-2"><span class="cap">Endpoint URL</span><input type="url" name="endpoint" required placeholder="https://s3.us-east-1.amazonaws.com" value="' + esc(cfg ? cfg.endpoint : '') + '"></label>' +
+        '<label class="field"><span class="cap">Region</span><input type="text" name="region" required placeholder="us-east-1" value="' + esc(cfg ? cfg.region : '') + '"></label>' +
+        '<label class="field"><span class="cap">Bucket</span><input type="text" name="bucket" required value="' + esc(cfg ? cfg.bucket : '') + '"></label>' +
+      '</div>' +
+      '<div class="form-row mt-2">' +
+        '<label class="field flex-2"><span class="cap">Object key / path</span><input type="text" name="objectKey" placeholder="' + REMOTE_OBJECT_KEY_DEFAULT + '" value="' + esc(cfg ? cfg.objectKey : '') + '"></label>' +
+        '<label class="field"><span class="cap">Access key ID</span><input type="text" name="accessKeyId" required value="' + esc(cfg ? cfg.accessKeyId : '') + '"></label>' +
+        '<label class="field"><span class="cap">Secret access key</span><input type="password" name="secretAccessKey" placeholder="' + (cfg ? '•••••••• (leave blank to keep)' : '') + '"' + (!cfg ? ' required' : '') + '></label>' +
+      '</div>' +
+      '<div class="switch-row mt-2">' +
+        '<label for="sw-pathstyle"><strong>Path-style addressing</strong><br><span class="hint">Turn on for MinIO or other self-hosted endpoints; leave off for AWS S3, R2, B2, Spaces</span></label>' +
+        '<span class="switch"><input type="checkbox" id="sw-pathstyle" name="pathStyle"' + (cfg && cfg.pathStyle ? ' checked' : '') + '><span class="track" aria-hidden="true"></span></span>' +
+      '</div>' +
+      (ui.remoteError ? '<p class="error-text mt-2" role="alert">' + esc(ui.remoteError) + '</p>' : '') +
+      '<div class="form-actions mt-3">' +
+        '<button type="submit" class="btn btn-primary">Save configuration</button>' +
+        '<label class="file-btn"><span>' + IC.up + ' Load config file</span><input type="file" accept=".json,application/json" data-change="load-remote-config" aria-label="Load remote storage configuration from a JSON file"></label>' +
+      '</div>' +
+    '</form>';
+  }
+  html += '</div>';
+  return html;
+}
 function viewSettings(){
   const s = state.settings;
   const storage = storageSize();
@@ -2826,6 +3059,7 @@ function viewSettings(){
         '<label class="file-btn"><span>' + IC.up + ' Import history</span><input type="file" accept=".json,application/json" data-change="import-history" aria-label="Import workout history from a JSON file"></label>' +
       '</div>' +
     '</div>' +
+    remoteStorageHTML() +
     '<div class="setting-block">' +
       '<h3 class="danger-heading">Danger zone</h3>' +
       '<p class="desc">Removes every exercise, routine, workout and preference from this browser.</p>' +
@@ -2939,6 +3173,15 @@ const actions = {
   'export'(){ exportData(); },
   'export-routines'(){ exportRoutines(); },
   'export-history'(){ exportHistory(); },
+  'remote-form-toggle'(){ ui.remoteFormOpen = !ui.remoteFormOpen; ui.remoteError=''; render(); },
+  'remote-test'(){ remoteTestConnection(); },
+  'remote-backup'(){ remoteBackup(); },
+  'remote-restore'(){ remoteRestore(); },
+  'remote-forget'(){
+    confirmDlg('Forget remote configuration?',
+      'This removes the stored endpoint and credentials from this browser. It does not delete anything already uploaded to your bucket.',
+      'Forget', true).then(ok => { if (!ok) return; clearRemoteConfig(); render(); toast('Remote configuration removed'); });
+  },
   'clear-all'(){ clearAllData(); },
   'load-samples'(){ loadSamples(); },
   'help-open'(){ $('#help-dlg').showModal(); },
@@ -3013,7 +3256,8 @@ const changeHandlers = {
   },
   'import-all'(t){ withPickedFile(t, importData); },
   'import-routines'(t){ withPickedFile(t, importRoutines); },
-  'import-history'(t){ withPickedFile(t, importHistory); }
+  'import-history'(t){ withPickedFile(t, importHistory); },
+  'load-remote-config'(t){ withPickedFile(t, loadRemoteConfigFile); }
 };
 /* file inputs are reset so re-picking the same file fires change again */
 function withPickedFile(input, fn){
@@ -3042,6 +3286,7 @@ document.addEventListener('submit', e => {
     saveNewExercise({ name:g('exname'), category:g('excat'), unit:g('exunit'), notes:g('exnotes') });
   }
   else if (kind === 'ex-save'){ saveExerciseDraft(); }
+  else if (kind === 'remote-config'){ saveRemoteConfigForm(form); }
 });
 
 
