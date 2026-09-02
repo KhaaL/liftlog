@@ -110,15 +110,18 @@ document. Costs the single-file property (a manifest, a worker, and icons must
 be separate files) and requires HTTPS or `localhost`, so it should be a
 deliberate decision.
 
-### 3.2 Wake lock during a session
-Keep the screen awake while a workout is active (`navigator.wakeLock`), released
-on finish or discard. Small, big quality-of-life win.
+### 3.2 Wake lock during a session — **done**
+`syncWakeLock()` holds a screen wake lock for as long as `state.activeWorkout`
+is set, and re-requests it on `visibilitychange` since the browser drops the
+lock whenever the page is hidden.
 
-### 3.3 Timer that survives a backgrounded tab
-The rest timer is wall-clock based and restores correctly across reloads, but a
-backgrounded tab throttles the 250 ms interval, so the "rest complete" beep can
-fire late. A `Notification` (with permission) or an audio element scheduled at
-the end time would fix it.
+### 3.3 Timer that survives a backgrounded tab — **done**
+The end-of-rest beep is queued in the audio clock when rest starts
+(`scheduleRestBeep()`), which is sample-accurate and unaffected by the
+throttling that delays the 250 ms tick. `completeRest()` only sounds an
+immediate beep when scheduling was not possible, and settles a rest that
+finished while the tab was hidden on the way back. A `Notification` would still
+be the way to reach a user who has switched apps entirely.
 
 ### 3.4 Storage headroom
 `localStorage` is a few MB and `save()` silently no-ops when full, so a long
@@ -172,8 +175,23 @@ clear all) is cheap. Currently every one of them is a confirm-and-hope.
   notes would help now that notes carry machine codes and cues.
 - **Focus after deletion.** Deleting a row returns focus to `<body>`; it should
   land on the next row or the list heading.
-- **Timer presets are fixed** at 60/90/120/180s. Let them be configured, or
-  derive them from the rest times actually used in the routines.
+- ~~**Timer presets are fixed** at 60/90/120/180s.~~ **Done** — `restPresets()`
+  offers the rest times the active session actually uses, current exercise
+  first, and falls back to `REST_PRESETS` when a session has too few distinct
+  values.
 - **Empty-state guidance.** A first-run walkthrough (create an exercise → build a
   routine → start it) would beat the current "load sample data" shortcut, which
   drops an opinionated program on the user.
+- **A bottom tab bar for navigation.** The header nav now scrolls horizontally
+  instead of pushing its last tab off-screen, but five text tabs is still the
+  wrong pattern for a phone. A five-icon bottom bar would cost less height —
+  and collides with the sticky action bar, so it needs a design that shares
+  that edge.
+- **The set row's floor is the 44px Done target.** Rows are 57px on a phone
+  (was 74). Getting below that means rethinking how a set is marked done —
+  swipe, or completing from the action bar only — not shrinking the button.
+- **`--header-h` is measured, not declared.** `trackHeaderHeight()` writes the
+  header's height to a custom property so the session strip can stick beneath
+  it. A layout that did not need JS to know a CSS value would be better; it
+  needs the header to have a height CSS can state, which the scrolling nav
+  currently does not.
