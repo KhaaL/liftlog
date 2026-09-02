@@ -191,6 +191,36 @@ Three separate flows, all plain JSON (`EXPORT_SCHEMA = '1.0.0'`):
 Legacy files without `setType` fall back to the exercise/set unit, and
 `includeInVolume` is accepted as an alias of `countForVolume`.
 
+### The format is documented in the app
+
+Settings → **Transfer routines & history** has a **?** that opens the field
+reference for both file kinds, and buttons that download a working sample of
+each. Three things have to agree on that shape — the export, the sample, and
+the reference — so there is exactly one builder per kind
+(`routinesPayload()`, `historyPayload()`) and exactly one piece of example data
+(`importFixture()`). The reference renders its examples by putting that fixture
+through those builders, which means:
+
+- the samples are guaranteed to import, unlike a hand-written snippet in a doc;
+- what the dialog shows is byte-identical to what the buttons download and to
+  what a real export writes;
+- the bounds quoted in the reference are interpolated from `ITEM_LIMITS` and
+  `UNITS`, the constants the importer actually clamps against, so they cannot
+  drift from what is enforced; the set-type list comes from `SET_TYPES`, which
+  `historyPayload()` also writes from. (`normalizeImportedSet()` still branches
+  on each type individually — each one decides a different field — so a new
+  type needs teaching there too.)
+
+The fixture deliberately covers the three cases a reader would otherwise get
+wrong: a warm-up set (`countForVolume: false`, still `completed`), timed work
+(seconds in `durationSeconds`, `reps: null`), and a routine item referencing an
+exercise the importing browser may not have.
+
+There is no "load sample data" button. It replaced the user's library and
+routines with one person's training program, which is not a thing an app should
+offer to do; importing a file you chose is the same convenience without the
+surprise.
+
 ## Remote storage (optional)
 
 Local storage is still the only place data lives by default. Settings →
@@ -295,9 +325,15 @@ you can.
   `#timer-toggle` singly, so exactly one copy of the action bar may be in the
   document. Two would leave the second silently unpainted.
 - **Closed vocabularies live in `DOMAIN CONSTANTS`.** Units, themes, rest bounds,
-  routine-item bounds and the shortcut list each have exactly one definition, and
-  the templates, validators and importers all read from it. The keyboard help
-  dialog and the Settings shortcut table are both rendered from `SHORTCUTS`.
+  routine-item bounds, set types and the shortcut list each have exactly one
+  definition, and the templates, validators and importers all read from it. The
+  keyboard help dialog and the Settings shortcut table are both rendered from
+  `SHORTCUTS`; the import-format reference reads `ITEM_LIMITS`, `UNITS` and
+  `SET_TYPES`.
+- **A `<dialog>` that sets `display` must scope it to `[open]`.** An unqualified
+  `display:flex` on a dialog outranks the UA sheet's
+  `dialog:not([open]){display:none}`, leaving a closed dialog laid out on top of
+  the page and swallowing clicks. See `.dlg-wide[open]`.
 - **Escape everything interpolated** with `esc()`. `setSummary()` returns escaped
   HTML because unit strings can originate in an import file.
 - **Feedback has one channel per message.** `#toast-region` is `aria-live`, so a

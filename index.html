@@ -686,6 +686,51 @@ dialog::backdrop{ background:rgb(15 17 20 / .5); }
 .dlg-body p{ color:var(--muted); font-size:var(--fs-sm); }
 .dlg-actions{ display:flex; gap:var(--sp-2); justify-content:flex-end; padding:var(--sp-3) var(--sp-5); border-top:1px solid var(--border); background:var(--surface-2); border-radius:0 0 var(--radius-lg) var(--radius-lg); flex-wrap:wrap; }
 
+/* A reference dialog: wider than a confirm, and it scrolls its own body so the
+   actions stay reachable on a phone. The display switch is scoped to [open] on
+   purpose — an unqualified `display:flex` here outranks the UA sheet's
+   `dialog:not([open]){display:none}`, which leaves a closed dialog laid out and
+   still swallowing clicks meant for the page behind it. */
+.dlg-wide{ max-width:min(760px,calc(100vw - 24px)); max-height:min(88vh,900px); }
+.dlg-wide[open]{ display:flex; flex-direction:column; }
+.dlg-wide .dlg-body{ overflow-y:auto; min-height:0; }
+.dlg-wide .dlg-actions{ flex:none; }
+.dlg-lede{ color:var(--text) !important; font-size:var(--fs-sm); margin-bottom:var(--sp-4); }
+.sh-h{ font-family:var(--font-display); margin:var(--sp-5) 0 var(--sp-2); padding-top:var(--sp-4); border-top:1px solid var(--border); }
+.dlg-body .desc{ color:var(--muted); font-size:var(--fs-sm); margin-bottom:var(--sp-3); }
+
+table.fields{ width:100%; border-collapse:collapse; font-size:var(--fs-sm); }
+table.fields td{ padding:6px var(--sp-2) 6px 0; border-bottom:1px solid var(--border); vertical-align:top; }
+table.fields tr:last-child td{ border-bottom:0; }
+table.fields td:first-child{ width:34%; }
+table.fields td.ft{ width:20%; color:var(--muted); font-size:var(--fs-xs); white-space:nowrap; }
+table.fields code{ word-break:break-word; }
+code{ font-family:var(--font-mono); font-size:.92em; background:var(--surface-2); border-radius:var(--radius-sm); padding:1px 4px; }
+
+/* wide content scrolls inside its own box; the dialog never scrolls sideways */
+pre.code{
+  margin:var(--sp-3) 0 0; padding:var(--sp-3);
+  background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius);
+  overflow-x:auto; max-height:300px; overflow-y:auto;
+  font-family:var(--font-mono); font-size:12px; line-height:1.5; tab-size:2;
+}
+pre.code code{ background:none; border:0; padding:0; font-size:inherit; white-space:pre; }
+
+.link-btn{
+  background:none; border:0; padding:0; font:inherit; color:var(--accent);
+  text-decoration:underline; cursor:pointer;
+}
+.link-btn:hover{ text-decoration:none; }
+.block-head{ display:flex; align-items:center; gap:var(--sp-1); margin-bottom:var(--sp-1); }
+.block-head h3{ margin-bottom:0; }
+@media (max-width:560px){
+  table.fields td{ display:block; border-bottom:0; padding:0; }
+  table.fields td:first-child,table.fields td.ft{ width:auto; }
+  table.fields td.ft{ margin:1px 0 2px; }
+  table.fields tr{ display:block; padding:var(--sp-2) 0; border-bottom:1px solid var(--border); }
+  table.fields tr:last-child{ border-bottom:0; }
+}
+
 /* --toast-lift is set from the action bar's measured height in render(), so a
    toast never lands on top of the primary button. */
 #toast-region{
@@ -809,6 +854,18 @@ dialog::backdrop{ background:rgb(15 17 20 / .5); }
   </div>
 </dialog>
 
+<dialog id="schema-dlg" class="dlg-wide" aria-labelledby="schema-title">
+  <div class="dlg-body">
+    <h2 id="schema-title">Import file format</h2>
+    <div id="schema-body"></div>
+  </div>
+  <div class="dlg-actions">
+    <button type="button" class="btn" data-action="sample-routines">Sample routines file</button>
+    <button type="button" class="btn" data-action="sample-history">Sample history file</button>
+    <button type="button" class="btn btn-primary" data-action="schema-close" autofocus>Close</button>
+  </div>
+</dialog>
+
 <noscript><p class="noscript-note">Liftlog needs JavaScript to run. Please enable it — everything stays on this device.</p></noscript>
 
 <script>
@@ -928,6 +985,7 @@ const IC = {
   skip:'<svg class="ic" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 5.5v13l8-6.5zM16 5h2.5v14H16z"/></svg>',
   box:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="4.5" width="15" height="15" rx="3"/></svg>',
   boxcheck:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="4.5" width="15" height="15" rx="3"/><path d="M8.5 12.2l2.6 2.6 4.9-5.4"/></svg>',
+  help:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.4 9.2a2.7 2.7 0 015.2.9c0 1.8-2.6 2.1-2.6 3.9"/><path d="M12 17.3h.01"/></svg>',
   pen:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L18.5 9.5a2.1 2.1 0 00-3-3L5 17zM13.5 6.5l3 3"/></svg>'
 };
 
@@ -955,6 +1013,13 @@ const THEMES = [
   { id:'dracula', label:'Dracula' }, { id:'gruvbox', label:'Gruvbox' }, { id:'nord', label:'Nord' },
   { id:'solarized', label:'Solarized' }, { id:'monokai', label:'Monokai' }
 ];
+
+/* How a set carries its measurement across the import/export boundary. The
+   one list: historyPayload() stamps one of these on every set it writes, and
+   the import-format help enumerates them. normalizeImportedSet() branches on
+   them individually, since each decides a different field — so adding a type
+   means teaching that function what it means, not just extending this list. */
+const SET_TYPES = ['reps','time','hold','distance'];
 
 /* Rest timer bounds, shared by the settings field and the routine editor. */
 const REST_MIN = 15, REST_MAX = 600;
@@ -989,7 +1054,7 @@ const SHORTCUTS = [
    than computed: a file cannot contain the hash of the commit it lands in, so
    the stamp names the commit the working tree was built from. Left as
    'unstamped' when the script has never run. */
-const BUILD = { branch:'claude/timer-ui-mobile-optimize-vdzpau', commit:'d2d0648', date:'2026-09-02' };
+const BUILD = { branch:'claude/import-schema-help-8kq2wr', commit:'28bc514', date:'2026-09-02' };
 const LS_KEY = 'liftlog.v1';
 const LS_RESCUE_KEY = 'liftlog.v1.unreadable';  /* holds data we could not load, so nothing is lost silently */
 const SCHEMA_VERSION = 3;   /* v3: sets carry durationSeconds (time no longer overloads reps)
@@ -2249,16 +2314,23 @@ function loadRemoteConfigFile(file){
 /* ---------- routines: export / import ---------- */
 /* Routines travel with the exercise definitions they reference, so an
    import into another browser can rebuild any missing library entries. */
-function exportRoutines(){
-  if (!state.routines.length){ toast('No routines to export'); return; }
+/* The payload shape lives here rather than inside the export action, because
+   three things have to agree on it: the export, the downloadable sample, and
+   the example shown in the import-format help. One builder means the help
+   cannot document a shape the importer would reject. */
+function routinesPayload(exercises, routines){
   const used = new Set();
-  state.routines.forEach(r => (r.items || []).forEach(it => used.add(it.exerciseId)));
-  downloadJSON({
+  routines.forEach(r => (r.items || []).forEach(it => used.add(it.exerciseId)));
+  return {
     app:'liftlog', kind:'routines', schemaVersion:EXPORT_SCHEMA, source:'liftlog-web',
     version:SCHEMA_VERSION, exportedAt:new Date().toISOString(),
-    exercises:state.exercises.filter(e => used.has(e.id)),
-    routines:state.routines
-  }, dateStamp('liftlog-routines'));
+    exercises:exercises.filter(e => used.has(e.id)),
+    routines:routines
+  };
+}
+function exportRoutines(){
+  if (!state.routines.length){ toast('No routines to export'); return; }
+  downloadJSON(routinesPayload(state.exercises, state.routines), dateStamp('liftlog-routines'));
   toast('Routines exported');
 }
 function importRoutines(file){
@@ -2301,18 +2373,149 @@ function importRoutines(file){
   });
 }
 
+/* ---------- import format: help and sample files ----------
+   A tiny hand-written fixture, put through the real payload builders. It is
+   the only place example data is written, so the downloadable sample, the
+   example in the help dialog and a genuine export are the same shape by
+   construction — and the sample is guaranteed to import, which a hand-written
+   snippet in a doc is not. Ids are literals rather than uid() so a reader can
+   see how items reference exercises. */
+function importFixture(){
+  const exercises = [
+    { id:'ex-squat', name:'Back Squat', category:'Legs', unit:'kg', notes:'Belt above 100kg' },
+    { id:'ex-plank', name:'Plank', category:'Core', unit:'time', notes:'' }
+  ];
+  const routines = [{
+    id:'rt-lower', name:'Lower body',
+    items:[
+      { id:'it-1', exerciseId:'ex-squat', sets:3, reps:5, weight:100, rest:180 },
+      { id:'it-2', exerciseId:'ex-plank', sets:2, reps:45,  weight:null, rest:60 }
+    ]
+  }];
+  /* two days back, so relative-date displays have something sensible to show */
+  const started = Date.now() - 2 * 86400000;
+  const workouts = [{
+    id:'wk-example-1', routineId:'rt-lower', routineName:'Lower body',
+    startedAt:started, finishedAt:started + 42 * 60000,
+    notes:'Example session — safe to delete after importing.',
+    currentExerciseIndex:2,
+    exercises:[
+      { exerciseId:'ex-squat', name:'Back Squat', category:'Legs', unit:'kg',
+        plannedSets:3, targetReps:5, targetWeight:100, restSeconds:180, notes:'', skipped:false,
+        sets:[
+          /* a warm-up: performed, but excluded from volume and from records */
+          { id:'st-1', weight:60,  reps:5, rpe:null, completed:true, completedAt:started + 120000,
+            unit:'kg', countForVolume:false, countForPR:false },
+          { id:'st-2', weight:100, reps:5, rpe:8,    completed:true, completedAt:started + 600000, unit:'kg' },
+          { id:'st-3', weight:100, reps:4, rpe:9.5,  completed:true, completedAt:started + 1200000, unit:'kg' }
+        ] },
+      { exerciseId:'ex-plank', name:'Plank', category:'Core', unit:'time',
+        plannedSets:2, targetReps:45, targetWeight:null, restSeconds:60, notes:'', skipped:false,
+        sets:[
+          /* timed work: seconds live in durationSeconds, never in reps */
+          { id:'st-4', weight:null, durationSeconds:45, rpe:null, completed:true,
+            completedAt:started + 2400000, unit:'time' },
+          { id:'st-5', weight:null, durationSeconds:38, rpe:null, completed:true,
+            completedAt:started + 2520000, unit:'time' }
+        ] }
+    ]
+  }];
+  return { exercises, routines, workouts };
+}
+/* The field reference. Bounds and vocabularies are interpolated from the
+   DOMAIN CONSTANTS the importer actually clamps against, so the numbers here
+   cannot drift from the numbers enforced. */
+function schemaHelpHTML(){
+  const L = ITEM_LIMITS;
+  const code = obj => '<pre class="code" tabindex="0"><code>' + esc(JSON.stringify(obj, null, 2)) + '</code></pre>';
+  const rows = list => '<table class="fields"><tbody>' + list.map(([f, t, d]) =>
+    '<tr><td><code>' + esc(f) + '</code></td><td class="ft">' + esc(t) + '</td><td>' + d + '</td></tr>').join('') +
+    '</tbody></table>';
+  const units = UNITS.map(u => '<code>' + u + '</code>').join(' · ');
+
+  return '<p class="dlg-lede">Both importers accept a file exported by Liftlog, and anything else with the ' +
+      'same shape. Every value is clamped or dropped on the way in, so a malformed field costs you that ' +
+      'field, not the import. Unknown fields are ignored.</p>' +
+
+    '<h3 class="sh-h">Routines file</h3>' +
+    '<p class="desc">A routine references exercises by <code>exerciseId</code>. Each id is resolved against your ' +
+      'library first, then by name, and finally created from the file\u2019s own <code>exercises</code> array \u2014 ' +
+      'which is why routines travel with the exercises they need. Routines whose name you already have are skipped.</p>' +
+    rows([
+      ['routines[]', 'required', 'The list. A bare top-level array is accepted too.'],
+      ['routines[].name', 'string, required', 'Skipped if missing, or if a routine of that name already exists.'],
+      ['routines[].items[]', 'required', 'One entry per exercise; order is the order you train in.'],
+      ['items[].exerciseId', 'string, required', 'Resolved by id, then name, then created from <code>exercises[]</code>.'],
+      ['items[].sets', 'integer', 'Clamped to ' + L.sets[0] + '\u2013' + L.sets[1] + '. Default 3.'],
+      ['items[].reps', 'integer', 'Clamped to ' + L.reps[0] + '\u2013' + L.reps[1] + '. Default 8. For a timed movement this is <em>seconds</em>.'],
+      ['items[].weight', 'number | null', 'Planned load. <code>null</code> leaves the bar to last time\u2019s figure.'],
+      ['items[].rest', 'integer', 'Seconds, clamped to ' + L.rest[0] + '\u2013' + L.rest[1] + '. Defaults to your setting.'],
+      ['exercises[]', 'optional', 'Definitions for the ids above: <code>id</code>, <code>name</code>, <code>category</code>, <code>unit</code>, <code>notes</code>.'],
+      ['exercises[].unit', 'enum', 'One of ' + units + '. Anything else becomes <code>kg</code>.']
+    ]) +
+    code(sampleRoutinesFile()) +
+
+    '<h3 class="sh-h">History file</h3>' +
+    '<p class="desc">Workouts are deduplicated by <code>id</code> \u2014 first write wins, so re-importing the same ' +
+      'file changes nothing. A workout needs an <code>id</code> and a <code>startedAt</code>; without either it is skipped.</p>' +
+    rows([
+      ['workouts[]', 'required', 'The list. A bare top-level array is accepted too.'],
+      ['workouts[].id', 'string, required', 'The dedupe key. Reused ids are skipped, not merged.'],
+      ['workouts[].startedAt', 'epoch ms | date string', 'Anything <code>Date.parse</code> understands. Required.'],
+      ['workouts[].finishedAt', 'same | null', 'Pulled up to <code>startedAt</code> if it would be earlier.'],
+      ['workouts[].exercises[]', 'required', 'Per-exercise blocks, each with its own <code>sets[]</code>.'],
+      ['exercises[].unit', 'enum', 'One of ' + units + '; decides how a set is read when <code>setType</code> is absent.'],
+      ['sets[].setType', 'enum', SET_TYPES.map(t => '<code>' + t + '</code>').join(' · ') + '. Decides which fields carry the measurement.'],
+      ['sets[].weight', 'number | null', 'Negative values are dropped.'],
+      ['sets[].reps', 'integer', 'A count, never seconds. Rounded, floored at 0.'],
+      ['sets[].durationSeconds', 'integer', 'Where timed work goes. A legacy file with seconds in <code>reps</code> is corrected on import.'],
+      ['sets[].rpe', 'number', 'Clamped to 1\u201310.'],
+      ['sets[].completed', 'boolean', 'Whether the set was performed.'],
+      ['sets[].countForVolume', 'boolean', 'Default true. <code>false</code> marks a warm-up: performed, but out of the totals. <code>includeInVolume</code> is accepted as an alias.'],
+      ['sets[].countForPR', 'boolean', 'Default true. <code>false</code> keeps a set out of records.']
+    ]) +
+    code(sampleHistoryFile()) +
+
+    '<p class="hint mt-3">Schema version <code>' + esc(EXPORT_SCHEMA) + '</code>. ' +
+      'The two examples above are the files the buttons below download \u2014 they are generated by the same code ' +
+      'that writes a real export, so they always import cleanly.</p>';
+}
+
+function sampleRoutinesFile(){
+  const f = importFixture();
+  return routinesPayload(f.exercises, f.routines);
+}
+function sampleHistoryFile(){
+  return historyPayload(importFixture().workouts);
+}
+function downloadSample(kind){
+  if (kind === 'routines'){
+    downloadJSON(sampleRoutinesFile(), 'liftlog-sample-routines.json');
+    toast('Sample routines file downloaded');
+  } else {
+    downloadJSON(sampleHistoryFile(), 'liftlog-sample-history.json');
+    toast('Sample history file downloaded');
+  }
+}
+
 /* ---------- history: export / import ---------- */
-function exportHistory(){
-  if (!state.workouts.length){ toast('No workout history to export'); return; }
-  /* export sets with an explicit setType so importers never guess at field semantics */
-  const setTypeOf = s => s.distance != null ? 'distance' : (s.unit === 'time' || s.durationSeconds != null) ? 'time' : 'reps';
-  const workouts = deepCopy(state.workouts);
+/* Sets go out with an explicit setType so importers never guess at field
+   semantics. Shared with the sample file and the help example — see
+   routinesPayload() for why. */
+function historyPayload(sourceWorkouts){
+  const setTypeOf = s => s.distance != null ? 'distance'
+    : (s.unit === 'time' || s.durationSeconds != null) ? 'time' : 'reps';
+  const workouts = deepCopy(sourceWorkouts);
   workouts.forEach(w => w.exercises.forEach(ex => (ex.sets || []).forEach(s => { s.setType = setTypeOf(s); })));
-  downloadJSON({
+  return {
     app:'liftlog', kind:'history', schemaVersion:EXPORT_SCHEMA, source:'liftlog-web',
     version:SCHEMA_VERSION, exportedAt:new Date().toISOString(),
     workouts
-  }, dateStamp('liftlog-history'));
+  };
+}
+function exportHistory(){
+  if (!state.workouts.length){ toast('No workout history to export'); return; }
+  downloadJSON(historyPayload(state.workouts), dateStamp('liftlog-history'));
   toast('History exported');
 }
 /* ---- import normalization (schema 1.0.0 contract) ----
@@ -2410,17 +2613,6 @@ function clearAllData(){
     render(); toast('All data cleared');
   });
 }
-function loadSamples(){
-  confirmDlg('Load sample data?','Sample exercises and routines will replace the current ones. Workout history is kept.','Load samples')
-    .then(ok => {
-      if (!ok) return;
-      state.exercises = sampleExercises();
-      state.routines = sampleRoutines(state.exercises);
-      resetUI();
-      save(); render(); toast('Sample data loaded');
-    });
-}
-
 /* ============================================================
    RENDERING
    ============================================================ */
@@ -2519,9 +2711,9 @@ function htmlPicker(){
   }
   html += '<section aria-labelledby="pick-title"><div class="section-title"><h2 id="pick-title">Start a workout</h2><span class="rule"></span></div>';
   if (state.routines.length === 0){
-    html += '<div class="empty"><h3>No routines yet</h3><p>Create a routine or load the samples to get going.</p>' +
+    html += '<div class="empty"><h3>No routines yet</h3><p>Build one from your exercise library, or import a routines file.</p>' +
       '<div class="form-actions"><button type="button" class="btn btn-primary" data-action="nav" data-view="routines">Go to Routines</button>' +
-      '<button type="button" class="btn" data-action="load-samples">Load sample data</button></div></div>';
+      '<button type="button" class="btn" data-action="nav" data-view="settings">Import a file</button></div></div>';
   } else {
     html += '<div class="routine-pick" role="group" aria-label="Choose a routine">';
     state.routines.forEach(r => {
@@ -2901,9 +3093,9 @@ function viewRoutines(){
 
   let html = '';
   if (!state.routines.length){
-    html += '<div class="empty"><h3>Nothing here yet</h3><p>Routines are ordered lists of exercises with targets. Create one, or load the samples.</p>' +
+    html += '<div class="empty"><h3>Nothing here yet</h3><p>Routines are ordered lists of exercises with targets. Create one, or import a routines file from Settings.</p>' +
       '<div class="form-actions"><button type="button" class="btn btn-primary" data-action="routine-new">' + IC.plus + '<span>New routine</span></button>' +
-      '<button type="button" class="btn" data-action="load-samples">Load sample data</button></div></div>';
+      '<button type="button" class="btn" data-action="nav" data-view="settings">Import routines</button></div></div>';
     return head + html;
   }
   html += '<ul class="list">';
@@ -3213,9 +3405,9 @@ function viewExercises(){
   if (ui.showExerciseForm) html += htmlExerciseForm();
 
   if (!state.exercises.length){
-    html += '<div class="empty"><h3>Library is empty</h3><p>Add your first movement, or load the sample library.</p>' +
+    html += '<div class="empty"><h3>Library is empty</h3><p>Add your first movement. Importing a routines file also creates any exercises it needs.</p>' +
       '<div class="form-actions"><button type="button" class="btn btn-primary" data-action="ex-form-toggle">' + IC.plus + '<span>New exercise</span></button>' +
-      '<button type="button" class="btn" data-action="load-samples">Load sample data</button></div></div>';
+      '<button type="button" class="btn" data-action="nav" data-view="settings">Import routines</button></div></div>';
     return head + html;
   }
 
@@ -3406,11 +3598,14 @@ function viewSettings(){
       '<div class="form-actions">' +
         '<button type="button" class="btn" data-action="export">' + IC.down + '<span>Export JSON</span></button>' +
         '<label class="file-btn"><span>' + IC.up + ' Import JSON</span><input type="file" accept=".json,application/json" data-change="import-all" aria-label="Import data from a JSON file"></label>' +
-        '<button type="button" class="btn" data-action="load-samples">Load sample data</button>' +
       '</div>' +
     '</div>' +
     '<div class="setting-block">' +
-      '<h3>Transfer routines &amp; history</h3>' +
+      '<div class="block-head">' +
+        '<h3>Transfer routines &amp; history</h3>' +
+        '<button type="button" class="icon-btn" data-action="schema-open" ' +
+          'aria-label="What format do these files use?" title="What format do these files use?">' + IC.help + '</button>' +
+      '</div>' +
       '<p class="desc">Move parts of your data between browsers. A routines file carries the exercises it needs — missing ones are added on import; duplicates are skipped.</p>' +
       '<div class="form-actions">' +
         '<button type="button" class="btn" data-action="export-routines">' + IC.down + '<span>Routines JSON</span></button>' +
@@ -3418,6 +3613,11 @@ function viewSettings(){
         '<button type="button" class="btn" data-action="export-history">' + IC.down + '<span>History JSON</span></button>' +
         '<label class="file-btn"><span>' + IC.up + ' Import history</span><input type="file" accept=".json,application/json" data-change="import-history" aria-label="Import workout history from a JSON file"></label>' +
       '</div>' +
+      '<p class="hint mt-3">Not sure what a file should look like? ' +
+        '<button type="button" class="link-btn" data-action="schema-open">See the format</button>, ' +
+        'or start from a sample: ' +
+        '<button type="button" class="link-btn" data-action="sample-routines">routines</button> · ' +
+        '<button type="button" class="link-btn" data-action="sample-history">history</button>.</p>' +
     '</div>' +
     remoteStorageHTML() +
     '<div class="setting-block">' +
@@ -3551,9 +3751,18 @@ const actions = {
       'Forget', true).then(ok => { if (!ok) return; clearRemoteConfig(); render(); toast('Remote configuration removed'); });
   },
   'clear-all'(){ clearAllData(); },
-  'load-samples'(){ loadSamples(); },
   'help-open'(){ $('#help-dlg').showModal(); },
-  'help-close'(){ $('#help-dlg').close(); }
+  'help-close'(){ $('#help-dlg').close(); },
+  /* built on open, not at init: the examples carry a timestamp and a date
+     relative to today, and there is no reason to hold that markup for a
+     dialog nobody has opened */
+  'schema-open'(){
+    $('#schema-body').innerHTML = schemaHelpHTML();
+    $('#schema-dlg').showModal();
+  },
+  'schema-close'(){ $('#schema-dlg').close(); },
+  'sample-routines'(){ downloadSample('routines'); },
+  'sample-history'(){ downloadSample('history'); }
 };
 
 document.addEventListener('click', e => {
