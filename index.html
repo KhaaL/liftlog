@@ -40,6 +40,10 @@
   --font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI","Helvetica Neue",Helvetica,Arial,sans-serif;
   --font-display:Georgia,"Iowan Old Style","Times New Roman",serif;
   --font-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+
+  /* Height of the sticky header, remeasured by trackHeaderHeight() so the
+     session strip can stick directly beneath it at any width. */
+  --header-h:54px;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
@@ -196,14 +200,23 @@ strong{ font-weight:650; }
   border-bottom:1px solid var(--border); background:var(--surface);
   position:sticky; top:0; z-index:20;
 }
-.header-inner{ display:flex; align-items:center; gap:var(--sp-5); min-height:52px; flex-wrap:wrap; padding-top:var(--sp-1); padding-bottom:var(--sp-1); }
+.header-inner{ display:flex; align-items:center; gap:var(--sp-4); min-height:52px; padding-top:var(--sp-1); padding-bottom:var(--sp-1); }
 .wordmark{
   font-family:var(--font-display); font-size:19px; font-weight:700; letter-spacing:.01em;
   display:flex; align-items:center; gap:8px; margin:0; user-select:none;
 }
 .wordmark .mark{ color:var(--accent); }
-.main-nav ul{ display:flex; gap:2px; overflow-x:auto; scrollbar-width:none; }
+/* flex:1 + min-width:0 is what makes the list below actually scroll: without
+   it the <ul> sizes to its content and pushes the last tab off-screen. */
+.main-nav{ flex:1; min-width:0; position:relative; }
+.main-nav ul{ display:flex; gap:2px; overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
 .main-nav ul::-webkit-scrollbar{ display:none; }
+/* fade the right edge so the scroll is discoverable — an overlay rather than a
+   mask, so it never clips a focus ring */
+.main-nav::after{
+  content:""; position:absolute; right:0; top:0; bottom:0; width:24px; pointer-events:none;
+  background:linear-gradient(90deg,transparent,var(--surface));
+}
 .nav-btn{
   appearance:none; background:none; border:0; border-bottom:2px solid transparent;
   padding:14px var(--sp-3) 12px; font-size:var(--fs-sm); font-weight:550; color:var(--muted);
@@ -340,10 +353,37 @@ kbd{
 .workout-meta{ color:var(--muted); font-size:var(--fs-sm); display:flex; gap:var(--sp-3); flex-wrap:wrap; margin-top:2px; }
 .workout-head-actions{ display:flex; gap:var(--sp-2); flex-wrap:wrap; }
 
-.progress-line{ margin-top:var(--sp-3); }
-.progress-track{ height:5px; background:var(--surface-2); border:1px solid var(--border); border-radius:99px; overflow:hidden; }
-.progress-fill{ height:100%; background:var(--accent); border-radius:99px; transition:width .25s ease; }
-.progress-label{ font-size:var(--fs-xs); color:var(--muted); margin-top:var(--sp-1); font-variant-numeric:tabular-nums; }
+/* Where-am-I strip: pinned under the header for the whole session, so
+   position in the workout never scrolls away. */
+.session-strip{
+  position:sticky; top:var(--header-h); z-index:18;
+  background:var(--surface); border:1px solid var(--border); border-top:0;
+  border-radius:0 0 var(--radius) var(--radius);
+  padding:var(--sp-1) var(--sp-3) var(--sp-3);
+  margin:calc(-1 * var(--sp-5)) 0 var(--sp-4);
+  box-shadow:var(--shadow-sm);
+}
+.strip-line{ display:flex; align-items:baseline; justify-content:space-between; gap:var(--sp-3); }
+.strip-pos{ font-size:var(--fs-sm); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.strip-pos .ex-of{ font-weight:700; font-variant-numeric:tabular-nums; }
+/* the set count doubles as the drawer toggle: a big tap target for the one
+   control that answers "where am I", without a second row to hold it */
+.strip-num{
+  flex:none; display:inline-flex; align-items:center; gap:2px;
+  font:inherit; font-size:var(--fs-xs); color:var(--muted); font-variant-numeric:tabular-nums;
+  background:none; border:1px solid transparent; border-radius:var(--radius);
+  min-height:34px; padding:0 4px 0 var(--sp-2); cursor:pointer; white-space:nowrap;
+}
+.strip-num:hover{ background:var(--surface-2); color:var(--text); border-color:var(--border); }
+.strip-num .ic{ width:14px; height:14px; }
+/* one segment per exercise, weighted by its set count: position in the session
+   is spatial, not a percentage */
+.seg-track{ display:flex; gap:2px; height:8px; margin-top:6px; }
+.seg{ background:var(--surface-2); border:1px solid var(--border); border-radius:2px; overflow:hidden; min-width:3px; }
+.seg > i{ display:block; height:100%; background:var(--accent); transition:width .25s ease; }
+.seg.is-current{ background:var(--accent-soft); }
+.seg.is-skipped{ border-color:var(--warning); }
+.seg.is-skipped > i{ background:var(--warning); }
 
 .ex-panel{ border-color:var(--accent); border-top:3px solid var(--accent); }
 .ex-head{ display:flex; justify-content:space-between; gap:var(--sp-3); align-items:baseline; flex-wrap:wrap; }
@@ -363,9 +403,15 @@ kbd{
 .prev-perf .pp-k{ font-size:var(--fs-xs); text-transform:uppercase; letter-spacing:.04em; font-weight:650; }
 .ex-notes{ margin-top:var(--sp-3); font-size:var(--fs-sm); color:var(--muted); font-style:italic; }
 
-/* sets table */
+/* sets table — the column template varies with what the exercise needs
+   (a bodyweight/timed movement has no weight field, RPE is optional), so it
+   lives in one custom property rather than four grid declarations. */
+.sets{ --sets-cols:52px 1fr 1fr 76px 96px; }
+.sets.no-rpe{ --sets-cols:52px 1fr 1fr 96px; }
+.sets.no-weight{ --sets-cols:52px 1fr 76px 96px; }
+.sets.no-weight.no-rpe{ --sets-cols:52px 1fr 96px; }
 .sets-head,.set-row{
-  display:grid; grid-template-columns:52px 1fr 1fr 76px 96px; gap:var(--sp-2); align-items:end;
+  display:grid; grid-template-columns:var(--sets-cols); gap:var(--sp-2); align-items:end;
 }
 .sets-head{ padding:0 2px var(--sp-1); }
 .sets-head span{ font-size:10.5px; font-weight:650; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
@@ -378,7 +424,10 @@ kbd{
 .set-num .prev{ font-size:10.5px; color:var(--muted); font-variant-numeric:tabular-nums; line-height:1.2; }
 .set-done-btn{ min-height:44px; min-width:44px; padding-inline:10px; justify-content:center; font-size:var(--fs-xs); }
 .set-done-btn[aria-pressed="true"]{ background:var(--success-soft); border-color:var(--success); color:var(--success); }
-.sets-foot{ display:flex; gap:var(--sp-2); flex-wrap:wrap; margin-top:var(--sp-3); padding-top:var(--sp-3); border-top:1px solid var(--border); }
+.sets-foot{ display:flex; gap:var(--sp-2); flex-wrap:wrap; align-items:center; margin-top:var(--sp-3); padding-top:var(--sp-3); border-top:1px solid var(--border); }
+.sets-foot .next-up{ margin-left:auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rpe-toggle{ min-height:30px; padding:3px var(--sp-3); font-size:var(--fs-xs); }
+.rpe-toggle[aria-pressed="true"]{ background:var(--accent-soft); border-color:var(--accent); color:var(--accent); }
 
 /* history session editor */
 .hedit{ border:1px solid var(--border-strong); }
@@ -401,15 +450,60 @@ kbd{
   .hset-ctl{ grid-column:1 / -1; justify-content:flex-end; }
 }
 
-.sticky-actions{
-  position:sticky; bottom:0; z-index:15;
-  display:flex; gap:var(--sp-2);
+/* ============================================================
+   ACTION BAR  (set actions + rest timer, in the one place a phone
+   can always see: the bottom edge)
+   ============================================================ */
+.actionbar{
+  position:sticky; bottom:0; z-index:16;
   background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg);
-  box-shadow:var(--shadow-md); padding:var(--sp-3);
+  box-shadow:var(--shadow-md); overflow:hidden;
+  padding:0 var(--sp-3) calc(var(--sp-3) + env(safe-area-inset-bottom));
   margin-top:var(--sp-4);
-  padding-bottom:calc(var(--sp-3) + env(safe-area-inset-bottom));
 }
-.sticky-actions .btn-primary{ flex:1; }
+/* full-bleed drain bar along the bar's top edge — the peripheral rest signal */
+.ab-drain{ height:5px; margin:0 calc(-1 * var(--sp-3)) var(--sp-2); background:var(--surface-2); }
+.ab-drain > i{ display:block; height:100%; width:0; background:var(--accent); transition:width .25s linear; }
+.actionbar.is-soon .ab-drain > i{ background:var(--warning); }
+.actionbar.is-done .ab-drain > i{ background:var(--success); }
+
+.ab-rows{ display:flex; flex-direction:column; gap:var(--sp-2); }
+.ab-row{ display:flex; align-items:center; gap:var(--sp-2); min-width:0; }
+.ab-time{
+  font-family:var(--font-mono); font-size:26px; font-weight:600; line-height:1;
+  font-variant-numeric:tabular-nums; letter-spacing:-.02em; flex:none;
+  min-width:74px; color:var(--muted);
+}
+.actionbar.is-running .ab-time{ color:var(--accent); }
+.actionbar.is-soon .ab-time{ color:var(--warning); }
+.actionbar.is-done .ab-time{ color:var(--success); }
+.ab-row .ab-grow{ flex:1; min-width:0; }
+.ab-row .btn{ white-space:nowrap; }
+.ab-actions .btn-primary{ flex:1; min-width:0; }
+.ab-actions .btn-big{ min-height:48px; }
+.ab-icon{ flex:none; min-width:44px; padding-inline:10px; }
+.ab-sheet{
+  display:flex; flex-wrap:wrap; align-items:center; gap:6px;
+  padding-bottom:var(--sp-3); border-bottom:1px solid var(--border); margin-bottom:var(--sp-3);
+}
+.ab-sheet .sheet-cap{ font-size:var(--fs-xs); font-weight:650; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+.actionbar .timer-status{ margin-top:var(--sp-2); }
+@keyframes flash-done{ 0%,100%{ background:var(--surface);} 30%{ background:var(--success-soft);} }
+.actionbar.is-done{ animation:flash-done 1.2s ease 2; }
+/* room to breathe once the width is there: timer and set actions side by side */
+@media (min-width:720px){
+  /* 1fr columns across a 920px page made a weight field 340px wide */
+  .sets{ max-width:600px; }
+  .ab-rows{ flex-direction:row; align-items:center; gap:var(--sp-5); }
+  .ab-rows > .ab-actions{ flex:1; }
+  .ab-time{ font-size:34px; min-width:92px; }
+}
+@media (max-width:719px){
+  .actionbar .timer-status{
+    position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+    overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0;
+  }
+}
 
 .done-ex-row{
   width:100%; display:flex; align-items:center; gap:var(--sp-3); text-align:left;
@@ -427,8 +521,6 @@ kbd{
 .status-chip.current{ background:var(--accent-soft); color:var(--accent); }
 
 /* session overview drawer */
-.progress-foot{ display:flex; align-items:baseline; justify-content:space-between; gap:var(--sp-3); margin-top:var(--sp-1); }
-.progress-foot .progress-label{ margin-top:0; }
 .overview-toggle .chev{ transition:transform .15s ease; }
 .overview-toggle[aria-expanded="true"] .chev{ transform:rotate(90deg); }
 .done-ex-row.is-current-row{ cursor:default; }
@@ -445,32 +537,18 @@ kbd{
 }
 
 /* ============================================================
-   REST TIMER
+   REST TIMER  (rendered inside the action bar; presets live in its sheet)
    ============================================================ */
-.timer{ margin-top:var(--sp-4); }
-.timer-top{ display:flex; align-items:center; justify-content:space-between; gap:var(--sp-3); flex-wrap:wrap; margin-bottom:var(--sp-2); }
-.timer-label{ font-size:var(--fs-xs); font-weight:650; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); display:flex; align-items:center; gap:6px; }
 .presets{ display:flex; gap:6px; flex-wrap:wrap; }
 .preset-btn{
-  min-height:34px; padding:2px var(--sp-3); font-size:var(--fs-xs); font-weight:650;
+  min-height:44px; padding:2px var(--sp-4); font-size:var(--fs-sm); font-weight:650;
   border:1px solid var(--border-strong); border-radius:99px; background:var(--surface);
   cursor:pointer; color:var(--muted); font-variant-numeric:tabular-nums;
   transition:all .12s ease;
 }
 .preset-btn:hover{ color:var(--text); border-color:var(--muted); }
 .preset-btn[aria-pressed="true"]{ background:var(--accent-soft); border-color:var(--accent); color:var(--accent); }
-.timer-main{ display:flex; align-items:center; gap:var(--sp-4); flex-wrap:wrap; }
-.timer-time{ font-family:var(--font-mono); font-size:44px; font-weight:600; line-height:1; font-variant-numeric:tabular-nums; letter-spacing:-.02em; min-width:130px; }
-.timer.is-running .timer-time{ color:var(--accent); }
-.timer.is-done .timer-time{ color:var(--success); }
-.timer.is-done{ border-color:var(--success); }
-.timer-controls{ display:flex; gap:var(--sp-2); flex-wrap:wrap; }
-.timer-track{ height:6px; background:var(--surface-2); border:1px solid var(--border); border-radius:99px; overflow:hidden; margin-top:var(--sp-3); }
-.timer-fill{ height:100%; width:100%; background:var(--accent); transition:width .25s linear; }
-.timer.is-done .timer-fill{ background:var(--success); }
-.timer-status{ margin-top:var(--sp-2); font-size:var(--fs-sm); color:var(--muted); }
-@keyframes flash-done{ 0%,100%{ background:var(--surface);} 30%{ background:var(--success-soft);} }
-.timer.is-done{ animation:flash-done 1.2s ease 2; }
+.timer-status{ font-size:var(--fs-sm); color:var(--muted); }
 
 /* ============================================================
    LISTS (routines, history, exercises)
@@ -608,8 +686,10 @@ dialog::backdrop{ background:rgb(15 17 20 / .5); }
 .dlg-body p{ color:var(--muted); font-size:var(--fs-sm); }
 .dlg-actions{ display:flex; gap:var(--sp-2); justify-content:flex-end; padding:var(--sp-3) var(--sp-5); border-top:1px solid var(--border); background:var(--surface-2); border-radius:0 0 var(--radius-lg) var(--radius-lg); flex-wrap:wrap; }
 
+/* --toast-lift is set from the action bar's measured height in render(), so a
+   toast never lands on top of the primary button. */
 #toast-region{
-  position:fixed; left:50%; bottom:calc(20px + env(safe-area-inset-bottom)); transform:translateX(-50%);
+  position:fixed; left:50%; bottom:calc(var(--toast-lift, 20px) + env(safe-area-inset-bottom)); transform:translateX(-50%);
   z-index:60; display:flex; flex-direction:column; gap:var(--sp-2); align-items:center; pointer-events:none;
 }
 .toast{
@@ -641,9 +721,34 @@ dialog::backdrop{ background:rgb(15 17 20 / .5); }
 
 @media (max-width:640px){
   :root{ --fs-xl:24px; }
-  .sets-head,.set-row{ grid-template-columns:44px 1fr 1fr 60px 84px; gap:6px; }
-  .timer-time{ font-size:36px; min-width:104px; }
   .header-inner{ gap:var(--sp-3); }
+  .workout-head{ flex-wrap:nowrap; align-items:flex-start; }
+  .workout-head > div:first-child{ min-width:0; }
+  .workout-title{ font-size:var(--fs-md); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .workout-head-actions{ flex:none; flex-wrap:nowrap; }
+  /* a keyboard hint is noise on a touch device */
+  .key-hint{ display:none; }
+  .sets{ --sets-cols:40px 1fr 1fr 62px 54px; gap:6px; }
+  .sets.no-rpe{ --sets-cols:40px 1fr 1fr 54px; }
+  .sets.no-weight{ --sets-cols:40px 1fr 62px 54px; }
+  .sets.no-weight.no-rpe{ --sets-cols:40px 1fr 54px; }
+  .sets-head,.set-row{ gap:6px; }
+  /* the head row already names the columns; repeating them on every row cost
+     ~19px per set for nothing. Inputs carry an explicit aria-label instead. */
+  .set-row .field > .cap{ display:none; }
+  /* the previous-session figure cannot fit a 40px column without wrapping to
+     three lines, and .prev-perf above already lists the whole last session */
+  .set-num .prev{ display:none; }
+  .set-num{ padding-bottom:0; }
+  .set-row{ padding:6px 0; }
+  .set-row input{ min-height:40px; }
+  .set-done-btn{ padding-inline:0; }
+}
+@media (max-width:480px){
+  .wordmark .label{ display:none; }
+  /* detail that a 320px-wide head cannot afford: the start time (elapsed time
+     is the useful figure) and the word "workout" on the finish button */
+  .narrow-hide{ display:none; }
 }
 @media (prefers-reduced-motion: reduce){
   *,*::before,*::after{ animation:none !important; transition:none !important; scroll-behavior:auto !important; }
@@ -659,7 +764,7 @@ dialog::backdrop{ background:rgb(15 17 20 / .5); }
       <svg class="mark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
         <path d="M2 12h2M20 12h2M6.5 7v10M17.5 7v10M6.5 12h11"/>
       </svg>
-      Liftlog
+      <span class="label">Liftlog</span>
     </p>
     <nav class="main-nav" aria-label="Main">
       <ul id="nav-list">
@@ -884,7 +989,7 @@ const SHORTCUTS = [
    than computed: a file cannot contain the hash of the commit it lands in, so
    the stamp names the commit the working tree was built from. Left as
    'unstamped' when the script has never run. */
-const BUILD = { branch:'claude/timer-ui-mobile-optimize-vdzpau', commit:'34ad07d', date:'2026-09-02' };
+const BUILD = { branch:'claude/timer-ui-mobile-optimize-vdzpau', commit:'d2d0648', date:'2026-09-02' };
 const LS_KEY = 'liftlog.v1';
 const LS_RESCUE_KEY = 'liftlog.v1.unreadable';  /* holds data we could not load, so nothing is lost silently */
 const SCHEMA_VERSION = 3;   /* v3: sets carry durationSeconds (time no longer overloads reps)
@@ -1104,6 +1209,9 @@ function freshUI(){
     expandedWorkouts:new Set(),
     expandedDone:new Set(),     /* keyed by exercise index within the active workout */
     overviewOpen:false,         /* whether the session-overview drawer is expanded */
+    timerSheetOpen:false,       /* rest-length presets expanded in the action bar */
+    showRpe:false,              /* the optional RPE column in the set rows */
+    notesOpen:false,            /* session-notes field expanded (auto if a note exists) */
     routineDraft:null,          /* object while editing a routine */
     routineError:'',
     exerciseDraft:null,         /* object while editing one exercise row */
@@ -1153,7 +1261,21 @@ function applyTheme(){
    ============================================================ */
 /* #toast-region is aria-live, so a toast is already announced to screen
    readers. announce() is only for feedback that has no visible toast. */
+/* The action bar is sticky along the bottom edge — exactly where toasts
+   appear. Measured from where the bar actually is on screen rather than from
+   its height, because at the very end of the page it is no longer pinned. */
+function liftToasts(){
+  const bar = $('.actionbar');
+  let lift = 20;
+  if (bar){
+    const r = bar.getBoundingClientRect();
+    if (r.bottom > 0 && r.top < window.innerHeight)
+      lift = Math.max(20, window.innerHeight - r.top + 12);
+  }
+  document.body.style.setProperty('--toast-lift', lift + 'px');
+}
 function toast(msg){
+  liftToasts();
   const region = $('#toast-region');
   const el = document.createElement('div');
   el.className = 'toast';
@@ -1205,12 +1327,36 @@ function confirmDlg(title, body, confirmLabel, danger){
 /* ============================================================
    REST TIMER  (kept in module scope; persisted on activeWorkout)
    ============================================================ */
-const timer = { seconds:90, remaining:90, running:false, endsAt:0, done:false };
+/* `seconds` is the rest length the user chose (it drives which preset reads as
+   selected); `total` is the denominator the drain bar divides by. They are
+   separate because +0:30 must extend the countdown without silently
+   re-selecting a different preset. */
+const timer = { seconds:90, total:90, remaining:90, running:false, endsAt:0, done:false, beepScheduled:false };
+
+/* Rest presets are the rest times this session actually uses, so tapping one
+   is a real choice rather than a coincidence. Falls back to REST_PRESETS when
+   a session has too few distinct values to be useful. */
+function restPresets(){
+  const w = state.activeWorkout;
+  const seen = new Set(), out = [];
+  const add = v => {
+    const n = toNum(v);
+    if (n == null) return;
+    const c = clamp(Math.round(n), REST_MIN, REST_MAX);
+    if (!seen.has(c)){ seen.add(c); out.push(c); }
+  };
+  const cur = w && w.exercises[w.currentExerciseIndex];
+  if (cur) add(cur.restSeconds);                                  /* the one in play first */
+  if (w) w.exercises.forEach(ex => add(ex.restSeconds));
+  add(state.settings.defaultRest);
+  if (out.length < 3) REST_PRESETS.forEach(add);
+  return out.slice(0, 4).sort((a,b) => a - b);
+}
 
 function persistTimer(){
   if (state.activeWorkout){
     state.activeWorkout.timer = {
-      seconds:timer.seconds, remaining:Math.round(timer.remaining),
+      seconds:timer.seconds, total:timer.total, remaining:Math.round(timer.remaining),
       running:timer.running, endsAt:timer.endsAt
     };
     save();
@@ -1221,37 +1367,53 @@ function restoreTimer(){
   timer.running = false; timer.done = false;
   timer.seconds = (t && t.seconds) || state.settings.defaultRest;
   timer.remaining = (t && (t.remaining != null ? t.remaining : t.seconds)) || timer.seconds;
+  timer.total = (t && t.total) || timer.seconds;
   if (t && t.running && t.endsAt){
     const rem = (t.endsAt - Date.now()) / 1000;
     if (rem > 0){ timer.remaining = rem; timer.endsAt = t.endsAt; timer.running = true; }
     else { timer.remaining = 0; timer.done = true; }
   }
+  timer.total = Math.max(timer.total, timer.remaining);
+  timer.beepScheduled = timer.running ? scheduleRestBeep(timer.remaining) : false;
 }
 function loadTimer(sec){
+  cancelRestBeep();
   timer.seconds = sec || state.settings.defaultRest;
+  timer.total = timer.seconds;
   timer.remaining = timer.seconds;
-  timer.running = false; timer.done = false;
+  timer.running = false; timer.done = false; timer.beepScheduled = false;
   persistTimer(); drawTimer();
 }
 function startTimer(){
-  if (timer.remaining <= 0){ timer.remaining = timer.seconds; timer.done = false; }
+  if (timer.remaining <= 0){ timer.remaining = timer.seconds; timer.total = timer.seconds; timer.done = false; }
   timer.endsAt = Date.now() + timer.remaining * 1000;
   timer.running = true;
+  timer.beepScheduled = scheduleRestBeep(timer.remaining);
   persistTimer(); drawTimer();
 }
 function pauseTimer(){
   if (timer.running){ timer.remaining = Math.max(0, (timer.endsAt - Date.now())/1000); }
   timer.running = false;
+  cancelRestBeep(); timer.beepScheduled = false;
   persistTimer(); drawTimer();
 }
 function resetTimer(){
   timer.running = false; timer.done = false;
   timer.remaining = timer.seconds;
+  timer.total = timer.seconds;
+  cancelRestBeep(); timer.beepScheduled = false;
   persistTimer(); drawTimer();
 }
+/* Extends the countdown only. `total` grows with it so the drain bar stays a
+   fraction of a whole; `seconds` is left alone so the chosen preset stays
+   chosen. */
 function addThirty(){
-  timer.seconds += 30; timer.remaining += 30;
-  if (timer.running) timer.endsAt += 30000;
+  timer.remaining += 30;
+  timer.total = Math.max(timer.total, timer.remaining);
+  if (timer.running){
+    timer.endsAt += 30000;
+    timer.beepScheduled = scheduleRestBeep(timer.remaining);
+  }
   timer.done = false;
   persistTimer(); drawTimer();
 }
@@ -1272,14 +1434,20 @@ function currentRestSeconds(){
 function timerRemaining(){
   return timer.running ? Math.max(0, (timer.endsAt - Date.now())/1000) : timer.remaining;
 }
-/* Cheap path, runs four times a second: only the numbers that actually move. */
+/* Under this many seconds the bar turns amber — a peripheral "nearly up"
+   signal, so the digits don't have to be read. */
+const REST_SOON = 20;
+
+/* Cheap path, runs four times a second: only what actually moves. */
 function paintTimerTime(){
   const timeEl = $('#timer-time');
   if (!timeEl) return;
   const rem = timerRemaining();
   timeEl.textContent = fmtClock(rem);
   const fill = $('#timer-fill');
-  if (fill) fill.style.width = (timer.seconds > 0 ? Math.min(100, rem/timer.seconds*100) : 0) + '%';
+  if (fill) fill.style.width = (timer.total > 0 ? clamp(rem/timer.total*100, 0, 100) : 0) + '%';
+  const bar = $('#timer-panel');
+  if (bar) bar.classList.toggle('is-soon', timer.running && rem <= REST_SOON);
 }
 /* Full repaint, runs on state transitions and after every render. */
 function drawTimer(){
@@ -1287,64 +1455,124 @@ function drawTimer(){
   if (!timeEl) return;
   paintTimerTime();
   const rem = timerRemaining();
-  const panel = $('#timer-panel');
+  const bar = $('#timer-panel');
   const status = $('#timer-status');
   const toggle = $('#timer-toggle');
-  if (panel){
-    panel.classList.toggle('is-running', timer.running);
-    panel.classList.toggle('is-done', timer.done);
+  if (bar){
+    bar.classList.toggle('is-running', timer.running);
+    bar.classList.toggle('is-done', timer.done);
   }
   if (status){
     status.textContent = timer.done ? 'Rest complete — start your next set.'
       : timer.running ? 'Resting… press space to pause.'
-      : (rem < timer.seconds ? 'Paused.' : 'Ready. Timer starts after each completed set.');
+      : (rem < timer.total ? 'Paused.' : 'Ready. Timer starts after each completed set.');
   }
   if (toggle){
-    toggle.innerHTML = (timer.running ? IC.pause : IC.play) + '<span>' +
-      (timer.running ? 'Pause' : (rem < timer.seconds && !timer.done ? 'Resume' : 'Start')) + '</span>';
-    toggle.setAttribute('aria-label', timer.running ? 'Pause rest timer' : 'Start rest timer');
+    const label = timer.running ? 'Pause' : (rem < timer.total && !timer.done ? 'Resume' : 'Start');
+    toggle.innerHTML = (timer.running ? IC.pause : IC.play) + '<span>' + label + '</span>';
+    toggle.setAttribute('aria-label', timer.running ? 'Pause rest timer' : label + ' rest timer');
   }
   $$('.preset-btn').forEach(b =>
     b.setAttribute('aria-pressed', String(Number(b.dataset.sec) === timer.seconds)));
 }
+/* One place the rest-finished transition happens, so the wall-clock tick and a
+   late wake-up cannot both run it. */
+function completeRest(){
+  if (!timer.running) return;
+  timer.running = false; timer.remaining = 0; timer.done = true;
+  persistTimer();
+  announce('Rest complete.');
+  /* the beep was scheduled in the audio clock at start; only fall back to an
+     immediate one if that could not be arranged */
+  if (!timer.beepScheduled) beep();
+  timer.beepScheduled = false;
+  drawTimer();
+}
 function tickTimer(){
   if (!state.activeWorkout && !timer.running) return;
   if (timer.running){
-    if ((timer.endsAt - Date.now())/1000 <= 0){
-      timer.running = false; timer.remaining = 0; timer.done = true;
-      persistTimer();
-      announce('Rest complete.');
-      beep();
-      drawTimer();          /* transition: repaint labels and panel state */
-    } else {
-      paintTimerTime();
-    }
+    if ((timer.endsAt - Date.now())/1000 <= 0) completeRest();
+    else paintTimerTime();
   }
   /* keep elapsed workout time fresh */
   const el = $('#workout-elapsed');
   if (el && state.activeWorkout) el.textContent = fmtDuration(Date.now() - state.activeWorkout.startedAt);
 }
 let audioCtx = null;
+let scheduledBlips = [];
+function ensureAudio(){
+  if (audioCtx) return audioCtx;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return null;
+  try{ audioCtx = new Ctx(); }catch(e){ return null; }
+  return audioCtx;
+}
+function blipAt(ctx, t0, f){
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = 'sine'; o.frequency.value = f;
+  o.connect(g); g.connect(ctx.destination);
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(0.18, t0 + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.35);
+  o.start(t0); o.stop(t0 + 0.4);
+  return o;
+}
+/* The 250 ms tick is throttled in a backgrounded tab, so the end-of-rest beep
+   is queued in the audio clock the moment rest starts instead. Web Audio
+   scheduling is sample-accurate and unaffected by timer throttling, so the
+   beep lands on time even with the tab in the background. Returns whether the
+   beep is now queued, so completeRest() knows not to sound a second one. */
+function scheduleRestBeep(delaySec){
+  cancelRestBeep();
+  if (!state.settings.sound) return false;
+  const ctx = ensureAudio();
+  if (!ctx) return false;
+  try{
+    if (ctx.state === 'suspended') ctx.resume();
+    const t = ctx.currentTime + Math.max(0, delaySec);
+    scheduledBlips = [blipAt(ctx, t, 880), blipAt(ctx, t + 0.28, 1175)];
+    return true;
+  }catch(e){ return false; }
+}
+function cancelRestBeep(){
+  scheduledBlips.forEach(o => { try{ o.stop(); }catch(e){ /* already stopped */ } });
+  scheduledBlips = [];
+}
+/* Immediate fallback for when the beep could not be scheduled ahead of time. */
 function beep(){
   if (!state.settings.sound) return;
+  const ctx = ensureAudio();
+  if (!ctx) return;
   try{
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return;
-    if (!audioCtx) audioCtx = new Ctx();
-    const ctx = audioCtx;
     if (ctx.state === 'suspended') ctx.resume();
-    const blip = (t0, f) => {
-      const o = ctx.createOscillator(), g = ctx.createGain();
-      o.type = 'sine'; o.frequency.value = f;
-      o.connect(g); g.connect(ctx.destination);
-      g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(0.18, t0 + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.35);
-      o.start(t0); o.stop(t0 + 0.4);
-    };
-    blip(ctx.currentTime, 880);
-    blip(ctx.currentTime + 0.28, 1175);
+    blipAt(ctx, ctx.currentTime, 880);
+    blipAt(ctx, ctx.currentTime + 0.28, 1175);
   }catch(e){ /* audio unavailable — visual announcement still happens */ }
+}
+
+/* ---------- screen wake lock ----------
+   A phone propped against a rack turns its screen off mid-set. The lock is
+   held for exactly as long as a workout is active, and the browser drops it
+   whenever the page is hidden, so it is re-requested on the way back. */
+let wakeLock = null, wakeLockPending = false;
+function acquireWakeLock(){
+  if (wakeLock || wakeLockPending || !('wakeLock' in navigator)) return;
+  if (document.visibilityState !== 'visible') return;
+  wakeLockPending = true;
+  navigator.wakeLock.request('screen').then(lock => {
+    wakeLockPending = false;
+    wakeLock = lock;
+    lock.addEventListener('release', () => { wakeLock = null; });
+  }).catch(() => { wakeLockPending = false; wakeLock = null; });
+}
+function releaseWakeLock(){
+  if (!wakeLock) return;
+  const lock = wakeLock;
+  wakeLock = null;
+  try{ lock.release(); }catch(e){ /* already gone */ }
+}
+function syncWakeLock(){
+  if (state.activeWorkout) acquireWakeLock(); else releaseWakeLock();
 }
 
 /* ============================================================
@@ -1397,6 +1625,29 @@ function setSummary(s){
 function workoutVolume(w){ return w.exercises.reduce((a,ex) => a + sumVolume(ex.sets), 0); }
 function workoutSets(w){ return w.exercises.reduce((a,ex) => a + ex.sets.filter(s => s.completed).length, 0); }
 function workoutPlannedSets(w){ return w.exercises.reduce((a,ex) => a + ex.sets.length, 0); }
+/* Minutes left, measured from this session's own pace: the median gap between
+   consecutive completed sets, times the sets still to do. Returns null until
+   there are enough gaps to be worth showing — a guess from one data point is
+   worse than no estimate. Gaps outside 5s–15min are dropped as interruptions
+   rather than rest. */
+function sessionEstimate(w){
+  const remaining = workoutPlannedSets(w) - workoutSets(w);
+  if (remaining <= 0) return null;
+  const stamps = [];
+  w.exercises.forEach(ex => ex.sets.forEach(sx => {
+    if (sx.completed && sx.completedAt) stamps.push(sx.completedAt);
+  }));
+  stamps.sort((a,b) => a - b);
+  const gaps = [];
+  for (let i = 1; i < stamps.length; i++){
+    const g = (stamps[i] - stamps[i-1]) / 1000;
+    if (g > 5 && g < 900) gaps.push(g);
+  }
+  if (gaps.length < 2) return null;
+  gaps.sort((a,b) => a - b);
+  const median = gaps[Math.floor(gaps.length / 2)];
+  return Math.max(1, Math.round(remaining * median / 60));
+}
 /* An imported session may have no end time; report that rather than showing 0. */
 function workoutDuration(w){
   return (w.finishedAt && w.startedAt && w.finishedAt >= w.startedAt) ? w.finishedAt - w.startedAt : NaN;
@@ -1448,7 +1699,10 @@ function beginWorkout(workout){
   ui.view = 'today';
   ui.selectedRoutineId = null;
   ui.expandedDone.clear();   /* keys are indexes into the previous workout */
-  ui.overviewOpen = false;
+  /* nothing to log yet means the drawer is where the user needs to be */
+  ui.overviewOpen = workout.exercises.length === 0;
+  ui.timerSheetOpen = false;
+  ui.notesOpen = false;
   ui.focus = 'workout-title';
   render();
 }
@@ -2173,7 +2427,20 @@ function render(){
   main.innerHTML = viewHTML();
   if (switched) window.scrollTo(0,0);
   drawTimer();
+  liftToasts();      /* the bar's height changes with the sheet and the set row */
+  syncWakeLock();
   applyFocus();
+}
+/* The session strip sticks directly under the header, so the header's real
+   height has to be a value CSS can read. */
+function trackHeaderHeight(){
+  const header = $('.app-header');
+  if (!header) return;
+  const apply = () => document.documentElement.style.setProperty(
+    '--header-h', header.getBoundingClientRect().height + 'px');
+  apply();
+  if (window.ResizeObserver) new ResizeObserver(apply).observe(header);
+  else window.addEventListener('resize', apply);
 }
 /* Templates must not mutate ui while they build strings, so the two selections
    that can dangle (a deleted routine, a deleted trend exercise) settle here. */
@@ -2222,12 +2489,13 @@ function viewHTML(){
 /* ---------- TODAY ---------- */
 function viewToday(){
   const w = state.activeWorkout;
-  const head =
-    '<div class="view-head">' +
+  /* Mid-session the "Today / <date>" head is 100px of chrome above the thing
+     you came to do, saying what the current nav tab already says — and the
+     workout supplies its own h1. So it only appears when idle. */
+  if (w) return htmlActiveWorkout(w);
+  return '<div class="view-head">' +
       '<div><h1>Today</h1><p class="view-sub">' + esc(fmtDateLong(Date.now())) + '</p></div>' +
-      (w ? '<button type="button" class="btn" data-action="go-history">' + IC.flag + '<span>History</span></button>' : '') +
-    '</div>';
-  return head + (w ? htmlActiveWorkout(w) : htmlPicker());
+    '</div>' + htmlPicker();
 }
 
 function htmlPicker(){
@@ -2273,33 +2541,24 @@ function htmlActiveWorkout(w){
   const ex = currentExercise();
   const doneSets = workoutSets(w);
   const planned = workoutPlannedSets(w);
-  const pct = planned ? Math.round(doneSets/planned*100) : 0;
   const allDone = w.exercises.length > 0 && w.currentExerciseIndex >= w.exercises.length;
 
-  let html = '<section class="panel ex-panel" aria-label="Active workout">' +
+  let html = htmlSessionStrip(w);
+
+  html += '<section class="panel ex-panel" aria-label="Active workout">' +
     '<div class="pad">' +
       '<div class="workout-head">' +
         '<div>' +
           '<h1 class="workout-title" id="workout-title" tabindex="-1">' + esc(w.routineName) + '</h1>' +
           '<p class="workout-meta">' +
-            '<span>Started ' + fmtTime(w.startedAt) + '</span>' +
+            '<span class="narrow-hide">Started ' + fmtTime(w.startedAt) + '</span>' +
             '<span class="mono" id="workout-elapsed">' + fmtDuration(Date.now() - w.startedAt) + '</span>' +
-            '<span>' + doneSets + '/' + planned + ' sets</span>' +
+            '<span>' + fmtNum(workoutVolume(w)) + ' ' + unitLabel() + '</span>' +
           '</p>' +
         '</div>' +
         '<div class="workout-head-actions">' +
-          '<button type="button" class="btn btn-danger" data-action="discard-workout">' + IC.trash + '<span>Discard</span></button>' +
-          '<button type="button" class="btn btn-primary" data-action="finish-workout">' + IC.flag + '<span>Finish workout</span></button>' +
-        '</div>' +
-      '</div>' +
-      '<div class="progress-line">' +
-        '<div class="progress-track"><div class="progress-fill" style="width:' + pct + '%"></div></div>' +
-        '<div class="progress-foot">' +
-          '<p class="progress-label">' + (w.exercises.length ? 'Exercise ' + Math.min(w.currentExerciseIndex+1, w.exercises.length) + ' of ' + w.exercises.length : 'No exercises yet') + ' · ' + pct + '% of sets done</p>' +
-          (w.exercises.length > 1
-            ? '<button type="button" id="overview-toggle-btn" class="btn btn-sm overview-toggle" data-action="toggle-overview" ' +
-              'aria-expanded="' + ui.overviewOpen + '" aria-controls="workout-overview"><span>Overview</span>' + IC.chev + '</button>'
-            : '') +
+          '<button type="button" class="btn btn-primary" data-action="finish-workout">' + IC.flag +
+            '<span>Finish<span class="narrow-hide"> workout</span></span></button>' +
         '</div>' +
       '</div>' +
     '</div>';
@@ -2307,44 +2566,83 @@ function htmlActiveWorkout(w){
   if (ex){
     html += htmlCurrentExercise(w, ex);
   } else if (allDone && w.exercises.length){
-    html += '<div class="pad" id="ex-panel-top" tabindex="-1">' +
+    html += '<div class="pad divider-top" id="ex-panel-top" tabindex="-1">' +
       '<div class="empty is-solid"><h3>All exercises done</h3>' +
       '<p>' + doneSets + ' sets completed · ' + fmtNum(workoutVolume(w)) + ' ' + unitLabel() + ' total volume.</p>' +
       '<div class="form-actions">' +
         '<button type="button" class="btn btn-primary btn-big" data-action="finish-workout">' + IC.flag + '<span>Finish workout</span></button>' +
       '</div></div></div>';
   } else {
-    html += '<div class="pad" id="ex-panel-top" tabindex="-1">' +
-      '<p class="muted">No exercises in this session yet — add one below.</p></div>';
+    html += '<div class="pad divider-top" id="ex-panel-top" tabindex="-1">' +
+      '<div class="empty is-solid"><h3>Nothing planned yet</h3>' +
+      '<p>Add the first movement to this session.</p>' +
+      '<div class="form-actions">' +
+        '<button type="button" class="btn btn-primary" data-action="open-overview">' + IC.plus + '<span>Add an exercise</span></button>' +
+      '</div></div></div>';
   }
 
-  /* session notes */
-  html += '<div class="pad divider-top">' +
-    '<label class="field"><span class="cap">Session notes</span>' +
-    '<textarea data-bind="wnotes" rows="2" placeholder="Optional — how did it feel?">' + esc(w.notes || '') + '</textarea></label></div>';
-
+  html += htmlSessionNote(w);
   html += '</section>';
 
-  html += htmlTimerPanel();
-  html += htmlAddExercise();
-
-  /* sticky one-handed action bar */
-  if (ex){
-    const hasOpen = ex.sets.some(s => !s.completed);
-    html += '<div class="sticky-actions">' +
-      (hasOpen
-        ? '<button type="button" class="btn btn-primary btn-big" data-action="complete-current" id="btn-complete">' + IC.check + '<span>Complete set ' + (ex.sets.findIndex(s => !s.completed)+1) + '</span><span class="mono xs key-hint">(c)</span></button>'
-        : '<button type="button" class="btn btn-primary btn-big" data-action="next-exercise" id="btn-next-ex">' + IC.skip + '<span>' + (w.currentExerciseIndex + 1 >= w.exercises.length ? 'Done — wrap up' : 'Next exercise') + '</span><span class="mono xs key-hint">(n)</span></button>') +
-      '<button type="button" class="btn btn-big flex-none" data-action="add-set">' + IC.plus + '<span>Set</span></button>' +
-      '<button type="button" class="btn btn-big btn-quiet flex-none" data-action="skip-exercise" title="Skip this exercise">' + IC.skip + '<span class="sr-only">Skip exercise</span></button>' +
-    '</div>';
-  }
-
+  html += htmlActionBar(w, ex);
   html += ui.overviewOpen ? htmlWorkoutOverview(w) : htmlDoneExercises(w);
   return html;
 }
 
+/* The where-am-I strip, sticky under the header for the whole session. One
+   segment per exercise, weighted by its set count, so how far through the
+   session you are is a position rather than a percentage. */
+function htmlSessionStrip(w){
+  const doneSets = workoutSets(w);
+  const planned = workoutPlannedSets(w);
+  const total = w.exercises.length;
+  const idx = w.currentExerciseIndex;
+  const cur = w.exercises[idx];
+  const mins = sessionEstimate(w);
+
+  const where = cur ? '<span class="ex-of">' + (idx+1) + '/' + total + '</span> · ' + esc(cur.name)
+    : total ? '<strong>Session complete</strong>'
+    : '<span class="muted">No exercises yet</span>';
+
+  const segs = w.exercises.map((ex, i) => {
+    const n = ex.sets.length || 1;
+    const done = ex.sets.filter(sx => sx.completed).length;
+    const cls = 'seg' + (i === idx ? ' is-current' : '') + (ex.skipped ? ' is-skipped' : '');
+    const fill = ex.skipped ? 100 : Math.round(done / n * 100);
+    return '<span class="' + cls + '" style="flex:' + n + '"><i style="width:' + fill + '%"></i></span>';
+  }).join('');
+
+  return '<div class="session-strip">' +
+    '<div class="strip-line">' +
+      '<span class="strip-pos">' + where + '</span>' +
+      '<button type="button" id="overview-toggle-btn" class="strip-num overview-toggle" ' +
+        'data-action="toggle-overview" aria-expanded="' + ui.overviewOpen + '" aria-controls="workout-overview">' +
+        doneSets + '/' + planned + ' sets' + (mins != null ? ' · ~' + mins + ' min' : '') +
+        IC.chev + '</button>' +
+    '</div>' +
+    (total
+      ? '<div class="seg-track" role="img" aria-label="Exercise ' + (cur ? (idx+1) : total) + ' of ' + total +
+        ', ' + doneSets + ' of ' + planned + ' sets done">' + segs + '</div>'
+      : '') +
+  '</div>';
+}
+
+/* Collapsed to a button until there is something to say — it used to sit
+   between the sets and the timer at full height, in the middle of the flow. */
+function htmlSessionNote(w){
+  const open = ui.notesOpen || !!(w.notes || '').trim();
+  if (!open){
+    return '<div class="pad divider-top">' +
+      '<button type="button" class="btn btn-sm" data-action="open-session-note">' + IC.plus + '<span>Add session note</span></button>' +
+    '</div>';
+  }
+  return '<div class="pad divider-top">' +
+    '<label class="field"><span class="cap">Session notes</span>' +
+    '<textarea id="wnotes" data-bind="wnotes" rows="2" placeholder="Optional — how did it feel?">' + esc(w.notes || '') + '</textarea></label></div>';
+}
+
 function htmlCurrentExercise(w, ex){
+  const next = w.exercises[w.currentExerciseIndex + 1] || null;
   const stats = exerciseStats(ex.exerciseId);
   const prev = stats.last;
   const showWeight = ex.unit !== 'bw' && ex.unit !== 'time';
@@ -2362,43 +2660,54 @@ function htmlCurrentExercise(w, ex){
   if (bits.length) prevHTML = '<div class="prev-perf">' + bits.join('') + '</div>';
 
   const currentIdx = ex.sets.findIndex(s => !s.completed);
+  /* RPE is optional and empty most of the time, so it is off by default and
+     costs no column — but never hidden once a set actually carries a value. */
+  const showRpe = ui.showRpe || ex.sets.some(s => s.rpe != null);
+  const cols = 'sets' + (showRpe ? '' : ' no-rpe') + (showWeight ? '' : ' no-weight');
 
   let setsHTML =
     '<div class="sets-head" aria-hidden="true">' +
       '<span>Set</span>' +
-      (showWeight ? '<span>Weight (' + esc(wLabel) + ')</span><span>' + esc(repsLabel) + '</span>'
-                  : '<span>' + esc(repsLabel) + '</span><span></span>') +
-      '<span>RPE</span><span>Done</span>' +
+      (showWeight ? '<span>Weight (' + esc(wLabel) + ')</span>' : '') +
+      '<span>' + esc(repsLabel) + '</span>' +
+      (showRpe ? '<span>RPE</span>' : '') +
+      '<span>Done</span>' +
     '</div>';
 
   ex.sets.forEach((s, i) => {
     const isCur = i === currentIdx;
     const prevSet = prev && prev.sets[i] ? setSummary(prev.sets[i]) : '';
+    const n = i + 1;
     setsHTML += '<div class="set-row' + (isCur ? ' is-current' : '') + (s.completed ? ' is-done' : '') + '">' +
-      '<div class="set-num"><span class="n">' + (i+1) + '</span>' +
+      '<div class="set-num"><span class="n">' + n + '</span>' +
         (prevSet ? '<span class="prev" title="Previous session">' + prevSet + '</span>' : '') +
       '</div>';
+    /* Below 640px the per-row captions are hidden (the head row already names
+       the columns), so every input carries its own aria-label — which also
+       names it better than the bare unit ever did. */
     if (showWeight){
       setsHTML += '<label class="field"><span class="cap">' + esc(wLabel) + '</span>' +
         '<input id="sw-' + s.id + '" type="number" inputmode="decimal" min="0" step="0.5" ' +
+        'aria-label="Set ' + n + ' weight in ' + esc(wLabel) + '" ' +
         'data-bind="set" data-id="' + s.id + '" data-field="weight" ' +
         'value="' + (s.weight != null ? s.weight : '') + '" placeholder="0"></label>';
-    } else {
-      setsHTML += '<label class="field"><span class="cap">' + (ex.unit === 'bw' ? 'BW' : 'type') + '</span>' +
-        '<input type="text" disabled value="' + (ex.unit === 'bw' ? 'bodyweight' : 'timed') + '"></label>';
     }
     const timedField = ex.unit === 'time';
     const midVal = timedField ? setDuration(s) : s.reps;
     setsHTML += '<label class="field"><span class="cap">' + esc(repsLabel) + '</span>' +
       '<input id="sr-' + s.id + '" type="number" inputmode="numeric" min="0" step="1" ' +
+      'aria-label="Set ' + n + ' ' + esc(repsLabel) + '" ' +
       'data-bind="set" data-id="' + s.id + '" data-field="' + (timedField ? 'durationSeconds' : 'reps') + '" ' +
       'value="' + (midVal != null ? midVal : '') + '" placeholder="' + (ex.targetReps != null ? ex.targetReps : '0') + '"></label>';
-    setsHTML += '<label class="field"><span class="cap">RPE</span>' +
-      '<input type="number" inputmode="decimal" min="1" max="10" step="0.5" ' +
-      'data-bind="set" data-id="' + s.id + '" data-field="rpe" ' +
-      'value="' + (s.rpe != null ? s.rpe : '') + '" placeholder="–"></label>';
+    if (showRpe){
+      setsHTML += '<label class="field"><span class="cap">RPE</span>' +
+        '<input type="number" inputmode="decimal" min="1" max="10" step="0.5" ' +
+        'aria-label="Set ' + n + ' RPE" ' +
+        'data-bind="set" data-id="' + s.id + '" data-field="rpe" ' +
+        'value="' + (s.rpe != null ? s.rpe : '') + '" placeholder="–"></label>';
+    }
     setsHTML += '<button type="button" id="sd-' + s.id + '" class="btn set-done-btn" data-action="toggle-set" data-id="' + s.id + '" ' +
-      'aria-pressed="' + s.completed + '" aria-label="' + (s.completed ? 'Mark set ' + (i+1) + ' as not done' : 'Mark set ' + (i+1) + ' as done') + '">' +
+      'aria-pressed="' + s.completed + '" aria-label="' + (s.completed ? 'Mark set ' + n + ' as not done' : 'Mark set ' + n + ' as done') + '">' +
       (s.completed ? IC.boxcheck : IC.box) + '</button>';
     setsHTML += '</div>';
   });
@@ -2415,12 +2724,11 @@ function htmlCurrentExercise(w, ex){
     '</div>' +
     prevHTML +
     (ex.notes ? '<p class="ex-notes">“' + esc(ex.notes) + '”</p>' : '') +
-    '<div class="mt-4" role="group" aria-label="Sets for ' + esc(ex.name) + '">' + setsHTML + '</div>' +
+    '<div class="mt-4 ' + cols + '" role="group" aria-label="Sets for ' + esc(ex.name) + '">' + setsHTML + '</div>' +
     '<div class="sets-foot">' +
       '<button type="button" class="btn" data-action="add-set">' + IC.plus + '<span>Add set</span></button>' +
-      (currentIdx === -1 && w.currentExerciseIndex + 1 < w.exercises.length
-        ? '<button type="button" class="btn btn-primary" data-action="next-exercise" id="btn-next-ex">' + IC.skip + '<span>Next exercise</span></button>'
-        : '<button type="button" class="btn btn-quiet" data-action="skip-exercise">' + IC.skip + '<span>Skip exercise</span></button>') +
+      '<button type="button" class="btn rpe-toggle" data-action="toggle-rpe" aria-pressed="' + showRpe + '">RPE</button>' +
+      (next ? '<span class="next-up muted small">Next: ' + esc(next.name) + '</span>' : '') +
     '</div>' +
   '</div>';
 }
@@ -2496,40 +2804,79 @@ function htmlWorkoutOverview(w){
     }
   });
 
+  html += htmlAddExercise();
+  /* Discard lives here rather than beside "Finish workout": they had the same
+     size and adjacency, and a mis-tap costs the whole session. */
+  html += '<div class="pad divider-top">' +
+    '<button type="button" class="btn btn-danger" data-action="discard-workout">' + IC.trash +
+    '<span>Discard this workout</span></button></div>';
   html += '</section>';
   return html;
 }
 
-function htmlTimerPanel(){
-  return '<section class="panel timer" id="timer-panel" aria-label="Rest timer"><div class="pad">' +
-    '<div class="timer-top">' +
-      '<span class="timer-label">' + IC.timer + ' Rest timer</span>' +
-      '<span class="presets" role="group" aria-label="Timer presets">' +
-        REST_PRESETS.map(s =>
-          '<button type="button" class="preset-btn" data-action="timer-preset" data-sec="' + s + '" aria-pressed="false">' + fmtClock(s) + '</button>').join('') +
-      '</span>' +
+/* The action bar: the rest timer and the set actions in the one region a phone
+   can always see. It replaces the old full-width timer panel (which rendered
+   ~500px below the fold on a phone, i.e. invisible at exactly the moment rest
+   starts) and the old sticky button row. Both used to exist; they are now one
+   element, which is also why the timer ids live here — drawTimer() looks each
+   one up singly, so exactly one copy may be in the document. */
+function htmlActionBar(w, ex){
+  const hasOpen = ex && ex.sets.some(s => !s.completed);
+  const openIdx = ex ? ex.sets.findIndex(s => !s.completed) : -1;
+  const last = ex && w.currentExerciseIndex + 1 >= w.exercises.length;
+
+  const sheet = ui.timerSheetOpen
+    ? '<div class="ab-sheet" id="timer-sheet">' +
+        '<span class="sheet-cap">Rest</span>' +
+        '<span class="presets" role="group" aria-label="Rest length presets">' +
+          restPresets().map(sec =>
+            '<button type="button" class="preset-btn" data-action="timer-preset" data-sec="' + sec + '" aria-pressed="false">' +
+            fmtClock(sec) + '</button>').join('') +
+        '</span>' +
+        '<button type="button" class="btn btn-sm push-right" data-action="timer-reset">Reset</button>' +
+      '</div>'
+    : '';
+
+  const setRow = ex
+    ? '<div class="ab-row ab-actions">' +
+        (hasOpen
+          ? '<button type="button" class="btn btn-primary btn-big" data-action="complete-current" id="btn-complete">' +
+            IC.check + '<span>Set ' + (openIdx + 1) + ' done</span><span class="mono xs key-hint">(c)</span></button>'
+          : '<button type="button" class="btn btn-primary btn-big" data-action="next-exercise" id="btn-next-ex">' +
+            IC.skip + '<span>' + (last ? 'Wrap up' : 'Next exercise') + '</span><span class="mono xs key-hint">(n)</span></button>') +
+        '<button type="button" class="btn btn-big ab-icon" data-action="add-set" aria-label="Add a set">' + IC.plus + '</button>' +
+        '<button type="button" class="btn btn-big btn-quiet ab-icon" data-action="skip-exercise" aria-label="Skip this exercise">' + IC.skip + '</button>' +
+      '</div>'
+    : '';
+
+  return '<div class="actionbar" id="timer-panel" aria-label="Rest timer and set actions">' +
+    '<div class="ab-drain" aria-hidden="true"><i id="timer-fill"></i></div>' +
+    sheet +
+    '<div class="ab-rows">' +
+      '<div class="ab-row ab-timer">' +
+        '<output id="timer-time" class="ab-time" aria-label="Rest time remaining">' + fmtClock(timer.remaining) + '</output>' +
+        '<button type="button" class="btn" id="timer-toggle" data-action="timer-toggle">' + IC.play + '<span>Start</span></button>' +
+        '<button type="button" class="btn ab-icon" data-action="timer-add30" aria-label="Add 30 seconds to rest">+0:30</button>' +
+        '<button type="button" class="btn btn-quiet ab-icon" data-action="timer-sheet" id="timer-sheet-btn" ' +
+          'aria-expanded="' + !!ui.timerSheetOpen + '" aria-controls="timer-sheet" aria-label="Rest length options">' + IC.timer + '</button>' +
+      '</div>' +
+      setRow +
     '</div>' +
-    '<div class="timer-main">' +
-      '<output id="timer-time" class="timer-time" aria-label="Time remaining">' + fmtClock(timer.remaining) + '</output>' +
-      '<span class="timer-controls">' +
-        '<button type="button" class="btn btn-primary" id="timer-toggle" data-action="timer-toggle">' + IC.play + '<span>Start</span></button>' +
-        '<button type="button" class="btn" data-action="timer-add30" aria-label="Add 30 seconds">+0:30</button>' +
-        '<button type="button" class="btn btn-quiet" data-action="timer-reset" aria-label="Reset timer">Reset</button>' +
-      '</span>' +
-    '</div>' +
-    '<div class="timer-track"><div class="timer-fill" id="timer-fill"></div></div>' +
     '<p class="timer-status" id="timer-status">Ready.</p>' +
-  '</div></section>';
+  '</div>';
 }
 
+/* Lives in the session-overview drawer: adding a movement mid-session is
+   occasional, and it used to cost ~90px of permanent height right where the
+   timer needed to be. */
 function htmlAddExercise(){
   if (!state.activeWorkout || state.exercises.length === 0) return '';
-  return '<section class="panel mt-4"><div class="pad">' +
+  return '<div class="pad divider-top">' +
     '<form class="form-row" data-form="add-workout-exercise">' +
       '<label class="field"><span class="cap">Add exercise to session</span>' +
       '<select id="add-ex-select">' + exerciseOptions() + '</select></label>' +
       '<button type="submit" class="btn">' + IC.plus + '<span>Add</span></button>' +
-    '</form></div></section>';
+    '</form></div>';
 }
 /* the exercise library as <option>s — used by both "add" pickers */
 function exerciseOptions(selected){
@@ -3107,6 +3454,9 @@ const actions = {
     ui.focus = ui.overviewOpen ? 'overview-title' : 'overview-toggle-btn';
     render();
   },
+  'open-overview'(){ ui.overviewOpen = true; ui.focus = 'add-ex-select'; render(); },
+  'toggle-rpe'(){ ui.showRpe = !ui.showRpe; render(); },
+  'open-session-note'(){ ui.notesOpen = true; ui.focus = 'wnotes'; render(); },
   'overview-up'(d){ moveOverviewExercise(Number(d.idx), -1); },
   'overview-down'(d){ moveOverviewExercise(Number(d.idx), 1); },
   /* same underlying jump as "Reopen exercise" — the drawer just also closes,
@@ -3116,6 +3466,11 @@ const actions = {
   'discard-workout'(){ discardWorkout(); },
 
   'timer-preset'(d){ loadTimer(Number(d.sec)); toast('Rest set to ' + fmtClock(Number(d.sec))); },
+  'timer-sheet'(){
+    ui.timerSheetOpen = !ui.timerSheetOpen;
+    ui.focus = 'timer-sheet-btn';
+    render();
+  },
   'timer-toggle'(){ toggleTimer(); },
   'timer-reset'(){ resetTimer(); },
   'timer-add30'(){ addThirty(); },
@@ -3366,11 +3721,20 @@ function init(){
   else loadTimer(state.settings.defaultRest);
 
   paintBuildRef();
+  trackHeaderHeight();
   $('#help-shortcuts').innerHTML = shortcutTable();
 
   save();            /* persist the seed so a first visit survives a reload */
   render();
   setInterval(tickTimer, 250);
+  /* the browser drops a wake lock whenever the page is hidden, and a rest that
+     ended while backgrounded needs settling on the way back */
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    syncWakeLock();
+    if (timer.running && (timer.endsAt - Date.now()) / 1000 <= 0) completeRest();
+    else drawTimer();
+  });
 
   if (state.activeWorkout) announce('Active workout restored: ' + state.activeWorkout.routineName);
   if (loadWarning) toast(loadWarning);

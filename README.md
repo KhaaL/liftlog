@@ -52,7 +52,7 @@ holding an IIFE. Within each part, sections are marked by banner comments
 | `SEED / SAMPLE DATA` | The starting exercise library and program routines |
 | `STATE` | `state` (persisted) and `ui` (transient), navigation |
 | `FEEDBACK` | Toasts, screen-reader announcements, the confirm dialog |
-| `REST TIMER` | Timer model, persistence across reloads, painting |
+| `REST TIMER` | Timer model, persistence across reloads, scheduled beep, wake lock, painting |
 | `PERFORMANCE LOOKUPS` | Per-exercise history aggregates |
 | `ACTIONS — *` | State mutations, grouped by the screen that triggers them |
 | `RENDERING` | `render()` plus pure `viewX()` / `htmlX()` string builders |
@@ -98,6 +98,33 @@ control is a new table entry rather than a new listener:
 
 Handlers receive the element's `dataset`, so parameters travel as `data-id`,
 `data-idx`, `data-field`, `data-sid`.
+
+## Layout on a phone
+
+The active-workout screen is built around a fixed vertical budget, because a
+phone in a gym is the case that matters:
+
+- **The action bar** (`.actionbar`, `htmlActionBar()`) is sticky along the
+  bottom edge and holds *both* the rest timer and the set actions. These used
+  to be two elements — a full-width timer panel and a sticky button row — and
+  the panel rendered around 500px below the fold, so on a phone the timer was
+  off-screen at exactly the moment `completeCurrentSet()` started it. Anything
+  needed between sets belongs in this bar.
+- **The session strip** (`.session-strip`, `htmlSessionStrip()`) is sticky
+  directly under the header and answers "where am I": exercise *n* of *m*, its
+  name, sets done, a finish estimate, and one progress segment per exercise
+  weighted by its set count. It sticks at `top:var(--header-h)`, which
+  `trackHeaderHeight()` keeps in sync with the header's real height.
+- **Everything occasional is one tap away, not always on screen.** Adding an
+  exercise and discarding the workout live in the session-overview drawer; the
+  rest presets live in the action bar's sheet; the session note collapses to a
+  button until it has content; the RPE column is off until a set carries a
+  value.
+- **Column templates are one custom property.** `--sets-cols` on `.sets` has a
+  variant per shape (`.no-rpe`, `.no-weight`) rather than four grid
+  declarations, and the narrow breakpoint overrides the same four.
+- Below 640px the per-row field captions are hidden — the head row already
+  names the columns — so every set input carries an explicit `aria-label`.
 
 ## Data model
 
@@ -261,7 +288,12 @@ you can.
 
 - **Styling goes in the stylesheet.** Templates use classes (including the small
   layout utilities `.mt-*`, `.mb-*`, `.flex-*`, `.divider-top`, …). The only
-  inline style left is the one genuinely computed value — the progress bar width.
+  inline styles left are genuinely computed values: the rest timer's drain
+  width and the session strip's per-exercise segment weights and fills.
+- **One timer, one set of ids.** `drawTimer()` and `paintTimerTime()` look up
+  `#timer-panel`, `#timer-time`, `#timer-fill`, `#timer-status` and
+  `#timer-toggle` singly, so exactly one copy of the action bar may be in the
+  document. Two would leave the second silently unpainted.
 - **Closed vocabularies live in `DOMAIN CONSTANTS`.** Units, themes, rest bounds,
   routine-item bounds and the shortcut list each have exactly one definition, and
   the templates, validators and importers all read from it. The keyboard help
