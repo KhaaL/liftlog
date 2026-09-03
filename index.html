@@ -1134,12 +1134,12 @@ function load(){
     rescueUnreadable(raw, 'Saved data comes from a newer version of Liftlog and was set aside rather than downgraded.');
     return seedState();
   }
-  if (parsed.version === 1) migrateToV2(parsed);   /* old installs: swap in the program, keep history */
+  if (parsed.version === 1) migrateToV2(parsed);   /* old installs: refresh the seed library, keep history */
   if (parsed.version === 2) migrateToV3(parsed);   /* v2 stored seconds in `reps` for timed sets */
   return normalizeState(parsed);
 }
-/* v1 stored generic sample exercises/routines. v2 ships the real program,
-   so replace the library and routines but keep logged workouts and prefs. */
+/* v1 shipped an earlier seed library/routines. v2 refreshes both to the
+   current sample data, but keeps logged workouts and prefs untouched. */
 function migrateToV2(s){
   s.exercises = sampleExercises();
   s.routines = sampleRoutines(s.exercises);
@@ -1197,71 +1197,55 @@ function sortWorkouts(list){
 /* ============================================================
    SEED / SAMPLE DATA
    ============================================================ */
-/* The exercise library is intentionally limited to the movements in the
-   current training program (Day A / Day B / Home). Notes carry the machine
-   codes and effort targets so they show up on the Today screen. */
+/* Generic, machine-oriented exercise library for a first-time install:
+   mostly pin-loaded machines, plus a couple of bodyweight exceptions where
+   they are genuinely useful (glute activation, a core stability hold). */
 function sampleExercises(){
   const mk = (name, category, unit, notes) => ({ id:uid(), name, category, unit, notes: notes || '' });
   return [
-    mk('Lat Pulldown (OG24)','Back','kg','Vertical pull · RIR 1–2. Primary progression driver for this pattern.'),
-    mk('Front Press (OG41)','Shoulders','kg','Tanto machine — its own tracking line; never merge with OGFA41. Max 1 set at RIR 0–1.'),
-    mk('Seated Row (OG22)','Back','kg','Horizontal pull · RIR 1–2. 4 sets for push:pull balance.'),
-    mk('Single-Leg Squat (OG12)','Legs','kg','Unilateral squat · RIR 1–2. Gives legs a second weekly exposure.'),
-    mk('Bench Press (OG30)','Chest','kg','Horizontal push · RIR 1–2, max 1 set at RIR 0–1 on Day B. On Day A it is a capped accessory exposure, not a second bench day.'),
-    mk('Single-Leg RDL','Posterior chain','kg','Bilateral hold with 15–20 kg · RIR 2–3.'),
-    mk('Leg Raise → L-Sit (OGC7)','Core','bw','RIR 2–3. Progress along the raise → L-sit path once reps get easy.'),
-    mk('Prone Cross Bird-Dog','Core','bw','Ankle weights optional.'),
-    mk('Side Plank','Core','time','Timed hold per side — train both sides.'),
-    mk('Back Extension (OGC7)','Posterior chain','bw','Bodyweight · physio-cleared.'),
-    mk('Squat Machine (OG10)','Legs','kg','Day B main lift · RIR 1–2. Pick this or Hack Squat per visit and record which. Push it — three sessions at RIR 3+ means the ceiling is untested.'),
-    mk('Hack Squat (OG12)','Legs','kg','Day B main-lift alternative · RIR 1–2.'),
-    mk('Leg Press Single-Leg (OG14)','Legs','kg','Day B unilateral alternative — matters most after a bilateral main lift.'),
-    mk('Dead Bug','Core','bw','Bodyweight bracing work.'),
-    mk('Backpack Push-Up','Chest','kg','Load: 10 kg backpack.'),
-    mk('Single-Arm Plate Row','Back','kg','15 kg plate · per side.'),
-    mk('Bulgarian Split Squat','Legs','kg','10 kg backpack · per leg.'),
-    mk('L-Sit (Dip Bars)','Core','bw','Bodyweight hold.'),
-    mk('Biceps Curl (OG72)','Arms','kg','Optional isolation — filler only if time and energy allow.'),
-    mk('Triceps Press (OG80)','Arms','kg','Optional isolation — filler only if time and energy allow.')
+    mk('Chest Press Machine','Chest','kg','Gym machine. Use controlled reps, focus on form.'),
+    mk('Pec Fly Machine','Chest','kg','Light load works well. Focus on a smooth contraction.'),
+    mk('Shoulder Press Machine','Shoulders','kg','Seat height should align handles around shoulder level.'),
+    mk('Seated Row Machine','Back','kg','Keep chest tall, pull towards mid/lower chest, avoid jerking.'),
+    mk('Bicep Curl Machine','Biceps','kg','Machine-guided. Slow eccentric for better control.'),
+    mk('Triceps Extension Machine','Triceps','kg','Controlled full range, avoid locking aggressively.'),
+    mk('Glute Bridge (Bodyweight)','Glutes','bw','Bodyweight activation. Squeeze glutes at the top for 1-2 seconds.'),
+    mk('Leg Press Machine','Legs','kg','Feet shoulder-width, avoid going excessively deep. Keep knees tracking in line with feet.'),
+    mk('Leg Extension Machine','Quads','kg','Light-moderate weight recommended for beginners.'),
+    mk('Leg Curl Machine','Hamstrings','kg','Controlled contraction up top. Take the reps slowly, do not rush.'),
+    mk('Calf Raise Machine','Calves','kg','Full range up/down. Pause briefly at the top for tension.'),
+    mk('Plank','Core','time','Bodyweight stability hold. Focus on a braced, neutral spine.')
   ];
 }
-/* Program routines. Rep ranges from the plan are stored as the top-end
-   target (add a set or bump reps as needed); effort targets live in the
-   exercise notes so they are visible while logging. */
+/* Three beginner-friendly routines (upper / lower / full body). Guideline:
+   2-3 sets of 10-15 reps, 45-120s rest, weight challenging but not maxing out. */
 function sampleRoutines(exs){
   const find = n => exs.find(e => e.name === n).id;
   const item = (name, sets, reps, weight, rest) =>
     ({ id:uid(), exerciseId:find(name), sets, reps, weight, rest });
   return [
-    { id:uid(), name:'Day A — Vertical + Pull (Tanto)', items:[
-      item('Lat Pulldown (OG24)',4,8,null,150),
-      item('Front Press (OG41)',4,8,null,150),
-      item('Seated Row (OG22)',4,8,null,150),
-      item('Single-Leg Squat (OG12)',3,10,null,120),
-      item('Bench Press (OG30)',3,8,null,150),
-      item('Single-Leg RDL',3,10,15,120),
-      item('Leg Raise → L-Sit (OGC7)',3,10,null,90),
-      item('Prone Cross Bird-Dog',2,10,null,60),
-      item('Side Plank',3,45,null,60),
-      item('Back Extension (OGC7)',3,10,null,60)
+    { id:uid(), name:'A - Upper Body (Machine Focus)', items:[
+      item('Chest Press Machine',3,10,null,90),
+      item('Pec Fly Machine',2,12,null,60),
+      item('Shoulder Press Machine',3,10,null,90),
+      item('Seated Row Machine',3,10,null,90),
+      item('Bicep Curl Machine',2,12,null,45),
+      item('Triceps Extension Machine',2,12,null,45)
     ]},
-    { id:uid(), name:'Day B — Overload (Blom Park)', items:[
-      item('Squat Machine (OG10)',4,8,null,180),
-      item('Bench Press (OG30)',3,8,null,180),
-      item('Single-Leg Squat (OG12)',3,10,null,150),
-      item('Single-Leg RDL',3,10,15,120),
-      item('Dead Bug',3,10,null,60),
-      item('Side Plank',2,45,null,60),
-      item('Back Extension (OGC7)',2,10,null,60)
+    { id:uid(), name:'B - Lower Body (Machine Focus)', items:[
+      item('Glute Bridge (Bodyweight)',2,10,null,40),
+      item('Leg Press Machine',3,10,null,120),
+      item('Leg Extension Machine',2,12,null,60),
+      item('Leg Curl Machine',2,12,null,60),
+      item('Calf Raise Machine',2,15,null,40)
     ]},
-    { id:uid(), name:'Home — Bodyweight / Plate / Backpack', items:[
-      item('Backpack Push-Up',3,12,10,90),
-      item('Single-Arm Plate Row',3,12,15,90),
-      item('Bulgarian Split Squat',3,12,10,90),
-      item('Single-Leg RDL',3,10,15,90),
-      item('L-Sit (Dip Bars)',3,10,null,90),
-      item('Prone Cross Bird-Dog',2,10,null,60),
-      item('Side Plank',2,45,null,60)
+    { id:uid(), name:'C - Full Body (Machine Blend)', items:[
+      item('Leg Press Machine',3,10,null,90),
+      item('Chest Press Machine',3,10,null,90),
+      item('Seated Row Machine',3,10,null,90),
+      item('Shoulder Press Machine',2,10,null,70),
+      item('Leg Curl Machine',2,12,null,60),
+      item('Plank',2,25,null,40)
     ]}
   ];
 }
@@ -1283,19 +1267,17 @@ function seedState(){
     id:uid(), routineId:rid, routineName:rname, startedAt:started, finishedAt:started + mins*60000,
     notes:'', currentExerciseIndex:blocks.length, exercises:blocks
   });
-  const dayA = routines[0], home = routines[2];
+  const upper = routines[0], lower = routines[1];
   const workouts = [
-    mkWo(dayA.id,'Day A — Vertical + Pull (Tanto)', at(1,17), 63, [
-      /* first lat set is a warm-up: performed, but excluded from volume/PRs via the count flags */
-      exBlock('Lat Pulldown (OG24)',150,[set(30,8,null,{ countForVolume:false, countForPR:false }),set(55,8,7),set(55,8,8),set(55,7,8),set(50,8,9)]),
-      exBlock('Front Press (OG41)',150,[set(30,8,7),set(30,8,8),set(30,7,9)]),
-      exBlock('Seated Row (OG22)',150,[set(60,8,7),set(60,8,8),set(60,7,8),set(55,8,9)]),
-      exBlock('Side Plank',60,[set(null,null,null,{ unit:'time', durationSeconds:45 }),set(null,null,null,{ unit:'time', durationSeconds:45 }),set(null,null,null,{ unit:'time', durationSeconds:40 })])
+    mkWo(upper.id,'A - Upper Body (Machine Focus)', at(2,17), 48, [
+      exBlock('Chest Press Machine',90,[set(40,10,7),set(40,10,8),set(35,9,8)]),
+      exBlock('Shoulder Press Machine',90,[set(30,10,7),set(30,9,8),set(25,8,9)]),
+      exBlock('Seated Row Machine',90,[set(45,10,7),set(45,10,8),set(40,9,8)])
     ]),
-    mkWo(home.id,'Home — Bodyweight / Plate / Backpack', at(3,8), 38, [
-      exBlock('Backpack Push-Up',90,[set(10,12,7),set(10,11,8),set(10,10,8)]),
-      exBlock('Single-Arm Plate Row',90,[set(15,12,7),set(15,12,8),set(15,10,8)]),
-      exBlock('Bulgarian Split Squat',90,[set(10,12,7),set(10,10,8),set(10,10,9)])
+    mkWo(lower.id,'B - Lower Body (Machine Focus)', at(4,8), 40, [
+      exBlock('Leg Press Machine',120,[set(90,10,7),set(90,10,8),set(80,9,8)]),
+      exBlock('Leg Extension Machine',60,[set(35,12,7),set(35,12,8)]),
+      exBlock('Calf Raise Machine',40,[set(50,15,7),set(50,15,8)])
     ])
   ].sort((a,b) => b.startedAt - a.startedAt);
 
