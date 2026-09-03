@@ -153,6 +153,16 @@ state
   current display unit via `setWeight()`, so totals stay comparable after a
   kg/lb switch. Switching units rewrites the *active* session's sets and re-tags
   their `unit` — converting the value without re-tagging would convert twice.
+- **A completed set is a record, not a plan.** Nothing that propagates a
+  planned value may touch one. `cascadeWeight()` writes a committed weight down
+  to every later set in the exercise, skipping completed ones; `deleteSet()`
+  asks before removing one, and does not ask otherwise (`addSet()` pre-fills a
+  new row from the set above it, so "this row has a weight in it" says nothing
+  about whether the user typed anything).
+- **`ui.expandedDone` is keyed by position in `activeWorkout.exercises`.**
+  Anything that inserts or removes an exercise invalidates every key after it,
+  so it is cleared — see `confirmExerciseRemoval()`. Reordering is deliberately
+  scoped to the upcoming sub-range for the same reason.
 - **Execution and analytics are separate.** `completed` says the set was
   performed; `countForVolume` / `countForPR` (default true) say whether it counts
   toward totals and records. A warm-up is `completed: true` with both flags
@@ -339,6 +349,26 @@ you can.
 - **Feedback has one channel per message.** `#toast-region` is `aria-live`, so a
   toast is already announced; `announce()` is only for feedback that has no
   visible toast. Do not pair them.
+
+## Typography
+
+One family, sans-serif throughout, differentiated by size, weight and tracking
+rather than by a second face. Every family named in `--font-ui` and
+`--font-mono` is open-source (SIL OFL or Apache-2.0), ordered by how likely it
+is to be installed already — Roboto and Noto cover Android, Inter and Source
+Sans most Linux desktops, DejaVu and Liberation the rest.
+
+**No webfont is fetched, so nothing is guaranteed.** The app makes no network
+calls and ships as one document, which rules out both a `@font-face` URL and a
+separate font file; the stacks are a preference list, and on a machine with
+none of those families installed the generic `sans-serif` / `monospace`
+keywords decide, which may well land on a proprietary face. Genuinely
+guaranteeing an open-source face means embedding a subset as a `data:` URI —
+see [ENHANCEMENTS.md](ENHANCEMENTS.md) for what that costs.
+
+`--font-mono` is kept for the rest countdown and tabular figures, where
+consistent digit widths stop the numbers jittering as they change. Its families
+are sans-serif designs too.
 
 ## Accessibility
 

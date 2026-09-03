@@ -37,9 +37,18 @@
   --shadow-sm:0 1px 2px rgb(32 36 42 / .06);
   --shadow-md:0 4px 14px rgb(32 36 42 / .10);
 
-  --font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI","Helvetica Neue",Helvetica,Arial,sans-serif;
-  --font-display:Georgia,"Iowan Old Style","Times New Roman",serif;
-  --font-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  /* Open-source, sans-serif, legible at the sizes a phone uses in a gym.
+     Every named family is OFL or Apache-2.0 licensed; the previous stacks
+     led with proprietary system faces (SF, Segoe) and a serif display face.
+     No webfont is fetched: the app makes no network calls and ships as one
+     document, so this is a preference list and the generic `sans-serif` /
+     `monospace` keywords are the guaranteed floor. Order is by how likely a
+     family is to be installed already — Roboto and Noto cover Android, Inter
+     and Source Sans most Linux desktops, DejaVu and Liberation the rest.
+     There is no separate display face: headings are the same family,
+     separated by size, weight and tracking. */
+  --font-ui:"Inter","Roboto","Noto Sans","Open Sans","Source Sans 3","DejaVu Sans","Liberation Sans",sans-serif;
+  --font-mono:"JetBrains Mono","Fira Mono","Roboto Mono","Noto Sans Mono","DejaVu Sans Mono","Liberation Mono",monospace;
 
   /* Height of the sticky header, remeasured by trackHeaderHeight() so the
      session strip can stick directly beneath it at any width. */
@@ -202,7 +211,7 @@ strong{ font-weight:650; }
 }
 .header-inner{ display:flex; align-items:center; gap:var(--sp-4); min-height:52px; padding-top:var(--sp-1); padding-bottom:var(--sp-1); }
 .wordmark{
-  font-family:var(--font-display); font-size:19px; font-weight:700; letter-spacing:.01em;
+  font-size:19px; font-weight:700; letter-spacing:-.015em;
   display:flex; align-items:center; gap:8px; margin:0; user-select:none;
 }
 .wordmark .mark{ color:var(--accent); }
@@ -234,10 +243,10 @@ strong{ font-weight:650; }
    ============================================================ */
 main{ padding-top:var(--sp-5); padding-bottom:var(--sp-7); min-height:70vh; }
 .view-head{ display:flex; align-items:baseline; justify-content:space-between; gap:var(--sp-4); flex-wrap:wrap; margin-bottom:var(--sp-5); }
-.view-head h1{ font-family:var(--font-display); font-weight:700; }
+.view-head h1{ font-weight:700; letter-spacing:-.022em; }
 .view-sub{ color:var(--muted); font-size:var(--fs-sm); }
 .section-title{ display:flex; align-items:center; gap:var(--sp-3); margin:var(--sp-6) 0 var(--sp-3); }
-.section-title h2{ font-family:var(--font-display); font-weight:700; font-size:var(--fs-md); }
+.section-title h2{ font-weight:700; font-size:var(--fs-md); }
 .section-title .rule{ flex:1; border-top:1px solid var(--border); }
 .panel{
   background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
@@ -316,7 +325,7 @@ kbd{
 .self-end{ justify-self:end; }
 .span-all{ grid-column:1 / -1; }
 .divider-top{ border-top:1px solid var(--border); }
-.panel-title{ font-family:var(--font-display); font-size:var(--fs-md); }
+.panel-title{ font-size:var(--fs-md); font-weight:700; }
 .quote{ font-style:italic; }
 .key-hint{ opacity:.75; }
 .ic-xs{ width:11px; height:11px; display:inline-block; vertical-align:-1px; }
@@ -349,7 +358,7 @@ kbd{
    ACTIVE WORKOUT
    ============================================================ */
 .workout-head{ display:flex; justify-content:space-between; align-items:flex-start; gap:var(--sp-4); flex-wrap:wrap; }
-.workout-title{ font-family:var(--font-display); font-size:var(--fs-xl); font-weight:700; }
+.workout-title{ font-size:var(--fs-xl); font-weight:700; letter-spacing:-.022em; }
 .workout-meta{ color:var(--muted); font-size:var(--fs-sm); display:flex; gap:var(--sp-3); flex-wrap:wrap; margin-top:2px; }
 .workout-head-actions{ display:flex; gap:var(--sp-2); flex-wrap:wrap; }
 
@@ -387,7 +396,7 @@ kbd{
 
 .ex-panel{ border-color:var(--accent); border-top:3px solid var(--accent); }
 .ex-head{ display:flex; justify-content:space-between; gap:var(--sp-3); align-items:baseline; flex-wrap:wrap; }
-.ex-name{ font-family:var(--font-display); font-size:var(--fs-lg); font-weight:700; }
+.ex-name{ font-size:var(--fs-lg); font-weight:700; letter-spacing:-.02em; }
 .ex-tags{ display:flex; gap:var(--sp-2); flex-wrap:wrap; }
 .tag{
   font-size:var(--fs-xs); font-weight:650; padding:2px 8px; border-radius:99px;
@@ -406,10 +415,10 @@ kbd{
 /* sets table — the column template varies with what the exercise needs
    (a bodyweight/timed movement has no weight field, RPE is optional), so it
    lives in one custom property rather than four grid declarations. */
-.sets{ --sets-cols:52px 1fr 1fr 76px 96px; }
-.sets.no-rpe{ --sets-cols:52px 1fr 1fr 96px; }
-.sets.no-weight{ --sets-cols:52px 1fr 76px 96px; }
-.sets.no-weight.no-rpe{ --sets-cols:52px 1fr 96px; }
+.sets{ --sets-cols:52px 1fr 1fr 76px 60px 48px; }
+.sets.no-rpe{ --sets-cols:52px 1fr 1fr 60px 48px; }
+.sets.no-weight{ --sets-cols:52px 1fr 76px 60px 48px; }
+.sets.no-weight.no-rpe{ --sets-cols:52px 1fr 60px 48px; }
 .sets-head,.set-row{
   display:grid; grid-template-columns:var(--sets-cols); gap:var(--sp-2); align-items:end;
 }
@@ -423,6 +432,14 @@ kbd{
 .set-num .n{ font-weight:700; font-variant-numeric:tabular-nums; font-size:var(--fs-md); line-height:1; }
 .set-num .prev{ font-size:10.5px; color:var(--muted); font-variant-numeric:tabular-nums; line-height:1.2; }
 .set-done-btn{ min-height:44px; min-width:44px; padding-inline:10px; justify-content:center; font-size:var(--fs-xs); }
+/* destructive, so quiet until reached for — and never wider than the Done
+   control beside it, which is the one you actually aim at between sets */
+.set-del-btn{
+  min-height:44px; padding-inline:0; justify-content:center;
+  border-color:transparent; background:transparent; color:var(--muted);
+}
+.set-del-btn:hover{ color:var(--danger); border-color:var(--danger); background:var(--danger-soft); }
+.set-del-btn .ic{ width:15px; height:15px; }
 .set-done-btn[aria-pressed="true"]{ background:var(--success-soft); border-color:var(--success); color:var(--success); }
 .sets-foot{ display:flex; gap:var(--sp-2); flex-wrap:wrap; align-items:center; margin-top:var(--sp-3); padding-top:var(--sp-3); border-top:1px solid var(--border); }
 .sets-foot .next-up{ margin-left:auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -587,7 +604,7 @@ kbd{
 /* stats */
 .stats{ display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:var(--sp-3); }
 .stat{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:var(--sp-3) var(--sp-4); }
-.stat .v{ font-size:var(--fs-lg); font-weight:700; font-variant-numeric:tabular-nums; font-family:var(--font-display); }
+.stat .v{ font-size:var(--fs-lg); font-weight:700; font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
 .stat .k{ font-size:var(--fs-xs); text-transform:uppercase; letter-spacing:.05em; color:var(--muted); font-weight:650; }
 .chart-panel{ padding:var(--sp-4); }
 .chart-panel svg{ width:100%; height:auto; display:block; }
@@ -682,7 +699,7 @@ dialog{
 }
 dialog::backdrop{ background:rgb(15 17 20 / .5); }
 .dlg-body{ padding:var(--sp-5); }
-.dlg-body h2{ font-family:var(--font-display); margin-bottom:var(--sp-2); }
+.dlg-body h2{ font-weight:700; letter-spacing:-.02em; margin-bottom:var(--sp-2); }
 .dlg-body p{ color:var(--muted); font-size:var(--fs-sm); }
 .dlg-actions{ display:flex; gap:var(--sp-2); justify-content:flex-end; padding:var(--sp-3) var(--sp-5); border-top:1px solid var(--border); background:var(--surface-2); border-radius:0 0 var(--radius-lg) var(--radius-lg); flex-wrap:wrap; }
 
@@ -696,7 +713,7 @@ dialog::backdrop{ background:rgb(15 17 20 / .5); }
 .dlg-wide .dlg-body{ overflow-y:auto; min-height:0; }
 .dlg-wide .dlg-actions{ flex:none; }
 .dlg-lede{ color:var(--text) !important; font-size:var(--fs-sm); margin-bottom:var(--sp-4); }
-.sh-h{ font-family:var(--font-display); margin:var(--sp-5) 0 var(--sp-2); padding-top:var(--sp-4); border-top:1px solid var(--border); }
+.sh-h{ font-weight:700; margin:var(--sp-5) 0 var(--sp-2); padding-top:var(--sp-4); border-top:1px solid var(--border); }
 .dlg-body .desc{ color:var(--muted); font-size:var(--fs-sm); margin-bottom:var(--sp-3); }
 
 table.fields{ width:100%; border-collapse:collapse; font-size:var(--fs-sm); }
@@ -755,7 +772,7 @@ pre.code code{ background:none; border:0; padding:0; font-size:inherit; white-sp
   text-align:center; padding:var(--sp-7) var(--sp-4); color:var(--muted);
   border:1px dashed var(--border-strong); border-radius:var(--radius); background:var(--surface);
 }
-.empty h3{ color:var(--text); margin-bottom:var(--sp-1); font-family:var(--font-display); }
+.empty h3{ color:var(--text); margin-bottom:var(--sp-1); font-weight:700; }
 .empty p{ margin-bottom:var(--sp-4); font-size:var(--fs-sm); }
 .empty .form-actions{ justify-content:center; }
 .empty.is-solid{ border-style:solid; }
@@ -773,10 +790,12 @@ pre.code code{ background:none; border:0; padding:0; font-size:inherit; white-sp
   .workout-head-actions{ flex:none; flex-wrap:nowrap; }
   /* a keyboard hint is noise on a touch device */
   .key-hint{ display:none; }
-  .sets{ --sets-cols:40px 1fr 1fr 62px 54px; gap:6px; }
-  .sets.no-rpe{ --sets-cols:40px 1fr 1fr 54px; }
-  .sets.no-weight{ --sets-cols:40px 1fr 62px 54px; }
-  .sets.no-weight.no-rpe{ --sets-cols:40px 1fr 54px; }
+  /* weight and reps are not the same size problem: "142.5" needs room, "12"
+     does not, and the fixed columns leave little to share out at 320px */
+  .sets{ --sets-cols:34px 1.4fr 1fr 50px 46px 40px; gap:6px; }
+  .sets.no-rpe{ --sets-cols:34px 1.4fr 1fr 46px 40px; }
+  .sets.no-weight{ --sets-cols:34px 1fr 50px 46px 40px; }
+  .sets.no-weight.no-rpe{ --sets-cols:34px 1fr 46px 40px; }
   .sets-head,.set-row{ gap:6px; }
   /* the head row already names the columns; repeating them on every row cost
      ~19px per set for nothing. Inputs carry an explicit aria-label instead. */
@@ -788,6 +807,29 @@ pre.code code{ background:none; border:0; padding:0; font-size:inherit; white-sp
   .set-row{ padding:6px 0; }
   .set-row input{ min-height:40px; }
   .set-done-btn{ padding-inline:0; }
+}
+/* At 320px the sets grid has 256px to work with once .wrap and .pad take
+   their padding, so the fixed columns get trimmed rather than the weight
+   field. 36x44 for delete still clears the WCAG 2.2 minimum comfortably; it
+   is the Done control beside it that stays a full 44 wide, because that is
+   the one aimed at between sets. */
+@media (max-width:400px){
+  .sets{ --sets-cols:30px 1.4fr 1fr 46px 44px 36px; }
+  .sets.no-rpe{ --sets-cols:30px 1.4fr 1fr 44px 36px; }
+  .sets.no-weight{ --sets-cols:30px 1fr 46px 44px 36px; }
+  .sets.no-weight.no-rpe{ --sets-cols:30px 1fr 44px 36px; }
+  .set-done-btn{ min-width:0; padding-inline:0; }
+}
+/* Six columns do not fit the 256px a 320px screen leaves once .wrap and .pad
+   have taken their padding. Where RPE is switched on at that width, the set
+   number is what goes: its position in the list already says which set it is,
+   and every input names itself ("Set 3 weight in kg") for anyone not reading
+   position. Only here — 360px up keeps the number in every configuration. */
+@media (max-width:360px){
+  .sets{ --sets-cols:1.4fr 1fr 46px 44px 36px; }
+  .sets.no-weight{ --sets-cols:1fr 46px 44px 36px; }
+  .sets:not(.no-rpe) .set-num,
+  .sets:not(.no-rpe) .sets-head span:first-child{ display:none; }
 }
 @media (max-width:480px){
   .wordmark .label{ display:none; }
@@ -1054,7 +1096,7 @@ const SHORTCUTS = [
    than computed: a file cannot contain the hash of the commit it lands in, so
    the stamp names the commit the working tree was built from. Left as
    'unstamped' when the script has never run. */
-const BUILD = { branch:'claude/import-schema-help-8kq2wr', commit:'28bc514', date:'2026-09-02' };
+const BUILD = { branch:'claude/set-cascade-delete-fonts-r7m4qp', commit:'2419b36', date:'2026-09-03' };
 const LS_KEY = 'liftlog.v1';
 const LS_RESCUE_KEY = 'liftlog.v1.unreadable';  /* holds data we could not load, so nothing is lost silently */
 const SCHEMA_VERSION = 3;   /* v3: sets carry durationSeconds (time no longer overloads reps)
@@ -1866,6 +1908,111 @@ function toggleSet(setId){
   ui.focus = 'sd-' + setId;
   render();
 }
+/* Setting a weight is nearly always a decision about the rest of the exercise
+   rather than about one row, so it flows down to every later set that has not
+   been logged yet. Completed sets are left alone — they record what was
+   actually lifted, not what is planned.
+
+   Two deliberate choices. It runs on commit rather than per keystroke, so
+   typing "100" does not walk the rows below through 1 and 10. And it writes
+   the other inputs directly rather than calling render(), because a re-render
+   here would take the focus with it as the user tabs to the reps field. */
+function cascadeWeight(setId, value){
+  const ex = currentExercise(); if (!ex) return;
+  const i = ex.sets.findIndex(x => x.id === setId);
+  if (i === -1) return;
+  ex.sets[i].weight = value;
+  /* clearing a field is not "setting a weight", and must not wipe the rest */
+  if (value == null){ save(); return; }
+  let changed = 0;
+  for (let j = i + 1; j < ex.sets.length; j++){
+    const s = ex.sets[j];
+    if (s.completed || s.weight === value) continue;
+    s.weight = value;
+    const el = document.getElementById('sw-' + s.id);
+    if (el) el.value = value;
+    changed++;
+  }
+  save();
+  /* the rows visibly change, so this is for screen readers only */
+  if (changed) announce(plural(changed, 'later set') + ' set to ' + fmtNum(value) + ' ' + unitLabel() + '.');
+}
+
+/* Deleting a set is only ever about one row — until it is the last one, at
+   which point the exercise has nothing left in it and the real question is
+   whether the exercise belongs here at all. */
+function deleteSet(setId){
+  const w = state.activeWorkout, ex = currentExercise();
+  if (!w || !ex) return;
+  const i = ex.sets.findIndex(s => s.id === setId);
+  if (i === -1) return;
+  if (ex.sets.length === 1){ confirmExerciseRemoval(w, ex); return; }
+  const s = ex.sets[i];
+  const go = () => {
+    ex.sets.splice(i, 1);
+    save();
+    ui.focus = 'sd-' + (ex.sets[Math.min(i, ex.sets.length - 1)] || {}).id;
+    render();
+    toast('Set ' + (i + 1) + ' deleted');
+  };
+  /* Only a logged set is worth a dialog. An uncompleted row is a plan, and
+     "+ Set" puts it back — asking about one would also be misleading, since
+     addSet() pre-fills a new row from the set above it, so "this row has a
+     weight in it" says nothing about whether the user typed anything. */
+  if (!s.completed){ go(); return; }
+  confirmDlg('Delete set ' + (i + 1) + '?',
+    'This set is logged as done. Deleting it removes it from this session\u2019s totals.',
+    'Delete set', true).then(ok => { if (ok) go(); });
+}
+
+/* Removing the exercise from the session is the local answer; if it came from
+   a routine, the user may well mean the plan itself, so that is offered as a
+   separate, clearly-labelled choice rather than assumed either way. */
+function confirmExerciseRemoval(w, ex){
+  const idx = w.currentExerciseIndex;
+  const routine = w.routineId ? routineById(w.routineId) : null;
+  const inRoutine = routine ? routine.items.filter(it => it.exerciseId === ex.exerciseId).length : 0;
+
+  const buttons = [
+    { label:'Cancel', value:'cancel', cls:'', autofocus:true },
+    { label:'Remove from session', value:'session', cls:'btn-danger' }
+  ];
+  if (inRoutine) buttons.push({ label:'Remove from routine too', value:'routine', cls:'btn-danger-solid' });
+
+  dialog({
+    title:'Remove \u201C' + ex.name + '\u201D?',
+    body:'That was its last set, so nothing is left to log for it in this session.' +
+      (inRoutine
+        ? ' You can drop it from this session only, or also remove it from \u201C' + routine.name +
+          '\u201D so it stops appearing in future sessions.'
+        : ''),
+    buttons
+  }).then(v => {
+    if (v !== 'session' && v !== 'routine') return;
+    /* ui.expandedDone is keyed by position in w.exercises, and every index
+       after this one is about to shift — so the expand state goes with it */
+    w.exercises.splice(idx, 1);
+    w.currentExerciseIndex = Math.min(idx, w.exercises.length);
+    ui.expandedDone.clear();
+    let msg = 'Removed ' + ex.name + ' from this session';
+    if (v === 'routine'){
+      /* the workout block does not record which routine item built it, so
+         every item for this exercise goes — reported, not silent */
+      routine.items = routine.items.filter(it => it.exerciseId !== ex.exerciseId);
+      msg = 'Removed ' + ex.name + ' from this session and from ' + routine.name +
+        (inRoutine > 1 ? ' (' + inRoutine + ' entries)' : '');
+    }
+    /* removing the last exercise leaves the same empty session that starting a
+       quick session does, so land in the same place: the drawer, which is
+       where exercises are added */
+    if (!w.exercises.length){ ui.overviewOpen = true; ui.focus = 'add-ex-select'; }
+    else ui.focus = 'ex-panel-top';
+    save();
+    render();
+    toast(msg);
+  });
+}
+
 function addSet(){
   const ex = currentExercise(); if (!ex) return;
   const s = newSetFrom(ex, ex.sets[ex.sets.length - 1]);
@@ -2870,7 +3017,7 @@ function htmlCurrentExercise(w, ex){
       (showWeight ? '<span>Weight (' + esc(wLabel) + ')</span>' : '') +
       '<span>' + esc(repsLabel) + '</span>' +
       (showRpe ? '<span>RPE</span>' : '') +
-      '<span>Done</span>' +
+      '<span>Done</span><span></span>' +
     '</div>';
 
   ex.sets.forEach((s, i) => {
@@ -2888,7 +3035,7 @@ function htmlCurrentExercise(w, ex){
       setsHTML += '<label class="field"><span class="cap">' + esc(wLabel) + '</span>' +
         '<input id="sw-' + s.id + '" type="number" inputmode="decimal" min="0" step="0.5" ' +
         'aria-label="Set ' + n + ' weight in ' + esc(wLabel) + '" ' +
-        'data-bind="set" data-id="' + s.id + '" data-field="weight" ' +
+        'data-bind="set" data-change="set-weight" data-id="' + s.id + '" data-field="weight" ' +
         'value="' + (s.weight != null ? s.weight : '') + '" placeholder="0"></label>';
     }
     const timedField = ex.unit === 'time';
@@ -2908,6 +3055,8 @@ function htmlCurrentExercise(w, ex){
     setsHTML += '<button type="button" id="sd-' + s.id + '" class="btn set-done-btn" data-action="toggle-set" data-id="' + s.id + '" ' +
       'aria-pressed="' + s.completed + '" aria-label="' + (s.completed ? 'Mark set ' + n + ' as not done' : 'Mark set ' + n + ' as done') + '">' +
       (s.completed ? IC.boxcheck : IC.box) + '</button>';
+    setsHTML += '<button type="button" class="btn set-del-btn" data-action="delete-set" data-id="' + s.id + '" ' +
+      'aria-label="Delete set ' + n + '" title="Delete set ' + n + '">' + IC.trash + '</button>';
     setsHTML += '</div>';
   });
 
@@ -3648,6 +3797,7 @@ const actions = {
   'complete-current'(){ completeCurrentSet(); },
   'toggle-set'(d){ toggleSet(d.id); },
   'add-set'(){ addSet(); },
+  'delete-set'(d){ deleteSet(d.id); },
   'skip-exercise'(){ advanceExercise(true); },
   'next-exercise'(){ advanceExercise(false); },
   'reopen-exercise'(d){ reopenExercise(Number(d.idx)); },
@@ -3831,6 +3981,7 @@ const changeHandlers = {
     save(); render();
     toast(field === 'startedAt' ? 'Start time updated' : 'End time updated');
   },
+  'set-weight'(t){ cascadeWeight(t.dataset.id, toNum(t.value)); },
   'import-all'(t){ withPickedFile(t, importData); },
   'import-routines'(t){ withPickedFile(t, importRoutines); },
   'import-history'(t){ withPickedFile(t, importHistory); },

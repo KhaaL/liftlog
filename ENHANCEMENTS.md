@@ -123,7 +123,23 @@ immediate beep when scheduling was not possible, and settles a rest that
 finished while the tab was hidden on the way back. A `Notification` would still
 be the way to reach a user who has switched apps entirely.
 
-### 3.4 Storage headroom
+### 3.4 Embed the UI font instead of hoping for it
+**Why:** `--font-ui` and `--font-mono` name only open-source families, but
+naming a font is not shipping one. On a machine with none of them installed the
+generic `sans-serif` keyword decides, which on macOS and Windows means a
+proprietary face — the opposite of the intent.
+
+**How:** subset Inter (and JetBrains Mono) to Latin, and inline each weight as
+a `@font-face` with a `data:` URI. That keeps both hard constraints — one
+document, no network calls — and is the only way to actually guarantee the
+typeface. It costs file size: roughly 20–30 KB per weight as WOFF2, ~35–40 KB
+once base64-encoded, so three weights plus a mono is on the order of 150 KB
+against a document that is currently ~200 KB. The OFL also requires shipping
+the licence text, which means a second file or a large comment block. Worth
+doing only if the typeface matters more than the single-file size; otherwise
+the current preference list is the honest compromise.
+
+### 3.5 Storage headroom
 `localStorage` is a few MB and `save()` silently no-ops when full, so a long
 history will eventually stop persisting without telling anyone. Either report
 the failure or move to IndexedDB, which also removes the whole-state-per-write
