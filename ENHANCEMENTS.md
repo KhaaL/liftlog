@@ -179,9 +179,19 @@ clear all) is cheap. Currently every one of them is a confirm-and-hope.
   offers the rest times the active session actually uses, current exercise
   first, and falls back to `REST_PRESETS` when a session has too few distinct
   values.
-- **Empty-state guidance.** A first-run walkthrough (create an exercise → build a
-  routine → start it) would beat the current "load sample data" shortcut, which
-  drops an opinionated program on the user.
+- **Empty-state guidance.** ~~A first-run walkthrough would beat the "load sample
+  data" shortcut, which drops an opinionated program on the user.~~ The shortcut
+  is gone, and Settings now documents the import format and hands out working
+  sample files. A first-run walkthrough (create an exercise → build a routine →
+  start it) is still the missing piece, and it matters more now that there is no
+  one-click way to fill an empty app.
+- **`seedState()` still ships one person's program.** Removing the "load sample
+  data" button stopped the app *replacing* your library with the sample program,
+  but a first run is still seeded with it (and `migrateToV2()` depends on those
+  builders). Deciding whether a new install should start empty is a product
+  call, not a cleanup: an empty app plus the first-run walkthrough above is the
+  coherent alternative, and `sampleExercises()` / `sampleRoutines()` should
+  become an importable routines file (see 4.4) rather than code.
 - **A bottom tab bar for navigation.** The header nav now scrolls horizontally
   instead of pushing its last tab off-screen, but five text tabs is still the
   wrong pattern for a phone. A five-icon bottom bar would cost less height —
