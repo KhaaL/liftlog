@@ -176,8 +176,8 @@ state
 
 `load()` runs migrations in sequence for older data:
 
-- **v1 → v2** — replaces the sample library and routines with the real program,
-  keeps logged workouts and preferences.
+- **v1 → v2** — refreshes the seed exercise library and routines to the
+  current sample data, keeps logged workouts and preferences.
 - **v2 → v3** — moves seconds out of `reps` into `durationSeconds`; adds the
   `countForVolume` / `countForPR` split.
 
@@ -226,10 +226,9 @@ wrong: a warm-up set (`countForVolume: false`, still `completed`), timed work
 (seconds in `durationSeconds`, `reps: null`), and a routine item referencing an
 exercise the importing browser may not have.
 
-There is no "load sample data" button. It replaced the user's library and
-routines with one person's training program, which is not a thing an app should
-offer to do; importing a file you chose is the same convenience without the
-surprise.
+There is no "load sample data" button. It would silently replace the user's
+own library and routines, which is not a thing an app should offer to do;
+importing a file you chose is the same convenience without the surprise.
 
 ## Remote storage (optional)
 

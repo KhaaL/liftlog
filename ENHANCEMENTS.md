@@ -64,8 +64,8 @@ This is the single largest gap between the model and the interface.
 
 ### 2.2 Added load on bodyweight exercises
 **Why:** a `bw` exercise renders a disabled weight field, so weighted dips or a
-loaded push-up cannot be logged. The seed data works around this by declaring
-"Backpack Push-Up" as `kg`, which then misreports bodyweight volume.
+loaded push-up cannot be logged. Working around this by declaring the exercise
+as `kg` instead then misreports bodyweight volume.
 
 **How:** allow an optional `+load` value on `bw` sets (the label already exists
 in the design), and count `bodyweight + load` toward volume once a bodyweight
