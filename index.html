@@ -499,6 +499,11 @@ kbd{
 .ab-actions .btn-primary{ flex:1; min-width:0; }
 .ab-actions .btn-big{ min-height:48px; }
 .ab-icon{ flex:none; min-width:44px; padding-inline:10px; }
+/* .btn-quiet drops the border entirely, which reads as flat text rather than
+   a button — but this one opens the rest-length sheet, so it needs enough of
+   a border back to look pressable. */
+#timer-sheet-btn{ border-color:var(--border-strong); }
+#timer-sheet-btn:hover{ border-color:var(--muted); }
 .ab-sheet{
   display:flex; flex-wrap:wrap; align-items:center; gap:6px;
   padding-bottom:var(--sp-3); border-bottom:1px solid var(--border); margin-bottom:var(--sp-3);
@@ -1096,7 +1101,7 @@ const SHORTCUTS = [
    than computed: a file cannot contain the hash of the commit it lands in, so
    the stamp names the commit the working tree was built from. Left as
    'unstamped' when the script has never run. */
-const BUILD = { branch:'claude/set-cascade-delete-fonts-r7m4qp', commit:'2419b36', date:'2026-09-03' };
+const BUILD = { branch:'claude/brave-cori-8quipc', commit:'c724a20', date:'2026-09-03' };
 const LS_KEY = 'liftlog.v1';
 const LS_RESCUE_KEY = 'liftlog.v1.unreadable';  /* holds data we could not load, so nothing is lost silently */
 const SCHEMA_VERSION = 3;   /* v3: sets carry durationSeconds (time no longer overloads reps)
@@ -1873,8 +1878,10 @@ function completeCurrentSet(){
   save();
   announce('Set ' + (idx+1) + ' of ' + ex.sets.length + ' complete.');
   const next = ex.sets.find(x => !x.completed);
-  ui.focus = next ? 'sw-' + next.id : 'btn-next-ex';
-  render();
+  /* the last set done means there's nothing left to log here — move on rather
+     than making the user tap "Next exercise" for a foregone conclusion */
+  if (next){ ui.focus = 'sw-' + next.id; render(); }
+  else advanceExercise(false);
   if (state.settings.autoRest){
     loadTimer(ex.restSeconds || state.settings.defaultRest);
     startTimer();
@@ -1887,37 +1894,47 @@ function toggleSet(setId){
   if (s.completed){ s.completedAt = Date.now(); fillSetDefaults(ex, s); }
   else s.completedAt = null;
   save();
-  ui.focus = 'sd-' + setId;
-  render();
+  /* same rule as completeCurrentSet: checking the last open box also finishes
+     the exercise, so advance rather than sit on a fully-done set list */
+  if (s.completed && allSetsDone(ex)) advanceExercise(false);
+  else { ui.focus = 'sd-' + setId; render(); }
 }
-/* Setting a weight is nearly always a decision about the rest of the exercise
-   rather than about one row, so it flows down to every later set that has not
-   been logged yet. Completed sets are left alone — they record what was
-   actually lifted, not what is planned.
+/* Setting a weight or a rep/duration target is nearly always a decision about
+   the rest of the exercise rather than about one row, so it flows down to
+   every later set that has not been logged yet. Completed sets are left
+   alone — they record what was actually done, not what is planned.
 
    Two deliberate choices. It runs on commit rather than per keystroke, so
    typing "100" does not walk the rows below through 1 and 10. And it writes
    the other inputs directly rather than calling render(), because a re-render
-   here would take the focus with it as the user tabs to the reps field. */
-function cascadeWeight(setId, value){
+   here would take the focus with it as the user tabs to the next field. */
+function cascadeSetField(setId, field, value, elPrefix, unitSuffix){
   const ex = currentExercise(); if (!ex) return;
   const i = ex.sets.findIndex(x => x.id === setId);
   if (i === -1) return;
-  ex.sets[i].weight = value;
-  /* clearing a field is not "setting a weight", and must not wipe the rest */
+  ex.sets[i][field] = value;
+  /* clearing a field is not "setting" it, and must not wipe the rest */
   if (value == null){ save(); return; }
   let changed = 0;
   for (let j = i + 1; j < ex.sets.length; j++){
     const s = ex.sets[j];
-    if (s.completed || s.weight === value) continue;
-    s.weight = value;
-    const el = document.getElementById('sw-' + s.id);
+    if (s.completed || s[field] === value) continue;
+    s[field] = value;
+    const el = document.getElementById(elPrefix + s.id);
     if (el) el.value = value;
     changed++;
   }
   save();
   /* the rows visibly change, so this is for screen readers only */
-  if (changed) announce(plural(changed, 'later set') + ' set to ' + fmtNum(value) + ' ' + unitLabel() + '.');
+  if (changed) announce(plural(changed, 'later set') + ' set to ' + fmtNum(value) + (unitSuffix ? ' ' + unitSuffix : '') + '.');
+}
+function cascadeWeight(setId, value){
+  cascadeSetField(setId, 'weight', value, 'sw-', unitLabel());
+}
+function cascadeReps(setId, value){
+  const ex = currentExercise(); if (!ex) return;
+  const field = ex.unit === 'time' ? 'durationSeconds' : 'reps';
+  cascadeSetField(setId, field, value, 'sr-', ex.unit === 'time' ? 'sec' : '');
 }
 
 /* Deleting a set is only ever about one row — until it is the last one, at
@@ -3025,7 +3042,7 @@ function htmlCurrentExercise(w, ex){
     setsHTML += '<label class="field"><span class="cap">' + esc(repsLabel) + '</span>' +
       '<input id="sr-' + s.id + '" type="number" inputmode="numeric" min="0" step="1" ' +
       'aria-label="Set ' + n + ' ' + esc(repsLabel) + '" ' +
-      'data-bind="set" data-id="' + s.id + '" data-field="' + (timedField ? 'durationSeconds' : 'reps') + '" ' +
+      'data-bind="set" data-change="set-reps" data-id="' + s.id + '" data-field="' + (timedField ? 'durationSeconds' : 'reps') + '" ' +
       'value="' + (midVal != null ? midVal : '') + '" placeholder="' + (ex.targetReps != null ? ex.targetReps : '0') + '"></label>';
     if (showRpe){
       setsHTML += '<label class="field"><span class="cap">RPE</span>' +
@@ -3964,6 +3981,7 @@ const changeHandlers = {
     toast(field === 'startedAt' ? 'Start time updated' : 'End time updated');
   },
   'set-weight'(t){ cascadeWeight(t.dataset.id, toNum(t.value)); },
+  'set-reps'(t){ cascadeReps(t.dataset.id, toNum(t.value)); },
   'import-all'(t){ withPickedFile(t, importData); },
   'import-routines'(t){ withPickedFile(t, importRoutines); },
   'import-history'(t){ withPickedFile(t, importHistory); },
