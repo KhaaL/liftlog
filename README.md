@@ -118,8 +118,8 @@ phone in a gym is the case that matters:
 - **Everything occasional is one tap away, not always on screen.** Adding an
   exercise and discarding the workout live in the session-overview drawer; the
   rest presets live in the action bar's sheet; the session note collapses to a
-  button until it has content; the RPE column is off until a set carries a
-  value.
+  button until it has content; the optional effort column (RPE, RIR, or none)
+  is a Settings-level choice (`settings.effortMetric`), off by default.
 - **Column templates are one custom property.** `--sets-cols` on `.sets` has a
   variant per shape (`.no-rpe`, `.no-weight`) rather than four grid
   declarations, and the narrow breakpoint overrides the same four.
@@ -131,13 +131,13 @@ phone in a gym is the case that matters:
 ```
 state
 ├─ version         schema version (SCHEMA_VERSION)
-├─ settings        { theme, unit, defaultRest, autoRest, sound }
+├─ settings        { theme, unit, defaultRest, autoRest, sound, effortMetric }
 ├─ exercises[]     { id, name, category, unit, notes }        — the library
 ├─ routines[]      { id, name, items[] }                      — the plan
 │   └─ items[]     { id, exerciseId, sets, reps, weight, rest }
 ├─ workouts[]      logged sessions, newest first              — the log
 │   └─ exercises[] { exerciseId, name, unit, targetReps, restSeconds, skipped, sets[] }
-│       └─ sets[]  { id, weight, reps, durationSeconds, rpe, unit, completed, completedAt }
+│       └─ sets[]  { id, weight, reps, durationSeconds, rpe, rir, unit, completed, completedAt }
 └─ activeWorkout   a workout in progress, or null
 ```
 
@@ -167,6 +167,15 @@ state
   performed; `countForVolume` / `countForPR` (default true) say whether it counts
   toward totals and records. A warm-up is `completed: true` with both flags
   false — it is still shown in history, marked as a warm-up.
+- **`rpe` and `rir` are independent fields on a set, but only one shows as an
+  input at a time.** `settings.effortMetric` (`'none' | 'rpe' | 'rir'`) is a
+  single global choice, not per-exercise — logging one style of set at a time
+  is the common case, and a per-exercise setting would need its own UI and
+  migration for one column's worth of value. Both fields still round-trip
+  through import/export and history editing regardless of the current
+  setting, so switching the setting later doesn't lose whichever one a set
+  already carries; only the active-workout input for the *other* one is
+  hidden while it's not selected.
 - **Everything crossing the boundary is validated.** `normalizeState()` and the
   `normalizeImported*()` functions clamp units, themes, numbers and free text on
   the way in, so the render layer never has to defend against stray strings.
@@ -282,6 +291,15 @@ Instead of the form, you can load a JSON config file with the same fields
 `pathStyle`) via **Load config file** — handy if you keep the setup elsewhere
 and don't want to retype it. Treat that file like a credential: it contains
 your secret key in plain text.
+
+**Save configuration** tests the connection before writing anything to
+storage: it sends a signed `GET` against the config you just typed and only
+persists it once that request comes back ok (a 404 still counts — it just
+means nothing has been backed up there yet). A failing request reports why
+and leaves the form open with what you typed untouched, rather than saving
+credentials that don't work. Typed-but-unsaved fields are also kept in memory
+across re-renders, so switching another setting (theme, unit, …) while the
+form is open no longer clears it.
 
 Once configured, **Backup now** and **Restore from remote** are manual,
 on-demand actions — there is no background sync, and restore always confirms
