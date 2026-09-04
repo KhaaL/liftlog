@@ -766,8 +766,7 @@ pre.code code{ background:none; border:0; padding:0; font-size:inherit; white-sp
 .toast.show{ opacity:1; transform:translateY(0); }
 
 .app-footer{ border-top:1px solid var(--border); padding:var(--sp-5) 0 var(--sp-6); color:var(--muted); font-size:var(--fs-xs); }
-.app-footer .wrap{ display:flex; justify-content:space-between; gap:var(--sp-3); flex-wrap:wrap; align-items:center; }
-.build-ref{ font-size:11px; opacity:.75; letter-spacing:-.01em; }
+.app-footer .wrap{ display:flex; justify-content:flex-end; gap:var(--sp-3); flex-wrap:wrap; align-items:center; }
 .footer-btn{ background:none; border:0; color:var(--muted); font-size:var(--fs-xs); cursor:pointer; text-decoration:underline; padding:2px; }
 .footer-btn:hover{ color:var(--text); }
 
@@ -872,8 +871,7 @@ pre.code code{ background:none; border:0; padding:0; font-size:inherit; white-sp
 
 <footer class="app-footer">
   <div class="wrap">
-    <span>Liftlog · <span id="app-build" class="mono build-ref">unstamped</span> · your data never leaves this browser</span>
-    <span>Press <kbd>?</kbd> for shortcuts · <button type="button" class="footer-btn" data-action="help-open">keyboard help</button></span>
+    <span><button type="button" class="footer-btn" data-action="help-open">keyboard help</button></span>
   </div>
 </footer>
 
@@ -1094,12 +1092,6 @@ const SHORTCUTS = [
 /* ============================================================
    STORAGE
    ============================================================ */
-/* Which source this file was built from, shown in the footer. There is no
-   build step (see README), so it is stamped in by tools/stamp-build.sh rather
-   than computed: a file cannot contain the hash of the commit it lands in, so
-   the stamp names the commit the working tree was built from. Left as
-   'unstamped' when the script has never run. */
-const BUILD = { branch:'claude/brave-cori-8quipc', commit:'c724a20', date:'2026-09-03' };
 const LS_KEY = 'liftlog.v1';
 const LS_RESCUE_KEY = 'liftlog.v1.unreadable';  /* holds data we could not load, so nothing is lost silently */
 const SCHEMA_VERSION = 4;   /* v3: sets carry durationSeconds (time no longer overloads reps)
@@ -2457,8 +2449,8 @@ function saveRemoteConfigForm(form){
   const existing = loadRemoteConfig();
   const endpoint = (d.endpoint || '').trim().replace(/\/+$/, '');
   const region = (d.region || '').trim(), bucket = (d.bucket || '').trim(), accessKeyId = (d.accessKeyId || '').trim();
-  if (!/^https:\/\/.+/.test(endpoint)){
-    ui.remoteError = 'Endpoint must be a full https:// URL, e.g. https://s3.us-east-1.amazonaws.com'; render(); return;
+  if (!/^https?:\/\/.+/.test(endpoint)){
+    ui.remoteError = 'Endpoint must be a full http:// or https:// URL, e.g. https://s3.us-east-1.amazonaws.com or http://your-lan-host:9000'; render(); return;
   }
   if (!region || !bucket || !accessKeyId){
     ui.remoteError = 'Region, bucket and access key ID are required.'; render(); return;
@@ -3751,6 +3743,10 @@ function remoteStorageHTML(){
         '<label class="field"><span class="cap">Region</span><input type="text" data-bind="remote" data-field="region" required placeholder="us-east-1" value="' + esc(d.region) + '"></label>' +
         '<label class="field"><span class="cap">Bucket</span><input type="text" data-bind="remote" data-field="bucket" required value="' + esc(d.bucket) + '"></label>' +
       '</div>' +
+      '<p class="hint mt-1">Plain <code>http://</code> is accepted for a LAN or self-hosted endpoint (e.g. ' +
+        '<code>http://srv-usio:3902</code>) — it only works if this app itself was opened over ' +
+        '<code>http://</code>, <code>file://</code>, or localhost, since a page loaded over ' +
+        '<code>https://</code> is blocked from calling an insecure endpoint.</p>' +
       '<div class="form-row mt-2">' +
         '<label class="field flex-2"><span class="cap">Object key / path</span><input type="text" data-bind="remote" data-field="objectKey" placeholder="' + REMOTE_OBJECT_KEY_DEFAULT + '" value="' + esc(d.objectKey) + '"></label>' +
         '<label class="field"><span class="cap">Access key ID</span><input type="text" data-bind="remote" data-field="accessKeyId" required value="' + esc(d.accessKeyId) + '"></label>' +
@@ -4151,19 +4147,6 @@ document.addEventListener('keydown', e => {
 /* ============================================================
    INIT
    ============================================================ */
-/* One-shot: the build stamp never changes while the page is open. Written with
-   textContent so a branch name never has to be trusted as markup. */
-function paintBuildRef(){
-  const el = $('#app-build');
-  if (!el) return;
-  const stamped = BUILD.commit && BUILD.commit !== 'unstamped';
-  el.textContent = stamped ? BUILD.branch + '@' + BUILD.commit : 'unstamped build';
-  el.setAttribute('title', stamped
-    ? 'Built from commit ' + BUILD.commit + ' on branch ' + BUILD.branch +
-      (BUILD.date ? ', ' + BUILD.date : '')
-    : 'This copy was not stamped with a branch or commit.');
-}
-
 function init(){
   applyTheme();
   /* restoreTimer() reads activeWorkout.timer, and loadTimer() overwrites it —
@@ -4171,7 +4154,6 @@ function init(){
   if (state.activeWorkout) restoreTimer();
   else loadTimer(state.settings.defaultRest);
 
-  paintBuildRef();
   trackHeaderHeight();
   $('#help-shortcuts').innerHTML = shortcutTable();
 
