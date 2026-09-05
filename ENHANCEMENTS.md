@@ -44,7 +44,10 @@ data we could not read" (as JSON) and "discard it".
 
 ### 1.4 Warn before a destructive import
 **Why:** a full-backup import replaces everything, including an in-progress
-workout, with only a generic confirm.
+workout, with only a generic confirm. Feeding it the *wrong kind* of file is now
+refused outright (files carry `kind`, and `applyFullBackup()` turns away a
+routines or history file), but a genuine backup still replaces the lot on one
+generic "Import & replace".
 
 **How:** name what is about to be lost in the dialog (`"3 routines, 42 workouts
 and a session in progress"`), and auto-export the current state to a rescue key

@@ -1311,6 +1311,7 @@ function freshUI(){
     editWorkoutId:null,         /* history session currently being edited */
     focus:null,                 /* element id to focus after render */
     remoteFormOpen:false,       /* remote-storage config form expanded in Settings */
+    remoteDraft:null,           /* config loaded from a file but still missing its secret key */
     remoteError:'',
     remoteBusy:false            /* a remote backup/restore/test request is in flight */
   };
@@ -2239,11 +2240,20 @@ function readJSONFile(file, cb){
 }
 
 /* ---------- full backup ---------- */
+/* One builder for the whole-state file, because two destinations write it: the
+   download below and the remote PUT. It carries the same app/kind marker as the
+   routines and history files so an importer can tell the three apart — see
+   applyFullBackup(), which refuses a partial file rather than emptying the
+   fields that file does not carry. */
+function backupPayload(){
+  return Object.assign(
+    { app:'liftlog', kind:'backup', schemaVersion:EXPORT_SCHEMA, source:'liftlog-web',
+      exportedAt:new Date().toISOString() },
+    deepCopy(state));
+}
 function exportData(){
-  downloadJSON(Object.assign(
-    { schemaVersion:EXPORT_SCHEMA, source:'liftlog-web', exportedAt:new Date().toISOString() },
-    deepCopy(state)), dateStamp('liftlog-export'));
-  toast('Data exported');
+  downloadJSON(backupPayload(), dateStamp('liftlog-backup'));
+  toast('Backup exported');
 }
 function importData(file){
   readJSONFile(file, applyFullBackup);
@@ -2251,8 +2261,15 @@ function importData(file){
 /* Shared by file import and remote restore: validate a full-backup object,
    confirm, then replace the in-memory state with it. */
 function applyFullBackup(obj){
+  /* A routines file also carries `version` and an `exercises` array, so the
+     shape check alone would accept one here and then "restore" a state with no
+     history and default settings. Anything that names itself as another kind is
+     turned away with the importer that does want it. */
+  if (obj && (obj.kind === 'routines' || obj.kind === 'history')){
+    toast('That is a ' + obj.kind + ' file — import it under Transfer routines & history'); return;
+  }
   if (!obj || !(obj.version >= 1 && obj.version <= SCHEMA_VERSION) || !Array.isArray(obj.exercises)){
-    toast('Unrecognized data — expected a Liftlog export'); return;
+    toast('Unrecognized data — expected a Liftlog backup'); return;
   }
   confirmDlg('Import data?','This replaces everything currently stored (exercises, routines, history, settings) with the imported file.','Import & replace',true)
     .then(ok => {
@@ -2353,11 +2370,6 @@ async function s3Request(cfg, method, bodyText){
     body: method === 'PUT' ? bodyText : undefined
   });
 }
-function remoteBackupPayload(){
-  return JSON.stringify(Object.assign(
-    { schemaVersion:EXPORT_SCHEMA, source:'liftlog-web', exportedAt:new Date().toISOString() },
-    deepCopy(state)));
-}
 async function remoteRunAction(fn){
   ui.remoteBusy = true; render();
   try{ await fn(); }
@@ -2368,7 +2380,7 @@ function remoteBackup(){
   const cfg = loadRemoteConfig();
   if (!cfg) return;
   return remoteRunAction(async () => {
-    const res = await s3Request(cfg, 'PUT', remoteBackupPayload());
+    const res = await s3Request(cfg, 'PUT', JSON.stringify(backupPayload()));
     if (!res.ok) throw new Error('Backup failed: HTTP ' + res.status);
     cfg.lastBackupAt = Date.now();
     saveRemoteConfig(cfg);
@@ -2400,7 +2412,7 @@ function remoteTestConnection(){
 }
 function saveRemoteConfigForm(form){
   const g = n => { const el = form.elements.namedItem(n); return el ? el.value.trim() : ''; };
-  const existing = loadRemoteConfig();
+  const existing = loadRemoteConfig() || ui.remoteDraft;
   const endpoint = g('endpoint').replace(/\/+$/, '');
   const region = g('region'), bucket = g('bucket'), accessKeyId = g('accessKeyId');
   if (!/^https:\/\/.+/.test(endpoint)){
@@ -2417,25 +2429,70 @@ function saveRemoteConfigForm(form){
     pathStyle: !!form.elements.namedItem('pathStyle').checked,
     lastBackupAt: existing ? existing.lastBackupAt : null
   });
-  ui.remoteError = ''; ui.remoteFormOpen = false;
+  ui.remoteError = ''; ui.remoteFormOpen = false; ui.remoteDraft = null;
   render(); toast('Remote storage configured');
+}
+/* The config file this app reads, so it is also the config file it writes —
+   otherwise "Load config file" only ever accepts hand-written JSON. The secret
+   is optional in both directions: a file without one sets up everything except
+   the credential, which is then typed once on the receiving device. */
+function remoteConfigPayload(cfg, includeSecret){
+  const out = {
+    app:'liftlog', kind:'remote-config', schemaVersion:EXPORT_SCHEMA, source:'liftlog-web',
+    exportedAt:new Date().toISOString(),
+    endpoint:cfg.endpoint, region:cfg.region, bucket:cfg.bucket,
+    objectKey:cfg.objectKey || REMOTE_OBJECT_KEY_DEFAULT,
+    pathStyle:!!cfg.pathStyle,
+    accessKeyId:cfg.accessKeyId
+  };
+  if (includeSecret) out.secretAccessKey = cfg.secretAccessKey;
+  return out;
+}
+/* Writing the secret to the Downloads folder is a real disclosure, so it is a
+   deliberate second choice rather than the default the first button gives you. */
+function exportRemoteConfig(){
+  const cfg = loadRemoteConfig();
+  if (!cfg) return;
+  dialog({ title:'Download configuration file?',
+    body:'The file carries the endpoint, region, bucket, object key and access key ID. ' +
+      'Including the secret access key makes it a complete credential: anyone who opens the file, ' +
+      'or anywhere it gets synced or mailed, can read and write that bucket.',
+    buttons:[
+      { label:'Cancel', value:'', cls:'', autofocus:true },
+      { label:'Without secret key', value:'safe', cls:'btn-primary' },
+      { label:'Include secret key', value:'full', cls:'btn-danger-solid' }
+    ]}).then(choice => {
+    if (!choice) return;
+    downloadJSON(remoteConfigPayload(cfg, choice === 'full'), dateStamp('liftlog-remote-config'));
+    toast(choice === 'full' ? 'Configuration downloaded — it contains your secret key'
+                            : 'Configuration downloaded without the secret key');
+  });
 }
 function loadRemoteConfigFile(file){
   readJSONFile(file, obj => {
-    if (!obj || typeof obj !== 'object' || !obj.endpoint || !obj.bucket || !obj.accessKeyId || !obj.secretAccessKey){
+    if (!obj || typeof obj !== 'object' || !obj.endpoint || !obj.bucket || !obj.accessKeyId){
       toast('That file is missing required remote storage fields'); return;
     }
-    saveRemoteConfig({
+    const cfg = {
       endpoint:String(obj.endpoint).replace(/\/+$/, ''),
       region:String(obj.region || 'us-east-1'),
       bucket:String(obj.bucket),
       accessKeyId:String(obj.accessKeyId),
-      secretAccessKey:String(obj.secretAccessKey),
+      secretAccessKey:obj.secretAccessKey ? String(obj.secretAccessKey) : '',
       objectKey:String(obj.objectKey || REMOTE_OBJECT_KEY_DEFAULT),
       pathStyle:!!obj.pathStyle,
       lastBackupAt:null
-    });
-    ui.remoteFormOpen = false;
+    };
+    /* A config without its secret cannot sign a request, so it is held in the
+       open form as a draft rather than saved as a configuration that would
+       fail on first use. */
+    if (!cfg.secretAccessKey){
+      ui.remoteDraft = cfg; ui.remoteFormOpen = true; ui.remoteError = '';
+      render(); toast('Loaded — paste the secret access key to finish');
+      return;
+    }
+    saveRemoteConfig(cfg);
+    ui.remoteDraft = null; ui.remoteFormOpen = false;
     render(); toast('Remote configuration loaded from file');
   });
 }
@@ -3642,8 +3699,8 @@ function remoteStorageHTML(){
   const cryptoOk = remoteCryptoAvailable();
   let html = '<div class="setting-block">' +
     '<h3>Remote storage <span class="hint">(optional, S3-compatible)</span></h3>' +
-    '<p class="desc">Off by default — everything stays in this browser. Configure a bucket below to back up or ' +
-    'restore on demand; requests go straight from this device to your storage provider using your own credentials — ' +
+    '<p class="desc">The same backup file as above, kept in a bucket you own instead of your downloads folder. ' +
+    'Off by default; requests go straight from this device to your storage provider using your own credentials — ' +
     'this app has no server to relay them through. Credentials are stored in this browser’s local storage in plain text.</p>';
   if (!cryptoOk){
     html += '<p class="error-text">Remote storage needs the Web Crypto API, only available in a secure context (https:// or localhost). It is unavailable here.</p></div>';
@@ -3662,26 +3719,32 @@ function remoteStorageHTML(){
     '</div>';
   }
   if (!cfg || ui.remoteFormOpen){
+    /* an unsaved config from a file (secret still missing) fills the form until it is completed */
+    const f = cfg || ui.remoteDraft;
     html += '<form data-form="remote-config" class="mt-3">' +
       '<div class="form-row">' +
-        '<label class="field flex-2"><span class="cap">Endpoint URL</span><input type="url" name="endpoint" required placeholder="https://s3.us-east-1.amazonaws.com" value="' + esc(cfg ? cfg.endpoint : '') + '"></label>' +
-        '<label class="field"><span class="cap">Region</span><input type="text" name="region" required placeholder="us-east-1" value="' + esc(cfg ? cfg.region : '') + '"></label>' +
-        '<label class="field"><span class="cap">Bucket</span><input type="text" name="bucket" required value="' + esc(cfg ? cfg.bucket : '') + '"></label>' +
+        '<label class="field flex-2"><span class="cap">Endpoint URL</span><input type="url" name="endpoint" required placeholder="https://s3.us-east-1.amazonaws.com" value="' + esc(f ? f.endpoint : '') + '"></label>' +
+        '<label class="field"><span class="cap">Region</span><input type="text" name="region" required placeholder="us-east-1" value="' + esc(f ? f.region : '') + '"></label>' +
+        '<label class="field"><span class="cap">Bucket</span><input type="text" name="bucket" required value="' + esc(f ? f.bucket : '') + '"></label>' +
       '</div>' +
       '<div class="form-row mt-2">' +
-        '<label class="field flex-2"><span class="cap">Object key / path</span><input type="text" name="objectKey" placeholder="' + REMOTE_OBJECT_KEY_DEFAULT + '" value="' + esc(cfg ? cfg.objectKey : '') + '"></label>' +
-        '<label class="field"><span class="cap">Access key ID</span><input type="text" name="accessKeyId" required value="' + esc(cfg ? cfg.accessKeyId : '') + '"></label>' +
+        '<label class="field flex-2"><span class="cap">Object key / path</span><input type="text" name="objectKey" placeholder="' + REMOTE_OBJECT_KEY_DEFAULT + '" value="' + esc(f ? f.objectKey : '') + '"></label>' +
+        '<label class="field"><span class="cap">Access key ID</span><input type="text" name="accessKeyId" required value="' + esc(f ? f.accessKeyId : '') + '"></label>' +
         '<label class="field"><span class="cap">Secret access key</span><input type="password" name="secretAccessKey" placeholder="' + (cfg ? '•••••••• (leave blank to keep)' : '') + '"' + (!cfg ? ' required' : '') + '></label>' +
       '</div>' +
       '<div class="switch-row mt-2">' +
         '<label for="sw-pathstyle"><strong>Path-style addressing</strong><br><span class="hint">Turn on for MinIO or other self-hosted endpoints; leave off for AWS S3, R2, B2, Spaces</span></label>' +
-        '<span class="switch"><input type="checkbox" id="sw-pathstyle" name="pathStyle"' + (cfg && cfg.pathStyle ? ' checked' : '') + '><span class="track" aria-hidden="true"></span></span>' +
+        '<span class="switch"><input type="checkbox" id="sw-pathstyle" name="pathStyle"' + (f && f.pathStyle ? ' checked' : '') + '><span class="track" aria-hidden="true"></span></span>' +
       '</div>' +
       (ui.remoteError ? '<p class="error-text mt-2" role="alert">' + esc(ui.remoteError) + '</p>' : '') +
       '<div class="form-actions mt-3">' +
         '<button type="submit" class="btn btn-primary">Save configuration</button>' +
         '<label class="file-btn"><span>' + IC.up + ' Load config file</span><input type="file" accept=".json,application/json" data-change="load-remote-config" aria-label="Load remote storage configuration from a JSON file"></label>' +
+        /* the counterpart to Load, so setting up a second device does not mean retyping the form */
+        (cfg ? '<button type="button" class="btn" data-action="remote-export-config">' + IC.down + '<span>Save config file</span></button>' : '') +
       '</div>' +
+      '<p class="hint mt-2">A config file sets up another device without retyping this form. ' +
+        'It can be written with or without the secret key.</p>' +
     '</form>';
   }
   html += '</div>';
@@ -3724,33 +3787,39 @@ function viewSettings(){
     '</div>' +
   '</section>' +
   '<section class="panel mt-4" aria-label="Data">' +
+    /* Whole-state backup first, in both the places it can be written — a file
+       here, the same file in a bucket below — then the partial transfer files,
+       which are a different job and not a second way to do this one. */
     '<div class="setting-block">' +
-      '<h3>Data</h3><p class="desc">Stored locally in this browser (' + storage + '). Nothing is uploaded anywhere.</p>' +
+      '<h3>Backup &amp; restore</h3>' +
+      '<p class="desc">Everything in one file: exercises, routines, history and preferences. ' +
+        'Restoring replaces what is in this browser (' + storage + ')' +
+        (loadRemoteConfig() ? '' : '. Nothing leaves this device unless you configure remote storage below') + '.</p>' +
       '<div class="form-actions">' +
-        '<button type="button" class="btn" data-action="export">' + IC.down + '<span>Export JSON</span></button>' +
-        '<label class="file-btn"><span>' + IC.up + ' Import JSON</span><input type="file" accept=".json,application/json" data-change="import-all" aria-label="Import data from a JSON file"></label>' +
+        '<button type="button" class="btn" data-action="export">' + IC.down + '<span>Download backup</span></button>' +
+        '<label class="file-btn"><span>' + IC.up + ' Restore from file</span><input type="file" accept=".json,application/json" data-change="import-all" aria-label="Restore from a backup file"></label>' +
       '</div>' +
     '</div>' +
+    remoteStorageHTML() +
     '<div class="setting-block">' +
       '<div class="block-head">' +
         '<h3>Transfer routines &amp; history</h3>' +
         '<button type="button" class="icon-btn" data-action="schema-open" ' +
           'aria-label="What format do these files use?" title="What format do these files use?">' + IC.help + '</button>' +
       '</div>' +
-      '<p class="desc">Move parts of your data between browsers. A routines file carries the exercises it needs — missing ones are added on import; duplicates are skipped.</p>' +
+      '<p class="desc">Parts rather than the whole, for moving into a browser you do not want to overwrite: ' +
+        'these files merge instead of replacing. A routines file carries the exercises it needs — missing ones are ' +
+        'added on import; duplicates are skipped.</p>' +
       '<div class="form-actions">' +
         '<button type="button" class="btn" data-action="export-routines">' + IC.down + '<span>Routines JSON</span></button>' +
         '<label class="file-btn"><span>' + IC.up + ' Import routines</span><input type="file" accept=".json,application/json" data-change="import-routines" aria-label="Import routines from a JSON file"></label>' +
         '<button type="button" class="btn" data-action="export-history">' + IC.down + '<span>History JSON</span></button>' +
         '<label class="file-btn"><span>' + IC.up + ' Import history</span><input type="file" accept=".json,application/json" data-change="import-history" aria-label="Import workout history from a JSON file"></label>' +
       '</div>' +
-      '<p class="hint mt-3">Not sure what a file should look like? ' +
-        '<button type="button" class="link-btn" data-action="schema-open">See the format</button>, ' +
-        'or start from a sample: ' +
+      '<p class="hint mt-3">The <strong>?</strong> above describes the format. Or start from a sample file: ' +
         '<button type="button" class="link-btn" data-action="sample-routines">routines</button> · ' +
         '<button type="button" class="link-btn" data-action="sample-history">history</button>.</p>' +
     '</div>' +
-    remoteStorageHTML() +
     '<div class="setting-block">' +
       '<h3 class="danger-heading">Danger zone</h3>' +
       '<p class="desc">Removes every exercise, routine, workout and preference from this browser.</p>' +
@@ -3874,13 +3943,19 @@ const actions = {
   'export-routines'(){ exportRoutines(); },
   'export-history'(){ exportHistory(); },
   'remote-form-toggle'(){ ui.remoteFormOpen = !ui.remoteFormOpen; ui.remoteError=''; render(); },
+  'remote-export-config'(){ exportRemoteConfig(); },
   'remote-test'(){ remoteTestConnection(); },
   'remote-backup'(){ remoteBackup(); },
   'remote-restore'(){ remoteRestore(); },
   'remote-forget'(){
     confirmDlg('Forget remote configuration?',
       'This removes the stored endpoint and credentials from this browser. It does not delete anything already uploaded to your bucket.',
-      'Forget', true).then(ok => { if (!ok) return; clearRemoteConfig(); render(); toast('Remote configuration removed'); });
+      'Forget', true).then(ok => {
+      if (!ok) return;
+      clearRemoteConfig();
+      ui.remoteDraft = null; ui.remoteFormOpen = false; ui.remoteError = '';
+      render(); toast('Remote configuration removed');
+    });
   },
   'clear-all'(){ clearAllData(); },
   'help-open'(){ $('#help-dlg').showModal(); },
