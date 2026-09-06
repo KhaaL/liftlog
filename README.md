@@ -14,23 +14,6 @@ dependencies**. That is a deliberate constraint: it has to work from a
 — see [ENHANCEMENTS.md](ENHANCEMENTS.md) for how to relax it if the file ever
 outgrows a single document.
 
-### Which build am I running?
-
-The footer shows a build reference — `branch@commit` — instead of a version
-number, so a copy on a phone can be traced back to source. There is no build
-step to compute it, so it is stamped in by hand:
-
-```sh
-tools/stamp-build.sh            # write the current branch/commit into index.html
-tools/stamp-build.sh --reset    # restore the 'unstamped' placeholders
-```
-
-Run it on the checked-out tree before copying `index.html` to a host and the
-stamp is exact for what you ship. If you deploy by committing instead, the
-stamp names the commit you ran it on — the parent of the commit it lands in —
-because a file cannot contain the hash of the commit it becomes part of. An
-unstamped copy says so rather than claiming a version it cannot verify.
-
 By default the app also makes **no network calls at all** — the only exception
 is the optional remote storage feature below, and even then every request goes
 directly from your browser to storage you configure, never through any server.
@@ -118,8 +101,8 @@ phone in a gym is the case that matters:
 - **Everything occasional is one tap away, not always on screen.** Adding an
   exercise and discarding the workout live in the session-overview drawer; the
   rest presets live in the action bar's sheet; the session note collapses to a
-  button until it has content; the RPE column is off until a set carries a
-  value.
+  button until it has content; the optional effort column (RPE, RIR, or none)
+  is a Settings-level choice (`settings.effortMetric`), off by default.
 - **Column templates are one custom property.** `--sets-cols` on `.sets` has a
   variant per shape (`.no-rpe`, `.no-weight`) rather than four grid
   declarations, and the narrow breakpoint overrides the same four.
@@ -131,13 +114,13 @@ phone in a gym is the case that matters:
 ```
 state
 ├─ version         schema version (SCHEMA_VERSION)
-├─ settings        { theme, unit, defaultRest, autoRest, sound }
+├─ settings        { theme, unit, defaultRest, autoRest, sound, effortMetric }
 ├─ exercises[]     { id, name, category, unit, notes }        — the library
 ├─ routines[]      { id, name, items[] }                      — the plan
 │   └─ items[]     { id, exerciseId, sets, reps, weight, rest }
 ├─ workouts[]      logged sessions, newest first              — the log
 │   └─ exercises[] { exerciseId, name, unit, targetReps, restSeconds, skipped, sets[] }
-│       └─ sets[]  { id, weight, reps, durationSeconds, rpe, unit, completed, completedAt }
+│       └─ sets[]  { id, weight, reps, durationSeconds, rpe, rir, unit, completed, completedAt }
 └─ activeWorkout   a workout in progress, or null
 ```
 
@@ -167,6 +150,15 @@ state
   performed; `countForVolume` / `countForPR` (default true) say whether it counts
   toward totals and records. A warm-up is `completed: true` with both flags
   false — it is still shown in history, marked as a warm-up.
+- **`rpe` and `rir` are independent fields on a set, but only one shows as an
+  input at a time.** `settings.effortMetric` (`'none' | 'rpe' | 'rir'`) is a
+  single global choice, not per-exercise — logging one style of set at a time
+  is the common case, and a per-exercise setting would need its own UI and
+  migration for one column's worth of value. Both fields still round-trip
+  through import/export and history editing regardless of the current
+  setting, so switching the setting later doesn't lose whichever one a set
+  already carries; only the active-workout input for the *other* one is
+  hidden while it's not selected.
 - **Everything crossing the boundary is validated.** `normalizeState()` and the
   `normalizeImported*()` functions clamp units, themes, numbers and free text on
   the way in, so the render layer never has to defend against stray strings.
@@ -282,7 +274,7 @@ In Settings → Remote storage, fill in:
 
 | Field | Meaning |
 | --- | --- |
-| Endpoint URL | Your provider's S3 endpoint, e.g. `https://s3.us-east-1.amazonaws.com`, `https://<account id>.r2.cloudflarestorage.com`, or your own MinIO URL. Must be `https://` — credentials are never sent over plain HTTP. |
+| Endpoint URL | Your provider's S3 endpoint, e.g. `https://s3.us-east-1.amazonaws.com`, `https://<account id>.r2.cloudflarestorage.com`, or your own MinIO URL. `http://` is accepted too, for a LAN or self-hosted server (e.g. `http://srv-usio:3902`) — but only works if this app itself was opened over `http://`, `file://`, or localhost, since browsers block a page loaded over `https://` from calling an insecure endpoint. |
 | Region | e.g. `us-east-1`. Cloudflare R2 uses `auto`. |
 | Bucket | The bucket to back up into. |
 | Object key / path | Where the backup is stored inside the bucket. Defaults to `liftlog-backup.json`. |
@@ -301,12 +293,24 @@ hand-writing JSON to feed the loader.
 
 - **Without the secret** (the offered default) the file is not a credential. It
   carries everything else, and the receiving device fills the form from it and
-  waits for the secret to be pasted in. Nothing is stored until it is — a config
-  that cannot sign a request is held as a draft in `ui.remoteDraft` rather than
-  saved as a configuration that would fail on first use.
+  waits for the secret to be pasted in.
 - **With the secret** the file is a complete credential for that bucket: anyone
   who opens it, and anywhere it gets synced or mailed, can read and write there.
   It is behind its own button in the download dialog for that reason.
+
+Either way a loaded file lands in `ui.remoteDraft` — the same draft the form
+edits — so it is reviewable before it is anything else, and it reaches storage
+only through the connection test below. A file is no more trustworthy than a
+typed form.
+
+**Save configuration** tests the connection before writing anything to
+storage: it sends a signed `GET` against the config you just typed and only
+persists it once that request comes back ok (a 404 still counts — it just
+means nothing has been backed up there yet). A failing request reports why
+and leaves the form open with what you typed untouched, rather than saving
+credentials that don't work. Typed-but-unsaved fields are also kept in memory
+across re-renders, so switching another setting (theme, unit, …) while the
+form is open no longer clears it.
 
 Once configured, **Backup now** and **Restore from remote** are manual,
 on-demand actions — there is no background sync, and restore always confirms

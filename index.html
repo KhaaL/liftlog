@@ -443,8 +443,6 @@ kbd{
 .set-done-btn[aria-pressed="true"]{ background:var(--success-soft); border-color:var(--success); color:var(--success); }
 .sets-foot{ display:flex; gap:var(--sp-2); flex-wrap:wrap; align-items:center; margin-top:var(--sp-3); padding-top:var(--sp-3); border-top:1px solid var(--border); }
 .sets-foot .next-up{ margin-left:auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.rpe-toggle{ min-height:30px; padding:3px var(--sp-3); font-size:var(--fs-xs); }
-.rpe-toggle[aria-pressed="true"]{ background:var(--accent-soft); border-color:var(--accent); color:var(--accent); }
 
 /* history session editor */
 .hedit{ border:1px solid var(--border-strong); }
@@ -499,6 +497,11 @@ kbd{
 .ab-actions .btn-primary{ flex:1; min-width:0; }
 .ab-actions .btn-big{ min-height:48px; }
 .ab-icon{ flex:none; min-width:44px; padding-inline:10px; }
+/* .btn-quiet drops the border entirely, which reads as flat text rather than
+   a button — but this one opens the rest-length sheet, so it needs enough of
+   a border back to look pressable. */
+#timer-sheet-btn{ border-color:var(--border-strong); }
+#timer-sheet-btn:hover{ border-color:var(--muted); }
 .ab-sheet{
   display:flex; flex-wrap:wrap; align-items:center; gap:6px;
   padding-bottom:var(--sp-3); border-bottom:1px solid var(--border); margin-bottom:var(--sp-3);
@@ -763,8 +766,7 @@ pre.code code{ background:none; border:0; padding:0; font-size:inherit; white-sp
 .toast.show{ opacity:1; transform:translateY(0); }
 
 .app-footer{ border-top:1px solid var(--border); padding:var(--sp-5) 0 var(--sp-6); color:var(--muted); font-size:var(--fs-xs); }
-.app-footer .wrap{ display:flex; justify-content:space-between; gap:var(--sp-3); flex-wrap:wrap; align-items:center; }
-.build-ref{ font-size:11px; opacity:.75; letter-spacing:-.01em; }
+.app-footer .wrap{ display:flex; justify-content:flex-end; gap:var(--sp-3); flex-wrap:wrap; align-items:center; }
 .footer-btn{ background:none; border:0; color:var(--muted); font-size:var(--fs-xs); cursor:pointer; text-decoration:underline; padding:2px; }
 .footer-btn:hover{ color:var(--text); }
 
@@ -869,8 +871,7 @@ pre.code code{ background:none; border:0; padding:0; font-size:inherit; white-sp
 
 <footer class="app-footer">
   <div class="wrap">
-    <span>Liftlog · <span id="app-build" class="mono build-ref">unstamped</span> · your data never leaves this browser</span>
-    <span>Press <kbd>?</kbd> for shortcuts · <button type="button" class="footer-btn" data-action="help-open">keyboard help</button></span>
+    <span><button type="button" class="footer-btn" data-action="help-open">keyboard help</button></span>
   </div>
 </footer>
 
@@ -1091,17 +1092,12 @@ const SHORTCUTS = [
 /* ============================================================
    STORAGE
    ============================================================ */
-/* Which source this file was built from, shown in the footer. There is no
-   build step (see README), so it is stamped in by tools/stamp-build.sh rather
-   than computed: a file cannot contain the hash of the commit it lands in, so
-   the stamp names the commit the working tree was built from. Left as
-   'unstamped' when the script has never run. */
-const BUILD = { branch:'claude/set-cascade-delete-fonts-r7m4qp', commit:'2419b36', date:'2026-09-03' };
 const LS_KEY = 'liftlog.v1';
 const LS_RESCUE_KEY = 'liftlog.v1.unreadable';  /* holds data we could not load, so nothing is lost silently */
-const SCHEMA_VERSION = 3;   /* v3: sets carry durationSeconds (time no longer overloads reps)
-                               + countForVolume / countForPR split execution from analytics */
-const EXPORT_SCHEMA = '1.0.0'; /* version of the documented import/export contract */
+const SCHEMA_VERSION = 4;   /* v3: sets carry durationSeconds (time no longer overloads reps)
+                               + countForVolume / countForPR split execution from analytics
+                               v4: settings carry effortMetric ('none'|'rpe'|'rir'), sets carry rir */
+const EXPORT_SCHEMA = '1.1.0'; /* version of the documented import/export contract — 1.1: sets[].rir */
 
 /* Set by load() when stored data could not be used, surfaced once after init. */
 let loadWarning = '';
@@ -1136,6 +1132,7 @@ function load(){
   }
   if (parsed.version === 1) migrateToV2(parsed);   /* old installs: refresh the seed library, keep history */
   if (parsed.version === 2) migrateToV3(parsed);   /* v2 stored seconds in `reps` for timed sets */
+  if (parsed.version === 3) migrateToV4(parsed);   /* v3 had no effort-metric preference */
   return normalizeState(parsed);
 }
 /* v1 shipped an earlier seed library/routines. v2 refreshes both to the
@@ -1163,6 +1160,18 @@ function migrateToV3(s){
   fix(s.activeWorkout);
   s.version = 3;
 }
+/* v3 had no per-set effort field beyond RPE and no way to turn it off. v4
+   adds a settings-level choice (None / RPE / RIR); installs that already had
+   logged RPE values keep seeing that column instead of losing it. */
+function migrateToV4(s){
+  const setHasRpe = set => set && set.rpe != null;
+  const exHasRpe = ex => (ex && ex.sets || []).some(setHasRpe);
+  const woHasRpe = w => (w && w.exercises || []).some(exHasRpe);
+  const hadRpe = (s.workouts || []).some(woHasRpe) || woHasRpe(s.activeWorkout);
+  s.settings = s.settings || {};
+  s.settings.effortMetric = hadRpe ? 'rpe' : 'none';
+  s.version = 4;
+}
 /* Anything reachable from disk or an import file gets clamped to a known value
    here, so the render layer never has to defend against stray strings. */
 function normalizeState(s){
@@ -1173,6 +1182,7 @@ function normalizeState(s){
   set.defaultRest = clamp(Math.round(toNum(set.defaultRest) || d.defaultRest), REST_MIN, REST_MAX);
   set.autoRest = !!set.autoRest;
   set.sound = !!set.sound;
+  set.effortMetric = EFFORT_METRICS.includes(set.effortMetric) ? set.effortMetric : d.effortMetric;
   s.settings = set;
   s.exercises = (s.exercises || []).map(e => Object.assign({}, e, {
     category: typeof e.category === 'string' ? e.category : '',
@@ -1185,8 +1195,13 @@ function normalizeState(s){
   sortWorkouts(s.workouts);
   return s;
 }
+/* The optional per-set effort field shown when logging: 'none' hides it,
+   otherwise it's whichever of RPE (Rate of Perceived Exertion) or RIR (Reps
+   In Reserve) the lifter prefers — the two are inverses of roughly the same
+   scale, so only one is shown at a time rather than both. */
+const EFFORT_METRICS = ['none', 'rpe', 'rir'];
 function defaultSettings(){
-  return { theme:'system', unit:'kg', defaultRest:90, autoRest:true, sound:true };
+  return { theme:'system', unit:'kg', defaultRest:90, autoRest:true, sound:true, effortMetric:'none' };
 }
 /* History is kept newest-first everywhere; every mutation that can change a
    start time re-establishes that instead of sorting again at each read. */
@@ -1299,7 +1314,6 @@ function freshUI(){
     expandedDone:new Set(),     /* keyed by exercise index within the active workout */
     overviewOpen:false,         /* whether the session-overview drawer is expanded */
     timerSheetOpen:false,       /* rest-length presets expanded in the action bar */
-    showRpe:false,              /* the optional RPE column in the set rows */
     notesOpen:false,            /* session-notes field expanded (auto if a note exists) */
     routineDraft:null,          /* object while editing a routine */
     routineError:'',
@@ -1313,7 +1327,8 @@ function freshUI(){
     remoteFormOpen:false,       /* remote-storage config form expanded in Settings */
     remoteDraft:null,           /* config loaded from a file but still missing its secret key */
     remoteError:'',
-    remoteBusy:false            /* a remote backup/restore/test request is in flight */
+    remoteBusy:false,           /* a remote backup/restore/test request is in flight */
+    remoteDraft:null            /* live-edited config fields, kept here so an unrelated re-render never drops them */
   };
 }
 const ui = freshUI();
@@ -1761,7 +1776,7 @@ function newSetFrom(ex, copyFrom){
     /* reps stays a pure count; timed work lives in durationSeconds */
     reps:   copyFrom ? (timed ? null : copyFrom.reps) : (!timed && ex.targetReps != null ? ex.targetReps : null),
     durationSeconds: copyFrom ? (timed ? copyFrom.durationSeconds : null) : (timed && ex.targetReps != null ? ex.targetReps : null),
-    rpe:null, completed:false, completedAt:null,
+    rpe:null, rir:null, completed:false, completedAt:null,
     unit: ex.unit === 'bw' ? 'bw' : (timed ? 'time' : state.settings.unit)
   };
 }
@@ -1874,8 +1889,10 @@ function completeCurrentSet(){
   save();
   announce('Set ' + (idx+1) + ' of ' + ex.sets.length + ' complete.');
   const next = ex.sets.find(x => !x.completed);
-  ui.focus = next ? 'sw-' + next.id : 'btn-next-ex';
-  render();
+  /* the last set done means there's nothing left to log here — move on rather
+     than making the user tap "Next exercise" for a foregone conclusion */
+  if (next){ ui.focus = 'sw-' + next.id; render(); }
+  else advanceExercise(false);
   if (state.settings.autoRest){
     loadTimer(ex.restSeconds || state.settings.defaultRest);
     startTimer();
@@ -1888,37 +1905,47 @@ function toggleSet(setId){
   if (s.completed){ s.completedAt = Date.now(); fillSetDefaults(ex, s); }
   else s.completedAt = null;
   save();
-  ui.focus = 'sd-' + setId;
-  render();
+  /* same rule as completeCurrentSet: checking the last open box also finishes
+     the exercise, so advance rather than sit on a fully-done set list */
+  if (s.completed && allSetsDone(ex)) advanceExercise(false);
+  else { ui.focus = 'sd-' + setId; render(); }
 }
-/* Setting a weight is nearly always a decision about the rest of the exercise
-   rather than about one row, so it flows down to every later set that has not
-   been logged yet. Completed sets are left alone — they record what was
-   actually lifted, not what is planned.
+/* Setting a weight or a rep/duration target is nearly always a decision about
+   the rest of the exercise rather than about one row, so it flows down to
+   every later set that has not been logged yet. Completed sets are left
+   alone — they record what was actually done, not what is planned.
 
    Two deliberate choices. It runs on commit rather than per keystroke, so
    typing "100" does not walk the rows below through 1 and 10. And it writes
    the other inputs directly rather than calling render(), because a re-render
-   here would take the focus with it as the user tabs to the reps field. */
-function cascadeWeight(setId, value){
+   here would take the focus with it as the user tabs to the next field. */
+function cascadeSetField(setId, field, value, elPrefix, unitSuffix){
   const ex = currentExercise(); if (!ex) return;
   const i = ex.sets.findIndex(x => x.id === setId);
   if (i === -1) return;
-  ex.sets[i].weight = value;
-  /* clearing a field is not "setting a weight", and must not wipe the rest */
+  ex.sets[i][field] = value;
+  /* clearing a field is not "setting" it, and must not wipe the rest */
   if (value == null){ save(); return; }
   let changed = 0;
   for (let j = i + 1; j < ex.sets.length; j++){
     const s = ex.sets[j];
-    if (s.completed || s.weight === value) continue;
-    s.weight = value;
-    const el = document.getElementById('sw-' + s.id);
+    if (s.completed || s[field] === value) continue;
+    s[field] = value;
+    const el = document.getElementById(elPrefix + s.id);
     if (el) el.value = value;
     changed++;
   }
   save();
   /* the rows visibly change, so this is for screen readers only */
-  if (changed) announce(plural(changed, 'later set') + ' set to ' + fmtNum(value) + ' ' + unitLabel() + '.');
+  if (changed) announce(plural(changed, 'later set') + ' set to ' + fmtNum(value) + (unitSuffix ? ' ' + unitSuffix : '') + '.');
+}
+function cascadeWeight(setId, value){
+  cascadeSetField(setId, 'weight', value, 'sw-', unitLabel());
+}
+function cascadeReps(setId, value){
+  const ex = currentExercise(); if (!ex) return;
+  const field = ex.unit === 'time' ? 'durationSeconds' : 'reps';
+  cascadeSetField(setId, field, value, 'sr-', ex.unit === 'time' ? 'sec' : '');
 }
 
 /* Deleting a set is only ever about one row — until it is the last one, at
@@ -2311,6 +2338,20 @@ function saveRemoteConfig(cfg){
 function clearRemoteConfig(){
   try{ localStorage.removeItem(LS_REMOTE_KEY); }catch(e){ /* nothing more we can do */ }
 }
+/* The secret is never pre-filled (its input just carries a "leave blank to
+   keep" placeholder when one is already stored), so a freshly opened draft
+   always starts with an empty secret field. */
+function remoteDraftFromConfig(cfg){
+  return {
+    endpoint: cfg ? cfg.endpoint : '',
+    region: cfg ? cfg.region : '',
+    bucket: cfg ? cfg.bucket : '',
+    objectKey: cfg ? cfg.objectKey : '',
+    accessKeyId: cfg ? cfg.accessKeyId : '',
+    secretAccessKey: '',
+    pathStyle: cfg ? !!cfg.pathStyle : false
+  };
+}
 function remoteCryptoAvailable(){
   return !!(window.crypto && window.crypto.subtle);
 }
@@ -2410,27 +2451,49 @@ function remoteTestConnection(){
     else throw new Error('Connection failed: HTTP ' + res.status);
   });
 }
+/* Save is gated on a live connection test: bad credentials or a typo'd
+   endpoint should never get silently persisted only to fail on the next
+   backup. The draft (ui.remoteDraft) is the source of truth for field
+   values rather than the form DOM, so it survives any re-render triggered
+   by something else on the Settings page while it's being filled in. */
 function saveRemoteConfigForm(form){
-  const g = n => { const el = form.elements.namedItem(n); return el ? el.value.trim() : ''; };
-  const existing = loadRemoteConfig() || ui.remoteDraft;
-  const endpoint = g('endpoint').replace(/\/+$/, '');
-  const region = g('region'), bucket = g('bucket'), accessKeyId = g('accessKeyId');
-  if (!/^https:\/\/.+/.test(endpoint)){
-    ui.remoteError = 'Endpoint must be a full https:// URL, e.g. https://s3.us-east-1.amazonaws.com'; render(); return;
+  const d = ui.remoteDraft || remoteDraftFromConfig(loadRemoteConfig());
+  const existing = loadRemoteConfig();
+  const endpoint = (d.endpoint || '').trim().replace(/\/+$/, '');
+  const region = (d.region || '').trim(), bucket = (d.bucket || '').trim(), accessKeyId = (d.accessKeyId || '').trim();
+  if (!/^https?:\/\/.+/.test(endpoint)){
+    ui.remoteError = 'Endpoint must be a full http:// or https:// URL, e.g. https://s3.us-east-1.amazonaws.com or http://your-lan-host:9000'; render(); return;
   }
   if (!region || !bucket || !accessKeyId){
     ui.remoteError = 'Region, bucket and access key ID are required.'; render(); return;
   }
-  const secretAccessKey = g('secretAccessKey') || (existing ? existing.secretAccessKey : '');
+  const secretAccessKey = (d.secretAccessKey || '').trim() || (existing ? existing.secretAccessKey : '');
   if (!secretAccessKey){ ui.remoteError = 'Secret access key is required.'; render(); return; }
-  saveRemoteConfig({
+  testAndSaveRemoteConfig({
     endpoint, region, bucket, accessKeyId, secretAccessKey,
-    objectKey: g('objectKey') || REMOTE_OBJECT_KEY_DEFAULT,
-    pathStyle: !!form.elements.namedItem('pathStyle').checked,
+    objectKey: (d.objectKey || '').trim() || REMOTE_OBJECT_KEY_DEFAULT,
+    pathStyle: !!d.pathStyle,
     lastBackupAt: existing ? existing.lastBackupAt : null
   });
-  ui.remoteError = ''; ui.remoteFormOpen = false; ui.remoteDraft = null;
-  render(); toast('Remote storage configured');
+}
+/* Tries the connection with the candidate config before writing anything to
+   storage. A 404 still counts as a success here (same rule as "Test
+   connection" below) — it means the bucket answered, there's just nothing
+   backed up there yet. On failure the form stays open with the draft intact
+   so the user can fix a field and retry, rather than losing what they typed. */
+async function testAndSaveRemoteConfig(candidate){
+  ui.remoteError = ''; ui.remoteBusy = true; render();
+  try{
+    const res = await s3Request(candidate, 'GET', '');
+    if (!res.ok && res.status !== 404) throw new Error('Connection failed: HTTP ' + res.status + ' — configuration was not saved.');
+    saveRemoteConfig(candidate);
+    ui.remoteFormOpen = false; ui.remoteDraft = null;
+    toast(res.status === 404 ? 'Connected — configuration saved (no backup there yet)' : 'Connected — configuration saved');
+  }catch(e){
+    ui.remoteError = (e && e.message ? e.message : 'Connection failed — configuration was not saved.');
+  }finally{
+    ui.remoteBusy = false; render();
+  }
 }
 /* The config file this app reads, so it is also the config file it writes —
    otherwise "Load config file" only ever accepts hand-written JSON. The secret
@@ -2468,32 +2531,31 @@ function exportRemoteConfig(){
                             : 'Configuration downloaded without the secret key');
   });
 }
+/* A loaded file lands in the same draft the form edits, so it is reviewable
+   before it is anything else, and a file missing its secret simply leaves that
+   one field empty for the user to fill. Saving still goes through the
+   connection test — a file is no more trustworthy than a typed form. */
 function loadRemoteConfigFile(file){
   readJSONFile(file, obj => {
     if (!obj || typeof obj !== 'object' || !obj.endpoint || !obj.bucket || !obj.accessKeyId){
       toast('That file is missing required remote storage fields'); return;
     }
-    const cfg = {
+    const draft = {
       endpoint:String(obj.endpoint).replace(/\/+$/, ''),
       region:String(obj.region || 'us-east-1'),
       bucket:String(obj.bucket),
+      objectKey:String(obj.objectKey || REMOTE_OBJECT_KEY_DEFAULT),
       accessKeyId:String(obj.accessKeyId),
       secretAccessKey:obj.secretAccessKey ? String(obj.secretAccessKey) : '',
-      objectKey:String(obj.objectKey || REMOTE_OBJECT_KEY_DEFAULT),
-      pathStyle:!!obj.pathStyle,
-      lastBackupAt:null
+      pathStyle:!!obj.pathStyle
     };
-    /* A config without its secret cannot sign a request, so it is held in the
-       open form as a draft rather than saved as a configuration that would
-       fail on first use. */
-    if (!cfg.secretAccessKey){
-      ui.remoteDraft = cfg; ui.remoteFormOpen = true; ui.remoteError = '';
+    ui.remoteDraft = draft; ui.remoteFormOpen = true; ui.remoteError = '';
+    if (!draft.secretAccessKey){
       render(); toast('Loaded — paste the secret access key to finish');
       return;
     }
-    saveRemoteConfig(cfg);
-    ui.remoteDraft = null; ui.remoteFormOpen = false;
-    render(); toast('Remote configuration loaded from file');
+    render();
+    testAndSaveRemoteConfig(Object.assign({ lastBackupAt:null }, draft));
   });
 }
 
@@ -2656,6 +2718,7 @@ function schemaHelpHTML(){
       ['sets[].reps', 'integer', 'A count, never seconds. Rounded, floored at 0.'],
       ['sets[].durationSeconds', 'integer', 'Where timed work goes. A legacy file with seconds in <code>reps</code> is corrected on import.'],
       ['sets[].rpe', 'number', 'Clamped to 1\u201310.'],
+      ['sets[].rir', 'integer', 'Reps in reserve. Clamped to 0\u201310.'],
       ['sets[].completed', 'boolean', 'Whether the set was performed.'],
       ['sets[].countForVolume', 'boolean', 'Default true. <code>false</code> marks a warm-up: performed, but out of the totals. <code>includeInVolume</code> is accepted as an alias.'],
       ['sets[].countForPR', 'boolean', 'Default true. <code>false</code> keeps a set out of records.']
@@ -2715,6 +2778,7 @@ function normalizeImportedSet(s, exUnit){
   o.weight = num(s.weight);          if (o.weight != null && o.weight < 0) o.weight = null;
   o.reps = num(s.reps);              if (o.reps != null) o.reps = Math.max(0, Math.round(o.reps));
   o.rpe = num(s.rpe);                if (o.rpe != null) o.rpe = Math.min(10, Math.max(1, o.rpe));
+  o.rir = num(s.rir);                if (o.rir != null) o.rir = Math.min(10, Math.max(0, Math.round(o.rir)));
   o.durationSeconds = num(s.durationSeconds);
   if (o.durationSeconds != null && o.durationSeconds < 0) o.durationSeconds = null;
   o.distance = num(s.distance);
@@ -3045,17 +3109,20 @@ function htmlCurrentExercise(w, ex){
   if (bits.length) prevHTML = '<div class="prev-perf">' + bits.join('') + '</div>';
 
   const currentIdx = ex.sets.findIndex(s => !s.completed);
-  /* RPE is optional and empty most of the time, so it is off by default and
-     costs no column — but never hidden once a set actually carries a value. */
-  const showRpe = ui.showRpe || ex.sets.some(s => s.rpe != null);
-  const cols = 'sets' + (showRpe ? '' : ' no-rpe') + (showWeight ? '' : ' no-weight');
+  /* Which optional effort column to show, if any — a global preference set
+     once in Settings rather than a per-exercise or per-session toggle. */
+  const metric = state.settings.effortMetric;      /* 'none' | 'rpe' | 'rir' */
+  const showMetric = metric !== 'none';
+  const metricField = metric === 'rir' ? 'rir' : 'rpe';
+  const metricLabel = metric === 'rir' ? 'RIR' : 'RPE';
+  const cols = 'sets' + (showMetric ? '' : ' no-rpe') + (showWeight ? '' : ' no-weight');
 
   let setsHTML =
     '<div class="sets-head" aria-hidden="true">' +
       '<span>Set</span>' +
       (showWeight ? '<span>Weight (' + esc(wLabel) + ')</span>' : '') +
       '<span>' + esc(repsLabel) + '</span>' +
-      (showRpe ? '<span>RPE</span>' : '') +
+      (showMetric ? '<span>' + metricLabel + '</span>' : '') +
       '<span>Done</span><span></span>' +
     '</div>';
 
@@ -3082,14 +3149,15 @@ function htmlCurrentExercise(w, ex){
     setsHTML += '<label class="field"><span class="cap">' + esc(repsLabel) + '</span>' +
       '<input id="sr-' + s.id + '" type="number" inputmode="numeric" min="0" step="1" ' +
       'aria-label="Set ' + n + ' ' + esc(repsLabel) + '" ' +
-      'data-bind="set" data-id="' + s.id + '" data-field="' + (timedField ? 'durationSeconds' : 'reps') + '" ' +
+      'data-bind="set" data-change="set-reps" data-id="' + s.id + '" data-field="' + (timedField ? 'durationSeconds' : 'reps') + '" ' +
       'value="' + (midVal != null ? midVal : '') + '" placeholder="' + (ex.targetReps != null ? ex.targetReps : '0') + '"></label>';
-    if (showRpe){
-      setsHTML += '<label class="field"><span class="cap">RPE</span>' +
-        '<input type="number" inputmode="decimal" min="1" max="10" step="0.5" ' +
-        'aria-label="Set ' + n + ' RPE" ' +
-        'data-bind="set" data-id="' + s.id + '" data-field="rpe" ' +
-        'value="' + (s.rpe != null ? s.rpe : '') + '" placeholder="–"></label>';
+    if (showMetric){
+      const mv = s[metricField];
+      setsHTML += '<label class="field"><span class="cap">' + metricLabel + '</span>' +
+        '<input type="number" inputmode="decimal" min="' + (metric === 'rir' ? 0 : 1) + '" max="10" step="' + (metric === 'rir' ? 1 : 0.5) + '" ' +
+        'aria-label="Set ' + n + ' ' + metricLabel + '" ' +
+        'data-bind="set" data-id="' + s.id + '" data-field="' + metricField + '" ' +
+        'value="' + (mv != null ? mv : '') + '" placeholder="–"></label>';
     }
     setsHTML += '<button type="button" id="sd-' + s.id + '" class="btn set-done-btn" data-action="toggle-set" data-id="' + s.id + '" ' +
       'aria-pressed="' + s.completed + '" aria-label="' + (s.completed ? 'Mark set ' + n + ' as not done' : 'Mark set ' + n + ' as done') + '">' +
@@ -3114,7 +3182,6 @@ function htmlCurrentExercise(w, ex){
     '<div class="mt-4 ' + cols + '" role="group" aria-label="Sets for ' + esc(ex.name) + '">' + setsHTML + '</div>' +
     '<div class="sets-foot">' +
       '<button type="button" class="btn" data-action="add-set">' + IC.plus + '<span>Add set</span></button>' +
-      '<button type="button" class="btn rpe-toggle" data-action="toggle-rpe" aria-pressed="' + showRpe + '">RPE</button>' +
       (next ? '<span class="next-up muted small">Next: ' + esc(next.name) + '</span>' : '') +
     '</div>' +
   '</div>';
@@ -3139,6 +3206,7 @@ function htmlDoneRow(ex, i, reopenAction){
     html += '<div class="done-ex-detail">' +
       (ex.sets.map((s, j) => '<div class="dset"><span class="muted">Set ' + (j+1) + '</span><span>' + setSummary(s) +
         (s.rpe != null ? ' <span class="muted">@ RPE ' + s.rpe + '</span>' : '') +
+        (s.rir != null ? ' <span class="muted">@ RIR ' + s.rir + '</span>' : '') +
         (s.completed ? '' : ' <span class="status-chip skip">open</span>') + '</span></div>').join('')) +
       '<div class="mt-2"><button type="button" class="btn btn-sm" data-action="' + reopenAction + '" data-idx="' + i + '">Reopen exercise</button></div>' +
     '</div>';
@@ -3436,7 +3504,7 @@ function htmlWorkoutDetail(w){
       '</h4>' +
       '<p class="hist-sets">' +
       (done.length
-        ? done.map(s => setSummary(s) + (s.rpe != null ? ' @' + s.rpe : '') +
+        ? done.map(s => setSummary(s) + (s.rpe != null ? ' @RPE' + s.rpe : '') + (s.rir != null ? ' @RIR' + s.rir : '') +
             (countsVolume(s) ? '' : ' <span class="status-chip skip">warm-up</span>')).join(' · ')
         : 'No completed sets') +
       '</p></div>';
@@ -3719,32 +3787,41 @@ function remoteStorageHTML(){
     '</div>';
   }
   if (!cfg || ui.remoteFormOpen){
-    /* an unsaved config from a file (secret still missing) fills the form until it is completed */
-    const f = cfg || ui.remoteDraft;
+    /* Populated once from the saved config (or blank); after that every
+       keystroke writes straight into this object (see the "remote" binder)
+       so the fields survive a re-render triggered by anything else on this
+       page — they don't reset to the last-saved value until a real save. */
+    if (!ui.remoteDraft) ui.remoteDraft = remoteDraftFromConfig(cfg);
+    const d = ui.remoteDraft;
     html += '<form data-form="remote-config" class="mt-3">' +
       '<div class="form-row">' +
-        '<label class="field flex-2"><span class="cap">Endpoint URL</span><input type="url" name="endpoint" required placeholder="https://s3.us-east-1.amazonaws.com" value="' + esc(f ? f.endpoint : '') + '"></label>' +
-        '<label class="field"><span class="cap">Region</span><input type="text" name="region" required placeholder="us-east-1" value="' + esc(f ? f.region : '') + '"></label>' +
-        '<label class="field"><span class="cap">Bucket</span><input type="text" name="bucket" required value="' + esc(f ? f.bucket : '') + '"></label>' +
+        '<label class="field flex-2"><span class="cap">Endpoint URL</span><input type="url" data-bind="remote" data-field="endpoint" required placeholder="https://s3.us-east-1.amazonaws.com" value="' + esc(d.endpoint) + '"></label>' +
+        '<label class="field"><span class="cap">Region</span><input type="text" data-bind="remote" data-field="region" required placeholder="us-east-1" value="' + esc(d.region) + '"></label>' +
+        '<label class="field"><span class="cap">Bucket</span><input type="text" data-bind="remote" data-field="bucket" required value="' + esc(d.bucket) + '"></label>' +
       '</div>' +
+      '<p class="hint mt-1">Plain <code>http://</code> is accepted for a LAN or self-hosted endpoint (e.g. ' +
+        '<code>http://srv-usio:3902</code>) — it only works if this app itself was opened over ' +
+        '<code>http://</code>, <code>file://</code>, or localhost, since a page loaded over ' +
+        '<code>https://</code> is blocked from calling an insecure endpoint.</p>' +
       '<div class="form-row mt-2">' +
-        '<label class="field flex-2"><span class="cap">Object key / path</span><input type="text" name="objectKey" placeholder="' + REMOTE_OBJECT_KEY_DEFAULT + '" value="' + esc(f ? f.objectKey : '') + '"></label>' +
-        '<label class="field"><span class="cap">Access key ID</span><input type="text" name="accessKeyId" required value="' + esc(f ? f.accessKeyId : '') + '"></label>' +
-        '<label class="field"><span class="cap">Secret access key</span><input type="password" name="secretAccessKey" placeholder="' + (cfg ? '•••••••• (leave blank to keep)' : '') + '"' + (!cfg ? ' required' : '') + '></label>' +
+        '<label class="field flex-2"><span class="cap">Object key / path</span><input type="text" data-bind="remote" data-field="objectKey" placeholder="' + REMOTE_OBJECT_KEY_DEFAULT + '" value="' + esc(d.objectKey) + '"></label>' +
+        '<label class="field"><span class="cap">Access key ID</span><input type="text" data-bind="remote" data-field="accessKeyId" required value="' + esc(d.accessKeyId) + '"></label>' +
+        '<label class="field"><span class="cap">Secret access key</span><input type="password" data-bind="remote" data-field="secretAccessKey" placeholder="' + (cfg ? '•••••••• (leave blank to keep)' : '') + '" value="' + esc(d.secretAccessKey) + '"' + (!cfg ? ' required' : '') + '></label>' +
       '</div>' +
       '<div class="switch-row mt-2">' +
         '<label for="sw-pathstyle"><strong>Path-style addressing</strong><br><span class="hint">Turn on for MinIO or other self-hosted endpoints; leave off for AWS S3, R2, B2, Spaces</span></label>' +
-        '<span class="switch"><input type="checkbox" id="sw-pathstyle" name="pathStyle"' + (f && f.pathStyle ? ' checked' : '') + '><span class="track" aria-hidden="true"></span></span>' +
+        '<span class="switch"><input type="checkbox" id="sw-pathstyle" data-change="remote-pathstyle"' + (d.pathStyle ? ' checked' : '') + '><span class="track" aria-hidden="true"></span></span>' +
       '</div>' +
       (ui.remoteError ? '<p class="error-text mt-2" role="alert">' + esc(ui.remoteError) + '</p>' : '') +
       '<div class="form-actions mt-3">' +
-        '<button type="submit" class="btn btn-primary">Save configuration</button>' +
+        '<button type="submit" class="btn btn-primary"' + (ui.remoteBusy ? ' disabled' : '') + '>' + (ui.remoteBusy ? 'Testing connection…' : 'Save configuration') + '</button>' +
         '<label class="file-btn"><span>' + IC.up + ' Load config file</span><input type="file" accept=".json,application/json" data-change="load-remote-config" aria-label="Load remote storage configuration from a JSON file"></label>' +
         /* the counterpart to Load, so setting up a second device does not mean retyping the form */
         (cfg ? '<button type="button" class="btn" data-action="remote-export-config">' + IC.down + '<span>Save config file</span></button>' : '') +
       '</div>' +
-      '<p class="hint mt-2">A config file sets up another device without retyping this form. ' +
-        'It can be written with or without the secret key.</p>' +
+      '<p class="hint mt-2">' + (cfg
+        ? 'A config file sets up another device without retyping this form, and can be written with or without the secret key.'
+        : 'Have a config file from another device? <strong>Load config file</strong> fills this form from it.') + '</p>' +
     '</form>';
   }
   html += '</div>';
@@ -3767,6 +3844,14 @@ function viewSettings(){
       '<div class="radio-row" role="radiogroup" aria-label="Unit">' +
         ['kg','lb'].map(u =>
           '<label class="radio-pill"><input type="radio" name="unit" value="' + u + '" data-change="unit"' + (s.unit === u ? ' checked' : '') + '><span>' + u + '</span></label>').join('') +
+      '</div>' +
+    '</div>' +
+    '<div class="setting-block">' +
+      '<h3>Effort tracking</h3><p class="desc">Adds an optional column when logging sets: Rate of Perceived Exertion (1–10) ' +
+        'or Reps In Reserve (how many more you could have done). Choose one, or turn it off.</p>' +
+      '<div class="radio-row" role="radiogroup" aria-label="Effort metric">' +
+        [['none','None'], ['rpe','RPE'], ['rir','RIR']].map(([v,label]) =>
+          '<label class="radio-pill"><input type="radio" name="effort-metric" value="' + v + '" data-change="effort-metric"' + (s.effortMetric === v ? ' checked' : '') + '><span>' + label + '</span></label>').join('') +
       '</div>' +
     '</div>' +
     '<div class="setting-block">' +
@@ -3863,7 +3948,6 @@ const actions = {
     render();
   },
   'open-overview'(){ ui.overviewOpen = true; ui.focus = 'add-ex-select'; render(); },
-  'toggle-rpe'(){ ui.showRpe = !ui.showRpe; render(); },
   'open-session-note'(){ ui.notesOpen = true; ui.focus = 'wnotes'; render(); },
   'overview-up'(d){ moveOverviewExercise(Number(d.idx), -1); },
   'overview-down'(d){ moveOverviewExercise(Number(d.idx), 1); },
@@ -3927,6 +4011,7 @@ const actions = {
       reps:   last && last.reps != null ? last.reps : null,
       durationSeconds: last && last.durationSeconds != null ? last.durationSeconds : null,
       rpe:    last && last.rpe != null ? last.rpe : null,
+      rir:    last && last.rir != null ? last.rir : null,
       completed:false, completedAt:0, unit: ex.unit || 'kg' };
     ex.sets.push(ns); save();
     ui.focus = 'hw-' + ns.id; render();
@@ -3942,7 +4027,11 @@ const actions = {
   'export'(){ exportData(); },
   'export-routines'(){ exportRoutines(); },
   'export-history'(){ exportHistory(); },
-  'remote-form-toggle'(){ ui.remoteFormOpen = !ui.remoteFormOpen; ui.remoteError=''; render(); },
+  'remote-form-toggle'(){
+    ui.remoteFormOpen = !ui.remoteFormOpen; ui.remoteError='';
+    if (!ui.remoteFormOpen) ui.remoteDraft = null;
+    render();
+  },
   'remote-export-config'(){ exportRemoteConfig(); },
   'remote-test'(){ remoteTestConnection(); },
   'remote-backup'(){ remoteBackup(); },
@@ -3950,12 +4039,7 @@ const actions = {
   'remote-forget'(){
     confirmDlg('Forget remote configuration?',
       'This removes the stored endpoint and credentials from this browser. It does not delete anything already uploaded to your bucket.',
-      'Forget', true).then(ok => {
-      if (!ok) return;
-      clearRemoteConfig();
-      ui.remoteDraft = null; ui.remoteFormOpen = false; ui.remoteError = '';
-      render(); toast('Remote configuration removed');
-    });
+      'Forget', true).then(ok => { if (!ok) return; clearRemoteConfig(); ui.remoteDraft = null; render(); toast('Remote configuration removed'); });
   },
   'clear-all'(){ clearAllData(); },
   'help-open'(){ $('#help-dlg').showModal(); },
@@ -3999,6 +4083,7 @@ const binders = {
     it[t.dataset.field] = t.dataset.field === 'weight' ? toNum(t.value) : (toNum(t.value) || 0);
   },
   edraft(t){ if (ui.exerciseDraft) ui.exerciseDraft[t.dataset.field] = t.value; },
+  remote(t){ if (ui.remoteDraft) ui.remoteDraft[t.dataset.field] = t.value; },
   hwo(t){ const w = editingWorkout(); if (w){ w[t.dataset.field] = t.value; save(); } },
   hex(t){ const ex = findHEx(t.dataset); if (ex){ ex[t.dataset.field] = t.value; save(); } },
   hset(t){ const s = findHSet(t.dataset); if (s){ s[t.dataset.field] = toNum(t.value); save(); } },
@@ -4015,6 +4100,10 @@ const changeHandlers = {
   hexsel(t){ const ex = findHEx(t.dataset); if (ex){ ex.unit = t.value; save(); } },
   theme(t){ setTheme(t.value); },
   unit(t){ setUnit(t.value); },
+  'effort-metric'(t){
+    state.settings.effortMetric = t.value; save();
+    toast('Effort tracking: ' + (t.value === 'none' ? 'off' : t.value.toUpperCase()));
+  },
   trend(t){ ui.trendExId = t.value; render(); },
   setting(t){
     const key = t.dataset.field;
@@ -4039,10 +4128,12 @@ const changeHandlers = {
     toast(field === 'startedAt' ? 'Start time updated' : 'End time updated');
   },
   'set-weight'(t){ cascadeWeight(t.dataset.id, toNum(t.value)); },
+  'set-reps'(t){ cascadeReps(t.dataset.id, toNum(t.value)); },
   'import-all'(t){ withPickedFile(t, importData); },
   'import-routines'(t){ withPickedFile(t, importRoutines); },
   'import-history'(t){ withPickedFile(t, importHistory); },
-  'load-remote-config'(t){ withPickedFile(t, loadRemoteConfigFile); }
+  'load-remote-config'(t){ withPickedFile(t, loadRemoteConfigFile); },
+  'remote-pathstyle'(t){ if (ui.remoteDraft) ui.remoteDraft.pathStyle = t.checked; }
 };
 /* file inputs are reset so re-picking the same file fires change again */
 function withPickedFile(input, fn){
@@ -4124,19 +4215,6 @@ document.addEventListener('keydown', e => {
 /* ============================================================
    INIT
    ============================================================ */
-/* One-shot: the build stamp never changes while the page is open. Written with
-   textContent so a branch name never has to be trusted as markup. */
-function paintBuildRef(){
-  const el = $('#app-build');
-  if (!el) return;
-  const stamped = BUILD.commit && BUILD.commit !== 'unstamped';
-  el.textContent = stamped ? BUILD.branch + '@' + BUILD.commit : 'unstamped build';
-  el.setAttribute('title', stamped
-    ? 'Built from commit ' + BUILD.commit + ' on branch ' + BUILD.branch +
-      (BUILD.date ? ', ' + BUILD.date : '')
-    : 'This copy was not stamped with a branch or commit.');
-}
-
 function init(){
   applyTheme();
   /* restoreTimer() reads activeWorkout.timer, and loadTimer() overwrites it —
@@ -4144,7 +4222,6 @@ function init(){
   if (state.activeWorkout) restoreTimer();
   else loadTimer(state.settings.defaultRest);
 
-  paintBuildRef();
   trackHeaderHeight();
   $('#help-shortcuts').innerHTML = shortcutTable();
 
