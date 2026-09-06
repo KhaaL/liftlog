@@ -57,13 +57,19 @@ first so the import is undoable.
 
 ## 2. Features the data model already supports
 
-### 2.1 Warm-up and PR flags as first-class UI
-**Why:** `countForVolume` / `countForPR` exist, are honoured everywhere, survive
-export/import, and are shown in history as a "warm-up" chip — but **nothing in
-the UI can set them**. They only ever arrive from seed or import data.
+### 2.1 Warm-up and PR flags as first-class UI — **done**
+A set can be marked a warm-up from the set row (the set number doubles as the
+toggle), from the labelled "Warm-up" chip on the set being logged, and from the
+history editor, so a past session can be reclassified too. `setWarmup()` writes
+both flags together: a warm-up is performed but counts for neither volume nor
+records, which is how the seed and the import contract have always used the
+pair, and one control cannot honestly claim to set them independently. Turning
+it off deletes the keys rather than writing `true`, so a file keeps carrying the
+exception rather than the rule.
 
-**How:** a per-set toggle in the active-workout set row and the history editor.
-This is the single largest gap between the model and the interface.
+Two entry points rather than one because the set-number cell is 34px at 480px,
+30px at 400px, and is dropped altogether below 360px when an effort column is
+on — so it cannot be the only way in. The chip is also the discoverable one.
 
 ### 2.2 Added load on bodyweight exercises
 **Why:** a `bw` exercise renders a disabled weight field, so weighted dips or a
@@ -230,6 +236,11 @@ clear all) is cheap. Currently every one of them is a confirm-and-hope.
   wrong pattern for a phone. A five-icon bottom bar would cost less height —
   and collides with the sticky action bar, so it needs a design that shares
   that edge.
+- ~~**Reps need the keyboard when a set goes off plan.**~~ **Done** — the set
+  being logged carries `repChips()`, five tap targets around the planned value
+  (stepping by 5 for a timed exercise). They route through `cascadeReps()`, so a
+  chip does exactly what typing in the field beside it does, later sets included.
+  Weight has no equivalent yet; the same mechanism would fit it.
 - **The set row's floor is the 44px Done target.** Rows are 57px on a phone
   (was 74). Getting below that means rethinking how a set is marked done —
   swipe, or completing from the action bar only — not shrinking the button.

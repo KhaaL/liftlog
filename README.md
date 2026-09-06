@@ -138,7 +138,8 @@ state
 │   └─ items[]     { id, exerciseId, sets, reps, weight, rest }
 ├─ workouts[]      logged sessions, newest first              — the log
 │   └─ exercises[] { exerciseId, name, unit, targetReps, restSeconds, skipped, sets[] }
-│       └─ sets[]  { id, weight, reps, durationSeconds, rpe, rir, unit, completed, completedAt }
+│       └─ sets[]  { id, weight, reps, durationSeconds, rpe, rir, unit, completed, completedAt,
+│                    countForVolume?, countForPR? }   — absent means "counts"
 └─ activeWorkout   a workout in progress, or null
 ```
 
@@ -456,6 +457,13 @@ the rest timer across a reload, finish a workout, edit a logged session, a kg/lb
 switch, an export/import round trip, and (if touching remote storage) saving a
 config, a failed connection test, and a backup/restore round trip against a
 real S3-compatible bucket.
+
+Also exercise the set row: mark a set as a warm-up from the set number and from
+the "Warm-up" chip, confirm the session volume does not move when it is
+completed, reclassify a logged set in the history editor, and check a rep chip
+writes the value and carries it to the later uncompleted sets exactly as typing
+does. Warm-up marking has two entry points because the set-number cell is
+dropped below 360px when an effort column is on — worth checking at 320px too.
 
 For the storage and install paths specifically:
 
