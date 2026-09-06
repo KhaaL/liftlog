@@ -5,6 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="description" content="Liftlog — a quiet, local-first gym workout tracker. Log sets, time rests, review progress.">
 <meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#fbfbf9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#16181b" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Liftlog">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon-180.png">
 <title>Liftlog — Gym Workout Tracker</title>
 <style>
 /* ============================================================
@@ -304,6 +312,20 @@ select{ appearance:none; padding-right:30px; background-image:linear-gradient(45
 .form-actions{ display:flex; gap:var(--sp-2); align-items:center; flex-wrap:wrap; }
 .form-footer{ margin-top:var(--sp-5); padding-top:var(--sp-4); border-top:1px solid var(--border); }
 .error-text{ color:var(--danger); font-size:var(--fs-sm); font-weight:600; }
+/* Not dismissable and not sticky: it sits under the header in normal flow so
+   it cannot cover the session strip, and it stays until a write succeeds. */
+.save-banner{ background:var(--danger-soft); border-bottom:2px solid var(--danger-strong); }
+.save-banner-inner{
+  display:flex; align-items:center; justify-content:space-between; gap:var(--sp-4);
+  padding-top:var(--sp-3); padding-bottom:var(--sp-3); flex-wrap:wrap;
+}
+.save-banner p{ margin:0; color:var(--text); font-size:var(--fs-sm); max-width:60ch; }
+.save-banner .btn{ flex:none; }
+/* The session strip cancels main's top padding with a negative margin so it
+   tucks under the header. With the banner in between, that margin would pull
+   the strip up over the banner's own last line instead — so drop it while the
+   banner is showing, and the strip tucks under the banner. */
+#save-banner:not([hidden]) ~ main .session-strip{ margin-top:0; }
 .hint{ color:var(--muted); font-size:var(--fs-xs); }
 
 kbd{
@@ -867,6 +889,13 @@ pre.code code{ background:none; border:0; padding:0; font-size:inherit; white-sp
   </div>
 </header>
 
+<div id="save-banner" class="save-banner" role="alert" hidden>
+  <div class="wrap save-banner-inner">
+    <p><strong>Changes are not being saved.</strong> This browser&rsquo;s storage is full or unavailable &mdash; anything logged now is lost when this tab closes.</p>
+    <button type="button" class="btn btn-danger-solid" data-action="export">Download a backup</button>
+  </div>
+</div>
+
 <main id="main" class="wrap" tabindex="-1"></main>
 
 <footer class="app-footer">
@@ -972,6 +1001,16 @@ function roundHalf(n){ return Math.round(n*2)/2; }
 const deepCopy = typeof structuredClone === 'function'
   ? (o => structuredClone(o))
   : (o => JSON.parse(JSON.stringify(o)));
+/* Coarse on purpose: the question is "is this recent enough", not the exact age. */
+function sinceLabel(ts){
+  if (!ts) return 'never';
+  const days = Math.floor((Date.now() - ts) / 86400000);
+  if (days <= 0) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 14) return days + ' days ago';
+  if (days < 60) return Math.floor(days / 7) + ' weeks ago';
+  return Math.floor(days / 30) + ' months ago';
+}
 /* Numeric coercion used by every form field and every importer:
    blank / null / non-numeric all collapse to null. */
 function toNum(v){
@@ -1101,10 +1140,79 @@ const EXPORT_SCHEMA = '1.1.0'; /* version of the documented import/export contra
 
 /* Set by load() when stored data could not be used, surfaced once after init. */
 let loadWarning = '';
+/* True while writes are failing (storage full, or blocked as in private mode).
+   The app keeps working in memory either way, but silently doing so is how a
+   session gets lost without anyone noticing — so it is shown, not swallowed. */
+let saveFailed = false;
 
 function save(){
-  try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
-  catch(e){ /* storage full or unavailable — app keeps working in memory */ }
+  try{
+    localStorage.setItem(LS_KEY, JSON.stringify(state));
+    if (saveFailed){ saveFailed = false; updateSaveBanner(); }
+  }catch(e){
+    if (!saveFailed){
+      saveFailed = true;
+      updateSaveBanner();
+      announce('Warning: changes are no longer being saved to this browser.');
+    }
+  }
+}
+/* The banner lives in the static body, not in #main, because render() replaces
+   that wholesale — a warning about losing data must not depend on the render
+   loop it is warning about. */
+function updateSaveBanner(){
+  const el = $('#save-banner');
+  if (el) el.hidden = !saveFailed;
+}
+
+/* ---------- storage durability ----------
+   localStorage is evictable by default: a browser short on space may clear it,
+   and iOS drops script-writable storage for a site left untouched for about a
+   week. navigator.storage.persist() asks for an exemption from that. Chrome
+   decides silently from engagement, Firefox prompts — so it is asked once, on
+   the first workout started in this browser (a real gesture, which is when a
+   grant is most likely), and only asked again if the user presses the button
+   in Settings. */
+const LS_PERSIST_ASKED = 'liftlog.v1.persist-asked';
+let storagePersisted = null;   /* null until known, false when best-effort */
+let storageEstimate = null;    /* {usage, quota} when the browser reports it */
+
+function storageManager(){
+  return (navigator.storage && navigator.storage.persist) ? navigator.storage : null;
+}
+function persistAsked(){
+  try{ return localStorage.getItem(LS_PERSIST_ASKED) === '1'; }
+  catch(e){ return false; }
+}
+/* Reads the current state without asking for anything. Re-renders only when an
+   answer actually changed, so it can never loop with the render it triggers. */
+function refreshStorageState(){
+  const sm = storageManager();
+  if (!sm) return;
+  sm.persisted().then(p => {
+    const changed = storagePersisted !== p;
+    storagePersisted = p;
+    if (changed && ui.view === 'settings') render();
+  }).catch(() => { /* nothing to report */ });
+  if (sm.estimate) sm.estimate().then(est => {
+    const changed = !storageEstimate || storageEstimate.usage !== est.usage;
+    storageEstimate = est;
+    if (changed && ui.view === 'settings') render();
+  }).catch(() => { /* nothing to report */ });
+}
+/* fromUser: pressed the button in Settings, where a previous refusal is
+   exactly what they are trying to undo. */
+function requestPersistence(fromUser){
+  const sm = storageManager();
+  if (!sm || storagePersisted) return;
+  if (!fromUser && persistAsked()) return;
+  try{ localStorage.setItem(LS_PERSIST_ASKED, '1'); }
+  catch(e){ /* the save banner already covers an unwritable store */ }
+  sm.persist().then(granted => {
+    storagePersisted = granted;
+    if (fromUser) toast(granted ? 'Storage is now persistent' : 'The browser declined — keep a backup instead');
+    render();
+  }).catch(() => { if (fromUser) toast('This browser cannot make storage persistent'); });
 }
 /* Stored data we cannot read is never overwritten in place: it is moved aside
    first so a bad parse or a downgrade can still be recovered by hand. */
@@ -1183,6 +1291,8 @@ function normalizeState(s){
   set.autoRest = !!set.autoRest;
   set.sound = !!set.sound;
   set.effortMetric = EFFORT_METRICS.includes(set.effortMetric) ? set.effortMetric : d.effortMetric;
+  set.lastFileBackupAt = toNum(set.lastFileBackupAt);
+  set.seededAt = toNum(set.seededAt);
   s.settings = set;
   s.exercises = (s.exercises || []).map(e => Object.assign({}, e, {
     category: typeof e.category === 'string' ? e.category : '',
@@ -1201,7 +1311,8 @@ function normalizeState(s){
    scale, so only one is shown at a time rather than both. */
 const EFFORT_METRICS = ['none', 'rpe', 'rir'];
 function defaultSettings(){
-  return { theme:'system', unit:'kg', defaultRest:90, autoRest:true, sound:true, effortMetric:'none' };
+  return { theme:'system', unit:'kg', defaultRest:90, autoRest:true, sound:true, effortMetric:'none',
+           lastFileBackupAt:null, seededAt:null };
 }
 /* History is kept newest-first everywhere; every mutation that can change a
    start time re-establishes that instead of sorting again at each read. */
@@ -1296,7 +1407,10 @@ function seedState(){
     ])
   ].sort((a,b) => b.startedAt - a.startedAt);
 
-  return { version:SCHEMA_VERSION, settings:defaultSettings(), exercises:exs, routines, workouts, activeWorkout:null };
+  /* When this install was created. The sample sessions below it are demo data,
+     not something the user would miss, so the backup reminder ignores them. */
+  const settings = Object.assign(defaultSettings(), { seededAt:Date.now() });
+  return { version:SCHEMA_VERSION, settings, exercises:exs, routines, workouts, activeWorkout:null };
 }
 
 /* ============================================================
@@ -1328,6 +1442,7 @@ function freshUI(){
     remoteDraft:null,           /* config loaded from a file but still missing its secret key */
     remoteError:'',
     remoteBusy:false,           /* a remote backup/restore/test request is in flight */
+    backupNagged:false,         /* the stale-backup reminder is shown once per page load */
     remoteDraft:null            /* live-edited config fields, kept here so an unrelated re-render never drops them */
   };
 }
@@ -1462,20 +1577,27 @@ function persistTimer(){
   if (state.activeWorkout){
     state.activeWorkout.timer = {
       seconds:timer.seconds, total:timer.total, remaining:Math.round(timer.remaining),
-      running:timer.running, endsAt:timer.endsAt
+      running:timer.running, endsAt:timer.endsAt, done:timer.done
     };
     save();
   }
 }
+/* Every stored field is read back through this rather than `||`: a rest that
+   ran out persists `remaining: 0`, and a falsy-zero fallback would restore it
+   as a full, untouched timer instead of a finished one. */
+function timerNum(v, fallback){
+  return (v != null && isFinite(v)) ? Number(v) : fallback;
+}
 function restoreTimer(){
   const t = state.activeWorkout && state.activeWorkout.timer;
-  timer.running = false; timer.done = false;
-  timer.seconds = (t && t.seconds) || state.settings.defaultRest;
-  timer.remaining = (t && (t.remaining != null ? t.remaining : t.seconds)) || timer.seconds;
-  timer.total = (t && t.total) || timer.seconds;
+  timer.running = false;
+  timer.seconds = timerNum(t && t.seconds, state.settings.defaultRest);
+  timer.remaining = timerNum(t && t.remaining, timer.seconds);
+  timer.total = timerNum(t && t.total, timer.seconds);
+  timer.done = !!(t && t.done);
   if (t && t.running && t.endsAt){
     const rem = (t.endsAt - Date.now()) / 1000;
-    if (rem > 0){ timer.remaining = rem; timer.endsAt = t.endsAt; timer.running = true; }
+    if (rem > 0){ timer.remaining = rem; timer.endsAt = t.endsAt; timer.running = true; timer.done = false; }
     else { timer.remaining = 0; timer.done = true; }
   }
   timer.total = Math.max(timer.total, timer.remaining);
@@ -1655,6 +1777,32 @@ function beep(){
   }catch(e){ /* audio unavailable — visual announcement still happens */ }
 }
 
+/* ---------- installability ----------
+   Registering the worker is what makes Liftlog openable with no network and
+   installable to a home screen — which on iOS is also what stops the browser
+   clearing the log after a week of not visiting. It needs a real origin: from
+   a file:// URL there is no service worker, nothing below runs, and the app
+   behaves exactly as it always has. */
+function registerServiceWorker(){
+  if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
+  navigator.serviceWorker.register('sw.js').then(reg => {
+    reg.addEventListener('updatefound', () => {
+      const fresh = reg.installing;
+      if (!fresh) return;
+      fresh.addEventListener('statechange', () => {
+        /* An existing controller means this is an update rather than the first
+           install. The page is never reloaded automatically — doing that in the
+           middle of a set is worse than running yesterday's version for one
+           more session. */
+        if (fresh.state === 'installed' && navigator.serviceWorker.controller){
+          fresh.postMessage({ type:'SKIP_WAITING' });
+          toast('Update ready — reopen Liftlog to apply');
+        }
+      });
+    });
+  }).catch(() => { /* no worker: the app still runs, just without an offline shell */ });
+}
+
 /* ---------- screen wake lock ----------
    A phone propped against a rack turns its screen off mid-set. The lock is
    held for exactly as long as a workout is active, and the browser drops it
@@ -1807,6 +1955,7 @@ function buildWorkoutExercise(item){
 function beginWorkout(workout){
   state.activeWorkout = workout;
   save();
+  requestPersistence(false);   /* a user gesture, and the point data starts mattering */
   restoreTimer();
   ui.view = 'today';
   ui.selectedRoutineId = null;
@@ -2097,6 +2246,7 @@ function finishWorkout(){
     navigate('history');
     window.scrollTo(0,0);
     toast('Workout saved — ' + fmtNum(workoutVolume(w)) + ' ' + unitLabel() + ' total');
+    maybeNagBackup();
   };
   if (done === 0){
     dialog({ title:'No sets completed', body:'This workout has no completed sets. Do you want to save it anyway?',
@@ -2279,8 +2429,51 @@ function backupPayload(){
     deepCopy(state));
 }
 function exportData(){
+  /* Stamped before the payload is built, so the file records when it was made:
+     restoring it then reports its real age rather than "never backed up". */
+  state.settings.lastFileBackupAt = Date.now();
   downloadJSON(backupPayload(), dateStamp('liftlog-backup'));
+  save();
+  render();   /* the "last backup" line is on the page holding this button */
   toast('Backup exported');
+}
+/* localStorage can be cleared by the browser, the OS, or a stray tap in
+   settings, so an off-device copy is the only real safety net — and a safety
+   net nobody is reminded about is one nobody refreshes. */
+const BACKUP_NAG_WORKOUTS = 3;
+const BACKUP_NAG_DAYS = 14;
+
+/* The newest whole-log copy that exists anywhere off this browser. A
+   downloaded file and a remote bucket both count; someone with neither is
+   exactly who needs telling. */
+function lastBackupInfo(){
+  const file = toNum(state.settings.lastFileBackupAt) || 0;
+  const cfg = loadRemoteConfig();
+  const remote = (cfg && toNum(cfg.lastBackupAt)) || 0;
+  const at = Math.max(file, remote);
+  return { at:at || null, where: at ? (remote >= file ? 'remote storage' : 'a file') : null };
+}
+/* Derived rather than counted into state, so it stays right across an import,
+   a restore, or a session deleted from history. With no backup at all the
+   cut-off is when this install was seeded, so the sample sessions a first-time
+   user has never looked at do not read as unsaved work. */
+function workoutsSinceBackup(){
+  const since = lastBackupInfo().at || toNum(state.settings.seededAt) || 0;
+  return state.workouts.filter(w => (w.finishedAt || w.startedAt || 0) > since).length;
+}
+function backupIsStale(){
+  const at = lastBackupInfo().at;
+  if (!at) return workoutsSinceBackup() > 0;
+  return workoutsSinceBackup() >= BACKUP_NAG_WORKOUTS ||
+         (Date.now() - at) / 86400000 >= BACKUP_NAG_DAYS;
+}
+/* Said at most once per page load, just after a workout is filed — the moment
+   there is something new to lose. */
+function maybeNagBackup(){
+  if (ui.backupNagged || !backupIsStale()) return;
+  ui.backupNagged = true;
+  const n = workoutsSinceBackup();
+  toast(n + (n === 1 ? ' workout' : ' workouts') + ' since your last backup — see Settings › Data');
 }
 function importData(file){
   readJSONFile(file, applyFullBackup);
@@ -3753,6 +3946,38 @@ function shortcutTable(){
       '</td><td>' + esc(sc.text) + '</td></tr>').join('') +
     '</tbody></table>';
 }
+function fmtBytes(n){
+  if (n == null) return '–';
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return Math.round(n/102.4)/10 + ' KB';
+  return Math.round(n/104857.6)/10 + ' MB';
+}
+/* What was written, how much room there is, and whether the browser considers
+   itself free to throw it away — the three facts that decide whether a log is
+   actually safe in this browser. */
+function storageHTML(){
+  const sm = storageManager();
+  let line, cls = 'hint', btn = '';
+  if (!sm){
+    line = 'This browser does not report whether it may evict stored data, so treat it as evictable and keep a backup.';
+  } else if (storagePersisted === true){
+    line = 'Persistent — this browser has agreed not to clear Liftlog’s data to reclaim space.';
+  } else if (storagePersisted === false){
+    line = 'Best-effort — this browser may clear the data when space runs low, and iOS clears it after about a week without a visit. Granting persistence, or installing Liftlog to the home screen, prevents that.';
+    cls = 'error-text';
+    btn = '<div class="form-actions"><button type="button" class="btn" data-action="request-persist">Request persistent storage</button></div>';
+  } else {
+    line = 'Checking whether this browser may evict the data…';
+  }
+  const est = storageEstimate
+    ? ' This site is using ' + fmtBytes(storageEstimate.usage) + ' of roughly ' + fmtBytes(storageEstimate.quota) + ' available to it.'
+    : '';
+  return '<div class="setting-block">' +
+    '<h3>Storage</h3>' +
+    '<p class="desc">Liftlog’s data takes ' + storageSize() + ' in this browser.' + est + '</p>' +
+    '<p class="' + cls + '">' + line + '</p>' + btn +
+  '</div>';
+}
 function storageSize(){
   try{
     const bytes = new Blob([localStorage.getItem(LS_KEY) || '']).size;
@@ -3830,6 +4055,7 @@ function remoteStorageHTML(){
 function viewSettings(){
   const s = state.settings;
   const storage = storageSize();
+  const backup = lastBackupInfo();
   return '<div class="view-head"><div><h1>Settings</h1><p class="view-sub">Preferences, data, shortcuts</p></div></div>' +
   '<section class="panel" aria-label="Preferences">' +
     '<div class="setting-block">' +
@@ -3880,11 +4106,14 @@ function viewSettings(){
       '<p class="desc">Everything in one file: exercises, routines, history and preferences. ' +
         'Restoring replaces what is in this browser (' + storage + ')' +
         (loadRemoteConfig() ? '' : '. Nothing leaves this device unless you configure remote storage below') + '.</p>' +
-      '<div class="form-actions">' +
+      '<p class="' + (backupIsStale() ? 'error-text' : 'hint') + '">Last full backup: ' + sinceLabel(backup.at) +
+        (backup.where ? ' (to ' + backup.where + ')' : '') + '.</p>' +
+      '<div class="form-actions mt-2">' +
         '<button type="button" class="btn" data-action="export">' + IC.down + '<span>Download backup</span></button>' +
         '<label class="file-btn"><span>' + IC.up + ' Restore from file</span><input type="file" accept=".json,application/json" data-change="import-all" aria-label="Restore from a backup file"></label>' +
       '</div>' +
     '</div>' +
+    storageHTML() +
     remoteStorageHTML() +
     '<div class="setting-block">' +
       '<div class="block-head">' +
@@ -4025,6 +4254,7 @@ const actions = {
   },
 
   'export'(){ exportData(); },
+  'request-persist'(){ requestPersistence(true); },
   'export-routines'(){ exportRoutines(); },
   'export-history'(){ exportHistory(); },
   'remote-form-toggle'(){
@@ -4237,6 +4467,10 @@ function init(){
     if (timer.running && (timer.endsAt - Date.now()) / 1000 <= 0) completeRest();
     else drawTimer();
   });
+
+  updateSaveBanner();   /* init()'s own save() above may already have failed */
+  refreshStorageState();
+  registerServiceWorker();
 
   if (state.activeWorkout) announce('Active workout restored: ' + state.activeWorkout.routineName);
   if (loadWarning) toast(loadWarning);
