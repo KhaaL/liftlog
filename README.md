@@ -180,15 +180,27 @@ warning, so a bad parse or a downgrade is always recoverable by hand.
 
 ## Import / export
 
-Three separate flows, all plain JSON (`EXPORT_SCHEMA = '1.0.0'`):
+Four flows, all plain JSON (`EXPORT_SCHEMA = '1.0.0'`). Every file names itself
+with `app: 'liftlog'` and a `kind`:
 
-- **Full backup** — the entire `state`; importing replaces everything.
-- **Routines** — routines plus the exercise definitions they reference, so an
+- **`backup`** — the entire `state`; importing replaces everything. Built by
+  `backupPayload()`, which is also what the remote PUT uploads, so the file in
+  your downloads folder and the object in your bucket are the same thing.
+- **`routines`** — routines plus the exercise definitions they reference, so an
   import into another browser can rebuild missing library entries. Exercises are
   resolved by id, then by name, then created. Duplicate names are skipped.
-- **History** — workouts, with an explicit `setType` (`reps` / `time` / `hold` /
+- **`history`** — workouts, with an explicit `setType` (`reps` / `time` / `hold` /
   `distance`) on every set so importers never guess at field semantics.
   Deduplicated by workout id; first write wins.
+- **`remote-config`** — the remote-storage settings, optionally without the
+  secret key. See [Remote storage](#remote-storage-optional).
+
+`kind` exists because a routines file and a backup are not distinguishable by
+shape: both carry a `version` and an `exercises` array, so the full-backup
+importer used to accept a routines file and "restore" a state with no history
+and default settings. `applyFullBackup()` now turns away anything that names
+itself as another kind. Files predating the marker have no `kind` and are still
+accepted on shape alone.
 
 Legacy files without `setType` fall back to the exercise/set unit, and
 `includeInVolume` is accepted as an alias of `countForVolume`.
@@ -269,11 +281,27 @@ In Settings → Remote storage, fill in:
 | Access key ID / Secret access key | Credentials for that bucket. Scope them to just this bucket, and to just `GetObject`/`PutObject`, if your provider supports it. |
 | Path-style addressing | Turn on for MinIO and most self-hosted endpoints; leave off for AWS S3, R2, B2 and Spaces. |
 
-Instead of the form, you can load a JSON config file with the same fields
-(`endpoint`, `region`, `bucket`, `accessKeyId`, `secretAccessKey`, `objectKey`,
-`pathStyle`) via **Load config file** — handy if you keep the setup elsewhere
-and don't want to retype it. Treat that file like a credential: it contains
-your secret key in plain text.
+### The config file
+
+The form is not the only way in or out. **Load config file** reads a JSON file
+with the same fields (`endpoint`, `region`, `bucket`, `accessKeyId`,
+`secretAccessKey`, `objectKey`, `pathStyle`), and **Save config file** writes
+one — so setting up a second device does not mean retyping the form or
+hand-writing JSON to feed the loader.
+
+`secretAccessKey` is optional in both directions, which is the point:
+
+- **Without the secret** (the offered default) the file is not a credential. It
+  carries everything else, and the receiving device fills the form from it and
+  waits for the secret to be pasted in.
+- **With the secret** the file is a complete credential for that bucket: anyone
+  who opens it, and anywhere it gets synced or mailed, can read and write there.
+  It is behind its own button in the download dialog for that reason.
+
+Either way a loaded file lands in `ui.remoteDraft` — the same draft the form
+edits — so it is reviewable before it is anything else, and it reaches storage
+only through the connection test below. A file is no more trustworthy than a
+typed form.
 
 **Save configuration** tests the connection before writing anything to
 storage: it sends a signed `GET` against the config you just typed and only
