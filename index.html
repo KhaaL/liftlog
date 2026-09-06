@@ -450,9 +450,33 @@ kbd{
 .set-row.is-current{ background:var(--accent-soft); margin:0 calc(-1 * var(--sp-3)); padding-left:var(--sp-3); padding-right:var(--sp-3); border-radius:var(--radius); border-top-color:transparent; }
 .set-row.is-done .n,.set-row.is-done input{ color:var(--muted); }
 .set-row.is-done input{ background:var(--surface-2); border-color:var(--border); }
-.set-num{ display:flex; flex-direction:column; justify-content:center; gap:1px; padding-bottom:8px; }
+.set-num{
+  display:flex; flex-direction:column; justify-content:center; align-items:flex-start; gap:1px;
+  padding-bottom:8px; min-height:44px; background:none; border:0; border-radius:var(--radius);
+  font:inherit; color:inherit; text-align:left; cursor:pointer; overflow:hidden;
+}
+.set-num:hover{ background:var(--surface-2); }
+.set-num .wu{ font-size:10px; font-weight:650; line-height:1.2; color:var(--warning); white-space:nowrap; max-width:100%; }
+/* Performed, but out of the totals — so it reads as present and discounted
+   rather than as an ordinary set. */
+.set-row.is-warmup .n{ color:var(--muted); }
+.set-row.is-warmup input{ opacity:.7; }
+.hset-warm{ min-height:44px; min-width:34px; padding-inline:8px; justify-content:center; font-weight:700; color:var(--muted); }
+.hset-warm[aria-pressed="true"]{ background:var(--warning-soft); border-color:var(--warning); color:var(--warning); }
 .set-num .n{ font-weight:700; font-variant-numeric:tabular-nums; font-size:var(--fs-md); line-height:1; }
 .set-num .prev{ font-size:10.5px; color:var(--muted); font-variant-numeric:tabular-nums; line-height:1.2; }
+/* A full-width strip under the fields of the set being logged. */
+.rep-chips{ grid-column:1 / -1; display:flex; flex-wrap:wrap; gap:var(--sp-2); margin-top:var(--sp-2); }
+.rep-chip{
+  min-height:44px; min-width:52px; padding:0 var(--sp-3); cursor:pointer;
+  border:1px solid var(--border-strong); border-radius:var(--radius); background:var(--surface);
+  font:inherit; font-weight:650; font-variant-numeric:tabular-nums; color:var(--text);
+}
+.rep-chip:hover{ background:var(--surface-2); }
+.rep-chip[aria-pressed="true"]{ background:var(--accent-soft); border-color:var(--accent); color:var(--accent); }
+.warm-chip{ min-width:0; font-weight:650; color:var(--muted); }
+.warm-chip[aria-pressed="true"]{ background:var(--warning-soft); border-color:var(--warning); color:var(--warning); }
+.chip-sep{ width:1px; align-self:stretch; background:var(--border); margin:0 2px; }
 .set-done-btn{ min-height:44px; min-width:44px; padding-inline:10px; justify-content:center; font-size:var(--fs-xs); }
 /* destructive, so quiet until reached for — and never wider than the Done
    control beside it, which is the one you actually aim at between sets */
@@ -1023,6 +1047,18 @@ function clamp(n, lo, hi){ return Math.min(hi, Math.max(lo, n)); }
    Warm-ups opt out with countForVolume:false instead of abusing completed:false. */
 const countsVolume = s => s.completed && s.countForVolume !== false;
 const countsPR     = s => s.completed && s.countForPR !== false;
+/* One "warm-up" concept rather than two independent flags: a warm-up is
+   performed but counts for neither volume nor records, which is exactly how the
+   seed and the import contract have always used the pair. An asymmetric
+   combination can still arrive by import — it reads as a warm-up here, and
+   toggling writes both, which is the only thing one control can honestly say. */
+const isWarmup = s => s.countForVolume === false || s.countForPR === false;
+/* Turning it off deletes the keys rather than writing `true`: counting is the
+   default, so a file should carry the exception and not the rule. */
+function setWarmup(s, on){
+  if (on){ s.countForVolume = false; s.countForPR = false; }
+  else { delete s.countForVolume; delete s.countForPR; }
+}
 /* A set keeps the unit it was logged in forever; aggregates convert to whatever
    unit is on display so totals stay comparable after a kg/lb switch. */
 const LB_PER_KG = 2.2046226218;
@@ -1875,6 +1911,40 @@ const lastPerformance = exId => exerciseStats(exId).last;
 
 const setDuration = s => s.durationSeconds != null ? s.durationSeconds : (s.unit === 'time' ? s.reps : null); /* reps fallback: pre-v3 data */
 /* Returns escaped HTML: distanceUnit and unit can originate in an import file. */
+/* Deviating from the plan is the one thing that still costs a keyboard: the
+   planned value is already in the field, so hitting your target is a single tap
+   on Done. These offer that value's neighbours as targets, which is what a set
+   that went differently nearly always is — a rep or two either way. Only the
+   current set gets them: it is the one being logged, and six rows of chips
+   would bury the fields they belong to. */
+function repChips(ex, s, isCur){
+  if (!isCur || s.completed) return '';
+  const timed = ex.unit === 'time';
+  const step = timed ? 5 : 1;
+  const field = timed ? 'durationSeconds' : 'reps';
+  const base = toNum(s[field]);
+  const target = toNum(ex.targetReps);
+  const centre = base != null ? base : (target != null ? target : (timed ? 30 : 8));
+  const seen = new Set(), vals = [];
+  for (let d = -2; d <= 2; d++){
+    const v = centre + d * step;
+    if (v < 0 || seen.has(v)) continue;
+    seen.add(v); vals.push(v);
+  }
+  /* The warm-up toggle rides along here as well as on the set number. The
+     number cell shrinks to 30px on a phone and is dropped entirely below 360px
+     when an effort column is on, so it cannot be the only way in — and a
+     labelled button is the discoverable one of the two. */
+  return '<div class="rep-chips" role="group" aria-label="Quick ' + (timed ? 'seconds' : 'reps') + ' for this set">' +
+    '<button type="button" id="wc-' + s.id + '" class="rep-chip warm-chip" data-action="toggle-warmup" data-id="' + s.id + '" ' +
+      'aria-pressed="' + isWarmup(s) + '" ' +
+      'title="Performed, but out of volume and records">Warm-up</button>' +
+    '<span class="chip-sep" aria-hidden="true"></span>' +
+    vals.map(v => '<button type="button" id="rc-' + s.id + '-' + v + '" class="rep-chip" ' +
+      'data-action="set-rep-chip" data-id="' + s.id + '" data-v="' + v + '" ' +
+      'aria-pressed="' + (v === base) + '" aria-label="' + v + (timed ? ' seconds' : ' reps') + '">' + v + '</button>').join('') +
+  '</div>';
+}
 function setSummary(s){
   if (s.distance != null) return fmtNum(s.distance) + ' ' + esc(s.distanceUnit || 'm');
   const dur = setDuration(s);
@@ -2046,6 +2116,17 @@ function completeCurrentSet(){
     loadTimer(ex.restSeconds || state.settings.defaultRest);
     startTimer();
   }
+}
+function toggleWarmup(setId, focusId){
+  const ex = currentExercise(); if (!ex) return;
+  const s = ex.sets.find(x => x.id === setId); if (!s) return;
+  const on = !isWarmup(s);
+  setWarmup(s, on);
+  save();
+  ui.focus = focusId || 'sn-' + setId;
+  render();
+  announce(on ? 'Marked as a warm-up: it no longer counts toward volume or records.'
+              : 'Marked as a working set.');
 }
 function toggleSet(setId){
   const ex = currentExercise(); if (!ex) return;
@@ -3323,10 +3404,22 @@ function htmlCurrentExercise(w, ex){
     const isCur = i === currentIdx;
     const prevSet = prev && prev.sets[i] ? setSummary(prev.sets[i]) : '';
     const n = i + 1;
-    setsHTML += '<div class="set-row' + (isCur ? ' is-current' : '') + (s.completed ? ' is-done' : '') + '">' +
-      '<div class="set-num"><span class="n">' + n + '</span>' +
-        (prevSet ? '<span class="prev" title="Previous session">' + prevSet + '</span>' : '') +
-      '</div>';
+    /* The set number doubles as the warm-up toggle: the row is already five or
+       six columns wide and has no room for another one, and "is this a warm-up"
+       is the set's identity rather than another field. The cell is 34px at
+       480px and 30px at 400px, so the marker is a letter and takes the place of
+       the previous-session figure — which is itself hidden below 480px, where
+       .prev-perf above already lists the whole of the last session. */
+    const warm = isWarmup(s);
+    setsHTML += '<div class="set-row' + (isCur ? ' is-current' : '') + (s.completed ? ' is-done' : '') +
+        (warm ? ' is-warmup' : '') + '">' +
+      '<button type="button" id="sn-' + s.id + '" class="set-num" data-action="toggle-warmup" data-id="' + s.id + '" ' +
+        'aria-pressed="' + warm + '" aria-label="Set ' + n +
+        (warm ? ' is a warm-up. Mark it as a working set' : ' is a working set. Mark it as a warm-up') + '">' +
+        '<span class="n">' + n + '</span>' +
+        (warm ? '<span class="wu" title="Warm-up: out of volume and records">W</span>'
+              : (prevSet ? '<span class="prev" title="Previous session">' + prevSet + '</span>' : '')) +
+      '</button>';
     /* Below 640px the per-row captions are hidden (the head row already names
        the columns), so every input carries its own aria-label — which also
        names it better than the bare unit ever did. */
@@ -3357,6 +3450,7 @@ function htmlCurrentExercise(w, ex){
       (s.completed ? IC.boxcheck : IC.box) + '</button>';
     setsHTML += '<button type="button" class="btn set-del-btn" data-action="delete-set" data-id="' + s.id + '" ' +
       'aria-label="Delete set ' + n + '" title="Delete set ' + n + '">' + IC.trash + '</button>';
+    setsHTML += repChips(ex, s, isCur);
     setsHTML += '</div>';
   });
 
@@ -3746,6 +3840,9 @@ function htmlWorkoutEditor(w){
         '<span class="hset-num muted xs mono">' + (si+1) + '</span>' +
         f(flds[0], 'hw-' + s.id) + f(flds[1]) + f(flds[2]) +
         '<span class="hset-ctl">' +
+          '<button type="button" class="btn hset-warm" data-action="hset-warmup" data-idx="' + xi + '" data-sid="' + s.id + '" ' +
+            'aria-pressed="' + isWarmup(s) + '" title="Warm-up: performed, but out of volume and records" ' +
+            'aria-label="Set ' + (si+1) + (isWarmup(s) ? ' is a warm-up. Mark it as a working set' : ' is a working set. Mark it as a warm-up') + '">W</button>' +
           '<button type="button" class="btn hset-done" data-action="hset-toggle" data-idx="' + xi + '" data-sid="' + s.id + '" ' +
             'aria-pressed="' + s.completed + '" aria-label="Set ' + (si+1) + ' completed">' + (s.completed ? IC.boxcheck : IC.box) + '</button>' +
           '<button type="button" class="btn hset-del" data-action="hset-del" data-idx="' + xi + '" data-sid="' + s.id + '" aria-label="Delete set ' + (si+1) + '">' + IC.trash + '</button>' +
@@ -4161,6 +4258,15 @@ const actions = {
 
   'complete-current'(){ completeCurrentSet(); },
   'toggle-set'(d){ toggleSet(d.id); },
+  'toggle-warmup'(d, el){ toggleWarmup(d.id, el && el.id); },
+  /* Routed through cascadeReps, exactly as typing in the field is: a chip that
+     behaved differently from the input beside it would be worse than either
+     rule on its own. */
+  'set-rep-chip'(d){
+    cascadeReps(d.id, toNum(d.v));
+    ui.focus = 'rc-' + d.id + '-' + d.v;
+    render();
+  },
   'add-set'(){ addSet(); },
   'delete-set'(d){ deleteSet(d.id); },
   'skip-exercise'(){ advanceExercise(true); },
@@ -4225,6 +4331,11 @@ const actions = {
   'hset-toggle'(d){
     const s = findHSet(d); if (!s) return;
     s.completed = !s.completed; s.completedAt = s.completed ? Date.now() : 0;
+    save(); render();
+  },
+  'hset-warmup'(d){
+    const s = findHSet(d); if (!s) return;
+    setWarmup(s, !isWarmup(s));
     save(); render();
   },
   'hset-del'(d){
