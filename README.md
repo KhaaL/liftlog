@@ -6,17 +6,34 @@ unless you deliberately configure remote storage yourself (see below).
 
 ## Running it
 
-Open `index.html` in a browser. That is the whole install step.
+Open `index.html` in a browser. That is still the whole install step, and it
+still works from a `file://` URL or a USB stick.
 
-The app is a single self-contained file with **no build step and no
-dependencies**. That is a deliberate constraint: it has to work from a
-`file://` URL, from a USB stick, or from any static host. Please keep it that way
-— see [ENHANCEMENTS.md](ENHANCEMENTS.md) for how to relax it if the file ever
-outgrows a single document.
+The application is **one document with no build step and no dependencies**:
+`index.html` is the entire app. A few small static files sit beside it purely
+to make it installable — `manifest.webmanifest`, `sw.js`, and `icons/`
+(regenerate with `python3 tools/make-icons.py`, standard library only). Nothing
+is compiled, bundled or fetched at any point; opening the file directly simply
+skips them. Please keep it that way — see [ENHANCEMENTS.md](ENHANCEMENTS.md)
+before adding anything that needs a build step.
 
-By default the app also makes **no network calls at all** — the only exception
-is the optional remote storage feature below, and even then every request goes
-directly from your browser to storage you configure, never through any server.
+By default the app also makes **no network calls at all**. The two exceptions
+are the optional remote storage feature below, whose requests go directly from
+your browser to storage you configure and never through any server, and the
+service worker, which only ever caches the app's own files.
+
+### Installing it
+
+Served over `https://` (or `localhost`), Liftlog can be installed to a home
+screen or desktop, and then opens with no network at all. Any static host will
+do; `python3 -m http.server` is enough to try it locally.
+
+Installing is worth more than the convenience. iOS clears a *site's* stored
+data after roughly a week without a visit, but leaves an installed app's data
+alone — so on an iPhone, installing is the difference between a training log
+that survives a holiday and one that does not. From a `file://` URL there is no
+service worker and no install prompt; everything else behaves as it always has,
+except remote storage, which needs a secure context for the Web Crypto API.
 
 ## Architecture
 
@@ -114,7 +131,8 @@ phone in a gym is the case that matters:
 ```
 state
 ├─ version         schema version (SCHEMA_VERSION)
-├─ settings        { theme, unit, defaultRest, autoRest, sound, effortMetric }
+├─ settings        { theme, unit, defaultRest, autoRest, sound, effortMetric,
+│                    lastFileBackupAt, seededAt }
 ├─ exercises[]     { id, name, category, unit, notes }        — the library
 ├─ routines[]      { id, name, items[] }                      — the plan
 │   └─ items[]     { id, exerciseId, sets, reps, weight, rest }
@@ -123,6 +141,30 @@ state
 │       └─ sets[]  { id, weight, reps, durationSeconds, rpe, rir, unit, completed, completedAt }
 └─ activeWorkout   a workout in progress, or null
 ```
+
+### Durability
+
+The log lives under one `localStorage` key (`liftlog.v1`), rewritten in full by
+`save()` on every mutation. Three things guard it, because `localStorage` is
+neither guaranteed nor permanent:
+
+- **Failed writes are visible.** `save()` still keeps the app working from
+  memory when a write throws (quota exhausted, or storage blocked as in private
+  mode), but it also sets `saveFailed` and shows a permanent banner offering a
+  download. Losing a session silently is the one outcome worth being loud about.
+- **Storage asks not to be evicted.** `requestPersistence()` calls
+  `navigator.storage.persist()` on the first workout started in a browser — a
+  real gesture, which is when a grant is most likely. Settings reports the
+  answer, and offers a retry if the browser said no.
+- **Staleness is surfaced.** `lastBackupInfo()` takes the newer of the last file
+  export (`settings.lastFileBackupAt`) and the last remote backup
+  (`lastBackupAt` in the remote config). Past `BACKUP_NAG_WORKOUTS` sessions or
+  `BACKUP_NAG_DAYS` days, Settings marks it and one toast follows a finished
+  workout. `workoutsSinceBackup()` is derived from the log rather than counted
+  into state, so it stays correct across an import, a restore or a deletion.
+  With no backup at all the cut-off is `settings.seededAt`, so the sample
+  sessions a first-time user has never looked at are not counted as work at
+  risk.
 
 ### Invariants
 
@@ -414,3 +456,20 @@ the rest timer across a reload, finish a workout, edit a logged session, a kg/lb
 switch, an export/import round trip, and (if touching remote storage) saving a
 config, a failed connection test, and a backup/restore round trip against a
 real S3-compatible bucket.
+
+For the storage and install paths specifically:
+
+- **A finished rest survives a reload.** Let a rest run out, reload, and check
+  it reads `0:00` / "Rest complete" rather than resetting to a full timer.
+- **The save banner appears and clears.** Stub `localStorage.setItem` to throw
+  from the console, log a set (banner appears, download works), restore it, log
+  another (banner clears).
+- **Backup staleness.** Set `settings.lastFileBackupAt` back three weeks, finish
+  a workout, and check both the toast and the red line in Settings; exporting
+  clears both.
+- **Offline and installable.** Serve the folder over `http://localhost`, load
+  once, then reload with the network off — the app must still open. Check the
+  service worker reaches *activated* and the manifest parses with no console
+  errors.
+- **`file://` still works.** Open the file directly and start a workout: no
+  service worker, no console errors, everything else unchanged.
