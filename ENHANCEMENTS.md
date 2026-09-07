@@ -160,8 +160,12 @@ the current preference list is the honest compromise.
 ### 3.5 Storage headroom — **reporting done, IndexedDB still open**
 `save()` no longer fails silently: it sets `saveFailed` and shows a permanent
 banner offering a download, and Settings reports bytes used, the browser's
-quota estimate, and whether the data is persistent or merely best-effort
-(`navigator.storage.persist()` is requested on the first workout).
+quota estimate, and which of four durability states this browser is in —
+granted, askable, refused outright (Brave), or unable to say because
+`StorageManager` needs a secure context. The last two used to read as
+"best-effort" and "checking…" forever, which told the user nothing they could
+act on; each now names the one thing that still helps, and the request button
+is only offered where pressing it can change the answer.
 
 What remains is the storage engine itself. `localStorage` is still a few MB,
 synchronous, and rewritten in full on every keystroke. IndexedDB would remove
