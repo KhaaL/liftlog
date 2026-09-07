@@ -745,6 +745,43 @@ dialog::backdrop{ background:rgb(15 17 20 / .5); }
 .dlg-wide[open]{ display:flex; flex-direction:column; }
 .dlg-wide .dlg-body{ overflow-y:auto; min-height:0; }
 .dlg-wide .dlg-actions{ flex:none; }
+/* The session overview: a sheet rather than a panel. It is a decision — what
+   am I doing next, in what order — so it takes the whole screen on a phone and
+   the middle of it on a desktop, over a scrim that puts the workout visibly
+   behind it. It used to render as another panel directly under the action bar,
+   in the same visual language as the exercise being logged, which read as more
+   of the same screen rather than a different question. */
+.dlg-sheet{ max-width:min(560px,calc(100vw - 32px)); max-height:min(86vh,780px); }
+.dlg-sheet[open]{ display:flex; flex-direction:column; }
+.dlg-sheet::backdrop{ background:rgb(15 17 20 / .62); }
+.sheet-head{
+  display:flex; align-items:flex-start; gap:var(--sp-3); flex:none;
+  padding:var(--sp-4) var(--sp-4) var(--sp-3);
+  background:var(--surface-2); border-bottom:1px solid var(--border);
+  border-radius:var(--radius-lg) var(--radius-lg) 0 0;
+}
+.sheet-head h2{ font-size:var(--fs-lg); font-weight:700; letter-spacing:-.02em; }
+.sheet-head h2:focus-visible{ outline:2px solid var(--accent); outline-offset:3px; }
+.sheet-sub{ color:var(--muted); font-size:var(--fs-xs); margin-top:2px; }
+.sheet-close{ margin-left:auto; flex:none; }
+/* flex:1 so a full-screen sheet puts its actions on the bottom edge rather
+   than under the last row; on a desktop the dialog is content-height, so
+   there is nothing to grow into and it stays as small as it deserves. */
+.sheet-body{ flex:1 1 auto; overflow-y:auto; overscroll-behavior:contain; min-height:0; }
+/* the rows bring their own padding and dividers, so the first one must not
+   also carry the panel's top border */
+.sheet-body > .done-ex-row:first-child{ border-top:0; }
+@media (max-width:640px){
+  .dlg-sheet{
+    max-width:none; width:100%; height:100%; max-height:none;
+    margin:0; border:0; border-radius:0;
+  }
+  .sheet-head{ border-radius:0; padding-top:calc(var(--sp-4) + env(safe-area-inset-top)); }
+  .dlg-sheet .dlg-actions{ border-radius:0; padding-bottom:calc(var(--sp-3) + env(safe-area-inset-bottom)); }
+  /* a full-screen sheet with the workout still scrolling behind it reads as a
+     bug; on a desktop the sheet is a window over a page, and it does not */
+  html.sheet-open{ overflow:hidden; }
+}
 .dlg-lede{ color:var(--text) !important; font-size:var(--fs-sm); margin-bottom:var(--sp-4); }
 .sh-h{ font-weight:700; margin:var(--sp-5) 0 var(--sp-2); padding-top:var(--sp-4); border-top:1px solid var(--border); }
 .dlg-body .desc{ color:var(--muted); font-size:var(--fs-sm); margin-bottom:var(--sp-3); }
@@ -938,6 +975,22 @@ pre.code code{ background:none; border:0; padding:0; font-size:inherit; white-sp
   </div>
   <div class="dlg-actions">
     <button type="button" class="btn" data-action="help-close">Close</button>
+  </div>
+</dialog>
+
+<dialog id="overview-dlg" class="dlg-sheet" aria-labelledby="overview-title">
+  <div class="sheet-head">
+    <div>
+      <h2 id="overview-title" tabindex="-1">Session overview</h2>
+      <p class="sheet-sub" id="overview-sub"></p>
+    </div>
+    <button type="button" class="icon-btn sheet-close" data-action="close-overview" aria-label="Close session overview">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </div>
+  <div class="sheet-body" id="overview-dlg-body"></div>
+  <div class="dlg-actions">
+    <button type="button" class="btn btn-primary" data-action="close-overview">Back to workout</button>
   </div>
 </dialog>
 
@@ -2028,10 +2081,11 @@ function beginWorkout(workout){
   ui.view = 'today';
   ui.selectedRoutineId = null;
   ui.expandedDone.clear();   /* keys are indexes into the previous workout */
-  /* nothing to log yet means the drawer is where the user needs to be */
+  /* nothing to log yet means the sheet is where the user needs to be — and the
+     focus with it: everything outside an open modal is inert. */
   ui.overviewOpen = workout.exercises.length === 0;
   ui.notesOpen = false;
-  ui.focus = 'workout-title';
+  ui.focus = ui.overviewOpen ? 'add-ex-select' : 'workout-title';
   render();
 }
 /* startRoutine and startEmpty differ only in the workout they build and the
@@ -3160,7 +3214,54 @@ function render(){
   drawTimer();
   liftToasts();      /* the bar's height changes with the sheet and the set row */
   syncWakeLock();
+  /* before applyFocus: showModal() takes the focus, so anything this render
+     wanted focused has to be put back afterwards — and a target inside the
+     sheet has to exist by then. */
+  syncOverviewSheet();
   applyFocus();
+}
+/* The overview sheet is a modal dialog, so it lives outside #main and is not
+   rebuilt by the line above. Only its body is refilled: calling showModal() on
+   an already-open dialog throws, and re-creating the element would flash the
+   backdrop on every reorder. */
+function syncOverviewSheet(){
+  const dlg = $('#overview-dlg');
+  if (!dlg) return;
+  const w = state.activeWorkout;
+  const open = !!(w && ui.overviewOpen);
+  if (open){
+    const body = $('#overview-dlg-body');
+    /* Refilling the body destroys whatever was focused inside it, and renders
+       arrive from elsewhere too (a storage answer landing, a rest tick that
+       finishes). Anything the render did not itself ask to focus is put back,
+       through the same ui.focus applyFocus() uses a few lines later. */
+    const keep = (!ui.focus && body.contains(document.activeElement) && document.activeElement.id) || '';
+    body.innerHTML = overviewSheetHTML(w);
+    $('#overview-sub').textContent = overviewSubtitle(w);
+    if (keep) ui.focus = keep;
+    if (!dlg.open) dlg.showModal();
+  } else if (dlg.open){
+    dlg.close();
+  }
+  document.documentElement.classList.toggle('sheet-open', open);
+}
+/* Esc and a click on the scrim close the dialog without going through an
+   action, so ui has to be told. The guard keeps the close() this render may
+   just have issued from starting another one. */
+function wireOverviewSheet(){
+  const dlg = $('#overview-dlg');
+  if (!dlg) return;
+  dlg.addEventListener('close', () => {
+    document.documentElement.classList.remove('sheet-open');
+    if (!ui.overviewOpen) return;
+    closeOverview();
+  });
+  dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });
+}
+function closeOverview(){
+  ui.overviewOpen = false;
+  ui.focus = 'overview-toggle-btn';
+  render();
 }
 /* The session strip sticks directly under the header, so the header's real
    height has to be a value CSS can read. */
@@ -3316,9 +3417,8 @@ function htmlActiveWorkout(w){
   html += '</section>';
 
   html += htmlActionBar(w, ex);
-  /* What has already been done is in the drawer, not stacked under the bar:
-     the screen ends at the action bar unless the drawer is open. */
-  html += ui.overviewOpen ? htmlWorkoutOverview(w) : '';
+  /* The screen ends at the action bar. Everything about the session as a whole
+     is in the sheet, which is a dialog outside #main — see syncOverviewSheet(). */
   return html;
 }
 
@@ -3349,7 +3449,8 @@ function htmlSessionStrip(w){
     '<div class="strip-line">' +
       '<span class="strip-pos">' + where + '</span>' +
       '<button type="button" id="overview-toggle-btn" class="strip-num overview-toggle" ' +
-        'data-action="toggle-overview" aria-expanded="' + ui.overviewOpen + '" aria-controls="workout-overview">' +
+        'data-action="toggle-overview" aria-haspopup="dialog" aria-expanded="' + ui.overviewOpen + '" ' +
+        'aria-controls="overview-dlg">' +
         doneSets + '/' + planned + ' sets' + (mins != null ? ' · ~' + mins + ' min' : '') +
         IC.chev + '</button>' +
     '</div>' +
@@ -3513,15 +3614,18 @@ function htmlDoneRow(ex, i){
   }
   return html;
 }
-/* The session-overview drawer: every exercise in the workout, done first,
-   then the one in progress, then what's left — with reorder/jump controls
-   on the upcoming ones. Reordering is scoped to indexes strictly after
+/* What is inside the session-overview sheet: every exercise in the workout,
+   done first, then the one in progress, then what's left — with reorder/jump
+   controls on the upcoming ones. Reordering is scoped to indexes strictly after
    currentExerciseIndex so done/current indexes (and ui.expandedDone, which
-   is keyed by index) never shift underneath the user. */
-function htmlWorkoutOverview(w){
+   is keyed by index) never shift underneath the user.
+
+   The frame (title, close, scroll container) is static markup in #overview-dlg;
+   this is only the part that changes, so a reorder refills the body without
+   the sheet itself blinking out and back. */
+function overviewSheetHTML(w){
   const lo = w.currentExerciseIndex + 1, hi = w.exercises.length - 1;
-  let html = '<section class="panel mt-4" aria-label="Session overview" id="workout-overview"><div class="pad">' +
-    '<h2 class="panel-title" id="overview-title" tabindex="-1">All exercises</h2></div>';
+  let html = '';
 
   w.exercises.forEach((ex, i) => {
     if (i < w.currentExerciseIndex || (allSetsDone(ex) && i !== w.currentExerciseIndex) || ex.skipped){
@@ -3553,8 +3657,15 @@ function htmlWorkoutOverview(w){
   html += '<div class="pad divider-top">' +
     '<button type="button" class="btn btn-danger" data-action="discard-workout">' + IC.trash +
     '<span>Discard this workout</span></button></div>';
-  html += '</section>';
   return html;
+}
+/* Where the session is, in the sheet's own words — the strip behind it is
+   covered while the sheet is open. */
+function overviewSubtitle(w){
+  const n = w.exercises.length;
+  if (!n) return 'Nothing planned yet';
+  const at = Math.min(w.currentExerciseIndex + 1, n);
+  return 'Exercise ' + at + ' of ' + n + ' · ' + workoutSets(w) + '/' + workoutPlannedSets(w) + ' sets done';
 }
 
 /* The action bar: the rest timer and the set actions in the one region a phone
@@ -4293,10 +4404,12 @@ const actions = {
     render();
   },
   'toggle-overview'(){
-    ui.overviewOpen = !ui.overviewOpen;
-    ui.focus = ui.overviewOpen ? 'overview-title' : 'overview-toggle-btn';
+    if (ui.overviewOpen){ closeOverview(); return; }
+    ui.overviewOpen = true;
+    ui.focus = 'overview-title';
     render();
   },
+  'close-overview'(){ closeOverview(); },
   'open-overview'(){ ui.overviewOpen = true; ui.focus = 'add-ex-select'; render(); },
   'open-session-note'(){ ui.notesOpen = true; ui.focus = 'wnotes'; render(); },
   'overview-up'(d){ moveOverviewExercise(Number(d.idx), -1); },
@@ -4569,7 +4682,8 @@ document.addEventListener('submit', e => {
 document.addEventListener('keydown', e => {
   const t = e.target;
   const typing = t && (t.matches && t.matches('input, textarea, select, [contenteditable="true"]'));
-  const dlgOpen = $('#dlg').open || $('#help-dlg').open;
+  /* any open dialog, not a list of two that a third one silently fell out of */
+  const dlgOpen = !!document.querySelector('dialog[open]');
 
   if (e.key === 'Escape'){
     if (dlgOpen) return; /* native dialog handles it */
@@ -4620,6 +4734,7 @@ function init(){
   else loadTimer(state.settings.defaultRest);
 
   trackHeaderHeight();
+  wireOverviewSheet();
   $('#help-shortcuts').innerHTML = shortcutTable();
 
   save();            /* persist the seed so a first visit survives a reload */
