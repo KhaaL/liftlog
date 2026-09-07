@@ -539,6 +539,11 @@ kbd{
 .ab-row .ab-grow{ flex:1; min-width:0; }
 .ab-row .btn{ white-space:nowrap; }
 .ab-actions .btn-primary{ flex:1; min-width:0; }
+/* The two ends of the bar. They share what the middle icon leaves, so neither
+   can push the other off a 320px row. */
+.ab-nav{ flex:1; min-width:0; justify-content:center; padding-inline:var(--sp-2); }
+.ab-nav > span:not(.key-hint){ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ab-nav[disabled]{ opacity:.45; }
 .ab-actions .btn-big{ min-height:48px; }
 .ab-icon{ flex:none; min-width:44px; padding-inline:10px; }
 .actionbar .timer-status{ margin-top:var(--sp-2); }
@@ -841,6 +846,10 @@ pre.code code{ background:none; border:0; padding:0; font-size:inherit; white-sp
    is the Done control beside it that stays a full 44 wide, because that is
    the one aimed at between sets. */
 @media (max-width:400px){
+  /* 24px of button padding either side left "Wrap up" 30px to render in. The
+     chevrons go before the words do — which end of the bar a button sits at
+     already says which way it goes. */
+  .ab-nav .ic{ display:none; }
   .sets{ --sets-cols:30px 1.4fr 1fr 46px 44px 36px; }
   .sets.no-rpe{ --sets-cols:30px 1.4fr 1fr 44px 36px; }
   .sets.no-weight{ --sets-cols:30px 1fr 46px 44px 36px; }
@@ -1075,6 +1084,7 @@ const IC = {
   plus:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
   trash:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 4h4M9 7v12a1 1 0 001 1h4a1 1 0 001-1V7M7 7l1 13h8l1-13"/></svg>',
   chev:'<svg class="ic chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>',
+  chevL:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>',
   up:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
   down:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg>',
   copy:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 012-2h9"/></svg>',
@@ -1139,6 +1149,7 @@ const SHORTCUTS = [
   { keys:['h'], text:'Go to History' },
   { keys:['e'], text:'Go to Exercises' },
   { keys:['s'], text:'Start selected routine · save current edit' },
+  { keys:['p'], text:'Previous exercise' },
   { keys:['n'], text:'Next exercise' },
   { keys:['space'], text:'Start / pause rest timer' },
   { keys:['esc'], text:'Cancel inline edit / close dialog' }
@@ -1189,46 +1200,114 @@ function updateSaveBanner(){
    the first workout started in this browser (a real gesture, which is when a
    grant is most likely), and only asked again if the user presses the button
    in Settings. */
+/* There are four answers here, not two, and the difference decides what the
+   user should do:
+
+   - unavailable: StorageManager is exposed only in a secure context, so a copy
+     opened from file:// or over plain http:// on a LAN — both supported ways to
+     run this app — has no API to ask with. This used to leave Settings saying
+     "checking…" for the rest of the session.
+   - declined: the browser refuses durability rather than deciding from
+     engagement. Brave does this, which is why asking it again never helped;
+     offering a button that cannot succeed is worse than saying so.
+   - best-effort: not granted, but askable.
+   - persistent: granted.
+
+   Every path ends in one of the four, including a rejected promise. */
 const LS_PERSIST_ASKED = 'liftlog.v1.persist-asked';
-let storagePersisted = null;   /* null until known, false when best-effort */
+const STORAGE_STATES = ['checking','unavailable','declined','best-effort','persistent'];
+let storageState = 'checking';
 let storageEstimate = null;    /* {usage, quota} when the browser reports it */
+let storageIsBrave = false;    /* Brave is the common case of "declined" */
 
 function storageManager(){
-  return (navigator.storage && navigator.storage.persist) ? navigator.storage : null;
+  const s = navigator.storage;
+  return (s && typeof s.persist === 'function' && typeof s.persisted === 'function') ? s : null;
+}
+/* Re-renders only when the answer actually changed, so it can never loop with
+   the render it triggers. A refusal is sticky: persisted() keeps answering
+   false afterwards, and that must not read as "not asked yet" again. */
+function setStorageState(next){
+  if (!STORAGE_STATES.includes(next) || next === storageState) return;
+  if (storageState === 'declined' && next === 'best-effort') return;
+  storageState = next;
+  if (ui.view === 'settings') render();
 }
 function persistAsked(){
   try{ return localStorage.getItem(LS_PERSIST_ASKED) === '1'; }
   catch(e){ return false; }
 }
-/* Reads the current state without asking for anything. Re-renders only when an
-   answer actually changed, so it can never loop with the render it triggers. */
+/* Running from the home screen / as an installed app, which is what earns
+   durability in browsers that will not grant it to a plain tab. */
+function installedAsApp(){
+  try{
+    return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+           navigator.standalone === true;
+  }catch(e){ return false; }
+}
+/* Reads the current state without asking for anything. */
 function refreshStorageState(){
   const sm = storageManager();
-  if (!sm) return;
-  sm.persisted().then(p => {
-    const changed = storagePersisted !== p;
-    storagePersisted = p;
-    if (changed && ui.view === 'settings') render();
-  }).catch(() => { /* nothing to report */ });
-  if (sm.estimate) sm.estimate().then(est => {
+  if (!sm){ setStorageState('unavailable'); return; }
+  sm.persisted()
+    .then(p => { if (p) setStorageState('persistent'); else checkStoragePermission(); })
+    .catch(() => setStorageState('unavailable'));
+  if (typeof sm.estimate === 'function') sm.estimate().then(est => {
+    if (!est) return;
     const changed = !storageEstimate || storageEstimate.usage !== est.usage;
     storageEstimate = est;
     if (changed && ui.view === 'settings') render();
   }).catch(() => { /* nothing to report */ });
+  if (navigator.brave && typeof navigator.brave.isBrave === 'function'){
+    navigator.brave.isBrave().then(yes => {
+      if (!yes || storageIsBrave) return;
+      storageIsBrave = true;
+      if (ui.view === 'settings') render();
+    }).catch(() => { /* not Brave, or not telling */ });
+  }
+}
+/* "denied" is the browser saying it will not grant durability at all, which is
+   not the same as "not granted yet". Not every browser answers the query
+   (Safari throws on the name), so a refused persist() reaches the same state
+   by the other route. */
+function checkStoragePermission(){
+  let q = null;
+  try{
+    q = navigator.permissions && typeof navigator.permissions.query === 'function' &&
+        navigator.permissions.query({ name:'persistent-storage' });
+  }catch(e){ q = null; }
+  if (!q || typeof q.then !== 'function'){ setStorageState('best-effort'); return; }
+  q.then(res => setStorageState(res && res.state === 'denied' ? 'declined' : 'best-effort'))
+   .catch(() => setStorageState('best-effort'));
 }
 /* fromUser: pressed the button in Settings, where a previous refusal is
    exactly what they are trying to undo. */
 function requestPersistence(fromUser){
   const sm = storageManager();
-  if (!sm || storagePersisted) return;
-  if (!fromUser && persistAsked()) return;
+  if (!sm || storageState === 'persistent') return;
+  if (!fromUser && (persistAsked() || storageState === 'declined')) return;
   try{ localStorage.setItem(LS_PERSIST_ASKED, '1'); }
   catch(e){ /* the save banner already covers an unwritable store */ }
-  sm.persist().then(granted => {
-    storagePersisted = granted;
-    if (fromUser) toast(granted ? 'Storage is now persistent' : 'The browser declined — keep a backup instead');
+  const granted = () => {
+    setStorageState('persistent');
+    if (fromUser) toast('Storage is now persistent');
     render();
-  }).catch(() => { if (fromUser) toast('This browser cannot make storage persistent'); });
+  };
+  const refused = () => {
+    setStorageState('declined');
+    if (fromUser) toast('This browser will not make storage persistent — keep a backup');
+    render();
+  };
+  sm.persist().then(ok => {
+    if (ok){ granted(); return; }
+    /* A browser can grant later than it answers, so persisted() gets the last
+       word before this is called a refusal. */
+    sm.persisted().then(p => p ? granted() : refused()).catch(refused);
+  }).catch(() => {
+    setStorageState('unavailable');
+    if (fromUser) toast('This browser cannot make storage persistent');
+    render();
+  });
 }
 /* Stored data we cannot read is never overwritten in place: it is moved aside
    first so a bad parse or a downgrade can still be recovered by hand. */
@@ -1396,9 +1475,12 @@ function seedState(){
   const routines = sampleRoutines(exs);
   const exId = n => exs.find(e => e.name === n).id;
   const at = (daysBack, h) => { const t = new Date(); t.setDate(t.getDate()-daysBack); t.setHours(h, 15, 0, 0); return t.getTime(); };
-  /* opts carries v3 fields: { unit, durationSeconds, countForVolume, countForPR } */
-  const set = (weight, reps, rpe, opts) => Object.assign(
-    { id:uid(), weight, reps, rpe, completed:true, completedAt:0, unit:'kg' }, opts || {});
+  /* opts carries v3 fields: { unit, durationSeconds, countForVolume, countForPR }.
+     Effort is logged as RIR (reps in reserve): it is the figure you can answer
+     honestly straight after a set, and the same one the sample history file
+     carries. */
+  const set = (weight, reps, rir, opts) => Object.assign(
+    { id:uid(), weight, reps, rir, completed:true, completedAt:0, unit:'kg' }, opts || {});
   const exBlock = (name, restSeconds, sets) => ({
     exerciseId:exId(name), name, category:(exs.find(e=>e.name===name)||{}).category || '',
     unit:(exs.find(e=>e.name===name)||{}).unit || 'kg', plannedSets:sets.length,
@@ -1412,14 +1494,14 @@ function seedState(){
   const upper = routines[0], lower = routines[1];
   const workouts = [
     mkWo(upper.id,'A - Upper Body (Machine Focus)', at(2,17), 48, [
-      exBlock('Chest Press Machine',90,[set(40,10,7),set(40,10,8),set(35,9,8)]),
-      exBlock('Shoulder Press Machine',90,[set(30,10,7),set(30,9,8),set(25,8,9)]),
-      exBlock('Seated Row Machine',90,[set(45,10,7),set(45,10,8),set(40,9,8)])
+      exBlock('Chest Press Machine',90,[set(40,10,3),set(40,10,2),set(35,9,2)]),
+      exBlock('Shoulder Press Machine',90,[set(30,10,3),set(30,9,2),set(25,8,1)]),
+      exBlock('Seated Row Machine',90,[set(45,10,3),set(45,10,2),set(40,9,2)])
     ]),
     mkWo(lower.id,'B - Lower Body (Machine Focus)', at(4,8), 40, [
-      exBlock('Leg Press Machine',120,[set(90,10,7),set(90,10,8),set(80,9,8)]),
-      exBlock('Leg Extension Machine',60,[set(35,12,7),set(35,12,8)]),
-      exBlock('Calf Raise Machine',40,[set(50,15,7),set(50,15,8)])
+      exBlock('Leg Press Machine',120,[set(90,10,3),set(90,10,2),set(80,9,2)]),
+      exBlock('Leg Extension Machine',60,[set(35,12,3),set(35,12,2)]),
+      exBlock('Calf Raise Machine',40,[set(50,15,3),set(50,15,2)])
     ])
   ].sort((a,b) => b.startedAt - a.startedAt);
 
@@ -2188,6 +2270,17 @@ function advanceExercise(markSkipped){
   ui.focus = 'ex-panel-top';
   render();
 }
+/* Back one exercise. `reopenExercise` is the same move the drawer makes, so
+   stepping back into a skipped exercise un-skips it: the exercise you are
+   looking at is never one the session has written off. From the end-of-session
+   state the index sits one past the last exercise, hence the clamp. */
+function goToPreviousExercise(){
+  const w = state.activeWorkout; if (!w) return;
+  const i = Math.min(w.currentExerciseIndex, w.exercises.length) - 1;
+  if (i < 0) return;
+  reopenExercise(i);
+  announce('Back to ' + w.exercises[i].name + '.');
+}
 function reopenExercise(idx){
   const w = state.activeWorkout; if (!w) return;
   if (idx < 0 || idx >= w.exercises.length) return;
@@ -2841,18 +2934,18 @@ function importFixture(){
         plannedSets:3, targetReps:5, targetWeight:100, restSeconds:180, notes:'', skipped:false,
         sets:[
           /* a warm-up: performed, but excluded from volume and from records */
-          { id:'st-1', weight:60,  reps:5, rpe:null, completed:true, completedAt:started + 120000,
+          { id:'st-1', weight:60,  reps:5, rir:null, completed:true, completedAt:started + 120000,
             unit:'kg', countForVolume:false, countForPR:false },
-          { id:'st-2', weight:100, reps:5, rpe:8,    completed:true, completedAt:started + 600000, unit:'kg' },
-          { id:'st-3', weight:100, reps:4, rpe:9.5,  completed:true, completedAt:started + 1200000, unit:'kg' }
+          { id:'st-2', weight:100, reps:5, rir:2,    completed:true, completedAt:started + 600000, unit:'kg' },
+          { id:'st-3', weight:100, reps:4, rir:0,    completed:true, completedAt:started + 1200000, unit:'kg' }
         ] },
       { exerciseId:'ex-plank', name:'Plank', category:'Core', unit:'time',
         plannedSets:2, targetReps:45, targetWeight:null, restSeconds:60, notes:'', skipped:false,
         sets:[
           /* timed work: seconds live in durationSeconds, never in reps */
-          { id:'st-4', weight:null, durationSeconds:45, rpe:null, completed:true,
+          { id:'st-4', weight:null, durationSeconds:45, rir:null, completed:true,
             completedAt:started + 2400000, unit:'time' },
-          { id:'st-5', weight:null, durationSeconds:38, rpe:null, completed:true,
+          { id:'st-5', weight:null, durationSeconds:38, rir:null, completed:true,
             completedAt:started + 2520000, unit:'time' }
         ] }
     ]
@@ -2906,8 +2999,8 @@ function schemaHelpHTML(){
       ['sets[].weight', 'number | null', 'Negative values are dropped.'],
       ['sets[].reps', 'integer', 'A count, never seconds. Rounded, floored at 0.'],
       ['sets[].durationSeconds', 'integer', 'Where timed work goes. A legacy file with seconds in <code>reps</code> is corrected on import.'],
-      ['sets[].rpe', 'number', 'Clamped to 1\u201310.'],
-      ['sets[].rir', 'integer', 'Reps in reserve. Clamped to 0\u201310.'],
+      ['sets[].rir', 'integer', 'Reps in reserve \u2014 what the sample file and the app log by default. Clamped to 0\u201310.'],
+      ['sets[].rpe', 'number', 'Rate of perceived exertion, the older of the two. Clamped to 1\u201310. Both are read; both are kept.'],
       ['sets[].completed', 'boolean', 'Whether the set was performed.'],
       ['sets[].countForVolume', 'boolean', 'Default true. <code>false</code> marks a warm-up: performed, but out of the totals. <code>includeInVolume</code> is accepted as an alias.'],
       ['sets[].countForPR', 'boolean', 'Default true. <code>false</code> keeps a set out of records.']
@@ -3223,7 +3316,9 @@ function htmlActiveWorkout(w){
   html += '</section>';
 
   html += htmlActionBar(w, ex);
-  html += ui.overviewOpen ? htmlWorkoutOverview(w) : htmlDoneExercises(w);
+  /* What has already been done is in the drawer, not stacked under the bar:
+     the screen ends at the action bar unless the drawer is open. */
+  html += ui.overviewOpen ? htmlWorkoutOverview(w) : '';
   return html;
 }
 
@@ -3396,10 +3491,8 @@ function htmlCurrentExercise(w, ex){
 
 /* A completed/skipped exercise row, expandable via ui.expandedDone (keyed by
    array index — safe because upcoming-only reordering never moves a done
-   exercise's index). Shared by the plain "earlier in this workout" list and
-   the session-overview drawer, which only differ in what the reopen button
-   does once the drawer needs to close itself too. */
-function htmlDoneRow(ex, i, reopenAction){
+   exercise's index). Lives in the session-overview drawer. */
+function htmlDoneRow(ex, i){
   const open = ui.expandedDone.has(String(i));
   const completed = ex.sets.filter(s => s.completed);
   const status = ex.skipped ? '<span class="status-chip skip">Skipped</span>'
@@ -3415,23 +3508,11 @@ function htmlDoneRow(ex, i, reopenAction){
         (s.rpe != null ? ' <span class="muted">@ RPE ' + s.rpe + '</span>' : '') +
         (s.rir != null ? ' <span class="muted">@ RIR ' + s.rir + '</span>' : '') +
         (s.completed ? '' : ' <span class="status-chip skip">open</span>') + '</span></div>').join('')) +
-      '<div class="mt-2"><button type="button" class="btn btn-sm" data-action="' + reopenAction + '" data-idx="' + i + '">Reopen exercise</button></div>' +
+      '<div class="mt-2"><button type="button" class="btn btn-sm" data-action="overview-jump" data-idx="' + i + '">Reopen exercise</button></div>' +
     '</div>';
   }
   return html;
 }
-function htmlDoneExercises(w){
-  const doneIdxs = [];
-  w.exercises.forEach((ex, i) => {
-    if (i < w.currentExerciseIndex || (allSetsDone(ex) && i !== w.currentExerciseIndex) || ex.skipped) doneIdxs.push(i);
-  });
-  if (!doneIdxs.length) return '';
-  let html = '<section class="panel mt-4" aria-label="Completed exercises"><div class="pad"><h2 class="panel-title">Earlier in this workout</h2></div>';
-  doneIdxs.forEach(i => { html += htmlDoneRow(w.exercises[i], i, 'reopen-exercise'); });
-  html += '</section>';
-  return html;
-}
-
 /* The session-overview drawer: every exercise in the workout, done first,
    then the one in progress, then what's left — with reorder/jump controls
    on the upcoming ones. Reordering is scoped to indexes strictly after
@@ -3444,7 +3525,7 @@ function htmlWorkoutOverview(w){
 
   w.exercises.forEach((ex, i) => {
     if (i < w.currentExerciseIndex || (allSetsDone(ex) && i !== w.currentExerciseIndex) || ex.skipped){
-      html += htmlDoneRow(ex, i, 'overview-jump');
+      html += htmlDoneRow(ex, i);
     } else if (i === w.currentExerciseIndex){
       const completed = ex.sets.filter(s => s.completed);
       html += '<div class="done-ex-row is-current-row" aria-current="step">' +
@@ -3486,13 +3567,24 @@ function htmlActionBar(w, ex){
   const last = ex && w.currentExerciseIndex + 1 >= w.exercises.length;
 
   /* Logging a set happens in its own row's done column, so the bar carries
-     only what moves the session on. */
-  const setRow = ex
+     only movement through the session: back on the left, forward on the right,
+     with the two edges of the bar being the two easiest places to hit. "Add
+     set" is not here — the sets list has its own, right under the row it adds
+     to, and this row has no width to spare on a phone. */
+  const atEnd = w.currentExerciseIndex >= w.exercises.length;
+  const canPrev = Math.min(w.currentExerciseIndex, w.exercises.length) > 0;
+  const setRow = w.exercises.length
     ? '<div class="ab-row ab-actions">' +
-        '<button type="button" class="btn btn-primary btn-big" data-action="next-exercise" id="btn-next-ex">' +
-          IC.skip + '<span>' + (last ? 'Wrap up' : 'Next exercise') + '</span><span class="mono xs key-hint">(n)</span></button>' +
-        '<button type="button" class="btn btn-big ab-icon" data-action="add-set" aria-label="Add a set">' + IC.plus + '</button>' +
-        '<button type="button" class="btn btn-big btn-quiet ab-icon" data-action="skip-exercise" aria-label="Skip this exercise">' + IC.skip + '</button>' +
+        '<button type="button" class="btn btn-big ab-nav" data-action="prev-exercise" id="btn-prev-ex"' +
+          (canPrev ? '' : ' disabled') + ' aria-label="Go back to the previous exercise">' +
+          IC.chevL + '<span>Prev.<span class="narrow-hide"> exercise</span></span>' +
+          '<span class="mono xs key-hint">(p)</span></button>' +
+        (ex ? '<button type="button" class="btn btn-big btn-quiet ab-icon" data-action="skip-exercise" ' +
+          'aria-label="Skip this exercise">' + IC.skip + '</button>' : '') +
+        '<button type="button" class="btn btn-primary btn-big ab-nav" data-action="next-exercise" id="btn-next-ex"' +
+          (atEnd ? ' disabled' : '') + ' aria-label="' + (last ? 'Wrap up' : 'Go on to the next exercise') + '">' +
+          '<span>' + (last ? 'Wrap up' : 'Next<span class="narrow-hide"> exercise</span>') + '</span>' +
+          '<span class="mono xs key-hint">(n)</span>' + IC.chev + '</button>' +
       '</div>'
     : '';
 
@@ -3741,10 +3833,15 @@ function htmlWorkoutEditor(w){
     ex.sets.forEach((s, si) => {
       /* timed exercises edit durationSeconds; reps stays a pure count */
       const timed = ex.unit === 'time' || s.durationSeconds != null;
+      /* The third field follows the effort metric in Settings, so what was
+         logged is what can be edited. With effort switched off it follows the
+         set itself rather than dropping a value nobody can then reach. */
+      const em = state.settings.effortMetric;
+      const effortKey = em === 'rir' ? 'rir' : em === 'rpe' ? 'rpe' : (s.rir != null ? 'rir' : 'rpe');
       const flds = [
         { cap:'Weight', key:'weight' },
         timed ? { cap:'Sec', key:'durationSeconds' } : { cap:'Reps', key:'reps' },
-        { cap:'RPE', key:'rpe' }
+        { cap:effortKey.toUpperCase(), key:effortKey }
       ];
       const f = (d, id) => '<label class="field"><span class="cap">' + d.cap + '</span>' +
         '<input' + (id ? ' id="' + id + '"' : '') + ' inputmode="decimal" data-bind="hset" data-idx="' + xi + '" data-sid="' + s.id + '" data-field="' + d.key + '" ' +
@@ -3966,16 +4063,30 @@ function fmtBytes(n){
    itself free to throw it away — the three facts that decide whether a log is
    actually safe in this browser. */
 function storageHTML(){
-  const sm = storageManager();
+  /* One line per state, and a button only where pressing it can change the
+     answer. Where it cannot, the way out is a backup — so that is the button. */
+  const installed = installedAsApp();
+  const backupBtn = '<div class="form-actions"><button type="button" class="btn" data-action="export">' +
+    IC.down + '<span>Download backup</span></button></div>';
   let line, cls = 'hint', btn = '';
-  if (!sm){
-    line = 'This browser does not report whether it may evict stored data, so treat it as evictable and keep a backup.';
-  } else if (storagePersisted === true){
+  if (storageState === 'persistent'){
     line = 'Persistent — this browser has agreed not to clear Liftlog’s data to reclaim space.';
-  } else if (storagePersisted === false){
+  } else if (storageState === 'declined'){
+    line = (storageIsBrave ? 'Brave does not grant persistent storage' : 'This browser has refused persistent storage') +
+      ', so asking again cannot help. The data is saved here and stays put in normal use, but the browser is free to clear it when space runs low, when you clear site data, and on iOS after about a week without a visit.' +
+      (installed ? ' Liftlog is running as an installed app here, which is the most durable this browser offers.'
+                 : ' Installing Liftlog to the home screen is the one thing that still improves on that.') +
+      ' Either way, keep an off-device backup — that is the only real guarantee.';
+    cls = 'error-text';
+    btn = backupBtn;
+  } else if (storageState === 'best-effort'){
     line = 'Best-effort — this browser may clear the data when space runs low, and iOS clears it after about a week without a visit. Granting persistence, or installing Liftlog to the home screen, prevents that.';
     cls = 'error-text';
     btn = '<div class="form-actions"><button type="button" class="btn" data-action="request-persist">Request persistent storage</button></div>';
+  } else if (storageState === 'unavailable'){
+    line = 'This browser will not say whether it may evict the data: the API that reports it needs a secure context, and this page is not one (it is open over file:// or plain http://). Treat the data as evictable and keep a backup.';
+    cls = 'error-text';
+    btn = backupBtn;
   } else {
     line = 'Checking whether this browser may evict the data…';
   }
@@ -4175,7 +4286,7 @@ const actions = {
   'delete-set'(d){ deleteSet(d.id); },
   'skip-exercise'(){ advanceExercise(true); },
   'next-exercise'(){ advanceExercise(false); },
-  'reopen-exercise'(d){ reopenExercise(Number(d.idx)); },
+  'prev-exercise'(){ goToPreviousExercise(); },
   'toggle-done-ex'(d){
     const k = String(d.idx);
     ui.expandedDone.has(k) ? ui.expandedDone.delete(k) : ui.expandedDone.add(k);
@@ -4485,6 +4596,9 @@ document.addEventListener('keydown', e => {
         const id = ui.selectedRoutineId || (state.routines[0] && state.routines[0].id);
         if (id) startRoutine(id);
       }
+      break;
+    case 'p':
+      if (state.activeWorkout && ui.view === 'today') goToPreviousExercise();
       break;
     case 'n':
       if (state.activeWorkout && ui.view === 'today') advanceExercise(false);

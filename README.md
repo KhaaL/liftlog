@@ -111,7 +111,12 @@ phone in a gym is the case that matters:
   off-screen at exactly the moment a logged set started it. Anything needed
   between sets belongs in this bar. A set is *not* logged from here: that is the
   done column's job (`toggleSet()`), which is also what starts auto-rest. The
-  bar carries the timer and what moves the session on.
+  bar carries the timer and movement through the session: **Prev.** at the left
+  edge, **Next exercise** / **Wrap up** at the right, skip between them. Nothing
+  is stacked below it — the completed exercises used to be listed there as
+  "Earlier in this workout", which put a second, half-overlapping account of the
+  session under the one you were logging into. That list lives in the drawer
+  (`htmlWorkoutOverview()`) and nowhere else.
 - **The session strip** (`.session-strip`, `htmlSessionStrip()`) is sticky
   directly under the header and answers "where am I": exercise *n* of *m*, its
   name, sets done, a finish estimate, and one progress segment per exercise
@@ -159,8 +164,25 @@ neither guaranteed nor permanent:
   download. Losing a session silently is the one outcome worth being loud about.
 - **Storage asks not to be evicted.** `requestPersistence()` calls
   `navigator.storage.persist()` on the first workout started in a browser — a
-  real gesture, which is when a grant is most likely. Settings reports the
-  answer, and offers a retry if the browser said no.
+  real gesture, which is when a grant is most likely. Settings reports one of
+  four answers (`storageState`), because the difference decides what the user
+  should do about it:
+
+  | State | What it means | What Settings offers |
+  |---|---|---|
+  | `persistent` | Granted. | Nothing to do. |
+  | `best-effort` | Not granted, but askable. | The request button. |
+  | `declined` | The browser refuses durability outright — Brave does, and a `persistent-storage` permission of `denied` says so before we even ask. | No request button (it cannot succeed); a backup button and the install hint instead. |
+  | `unavailable` | No `StorageManager`: it is exposed only in a secure context, so `file://` and plain `http://` on a LAN — both supported ways to run this — have no API to ask with. | A backup button. |
+
+  A refusal is sticky (`setStorageState()` will not fall back to
+  `best-effort`), a refused `persist()` is confirmed against `persisted()`
+  before being believed, and every path — including a rejected promise —
+  ends in one of the four. "Checking…" is a transient, not a resting state:
+  it used to be the permanent answer whenever `navigator.storage` was
+  missing. Brave is named in the copy when `navigator.brave.isBrave()`
+  confirms it, since "your browser refuses this" is only actionable if you
+  know which lever to pull.
 - **Staleness is surfaced.** `lastBackupInfo()` takes the newer of the last file
   export (`settings.lastFileBackupAt`) and the last remote backup
   (`lastBackupAt` in the remote config). Past `BACKUP_NAG_WORKOUTS` sessions or
@@ -205,7 +227,12 @@ neither guaranteed nor permanent:
   through import/export and history editing regardless of the current
   setting, so switching the setting later doesn't lose whichever one a set
   already carries; only the active-workout input for the *other* one is
-  hidden while it's not selected.
+  hidden while it's not selected. The history editor's third field follows the
+  same setting, falling back to whichever of the two the set actually carries
+  when effort tracking is off — a logged value nobody can reach to edit is
+  worse than a column that changes caption. The sample data (both the seeded
+  first-run history and the sample history file Settings hands out) logs
+  **RIR**: it is the figure a lifter can answer honestly straight after a set.
 - **Everything crossing the boundary is validated.** `normalizeState()` and the
   `normalizeImported*()` functions clamp units, themes, numbers and free text on
   the way in, so the render layer never has to defend against stray strings.
@@ -232,7 +259,13 @@ with `app: 'liftlog'` and a `kind`:
 
 - **`backup`** — the entire `state`; importing replaces everything. Built by
   `backupPayload()`, which is also what the remote PUT uploads, so the file in
-  your downloads folder and the object in your bucket are the same thing.
+  your downloads folder and the object in your bucket are the same thing. It is
+  a deep copy of the whole of `state`, so **every** setting travels with it
+  (theme, unit, default rest, auto-rest, sound, effort metric, and the backup
+  stamps) and a restore puts them all back. The one deliberate exception is the
+  remote-storage config: it lives under its own `localStorage` key and stays on
+  the device, so a backup file — including the copy sitting in the bucket —
+  never carries bucket credentials.
 - **`routines`** — routines plus the exercise definitions they reference, so an
   import into another browser can rebuild missing library entries. Exercises are
   resolved by id, then by name, then created. Duplicate names are skipped.
@@ -479,6 +512,18 @@ checking at 320px too.
 
 And the session picker: it lists the library A–Z, leaves out what is already in
 the session, and refuses a duplicate even if a stale value is submitted.
+
+Session movement is worth walking end to end: **Prev.** is disabled on the
+first exercise, steps back into a skipped one (un-skipping it), and still works
+from the end-of-session state, where **Next** is disabled instead; <kbd>p</kbd>
+and <kbd>n</kbd> do the same. Check the labels are not truncated at 320px,
+where the chevrons drop out.
+
+Storage durability is testable without four browsers: stub `navigator.storage`
+and `navigator.permissions` before the page scripts run and check Settings
+reports the right one of the four states, that a refused `persist()` removes the
+request button rather than leaving one that cannot work, and that a rejected
+promise never leaves "Checking…" on screen.
 
 For the storage and install paths specifically:
 
