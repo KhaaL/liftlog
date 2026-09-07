@@ -59,8 +59,8 @@ first so the import is undoable.
 
 ### 2.1 Warm-up and PR flags as first-class UI — **done**
 A set can be marked a warm-up from the set row (the set number doubles as the
-toggle), from the labelled "Warm-up" chip on the set being logged, and from the
-history editor, so a past session can be reclassified too. `setWarmup()` writes
+toggle), by long-pressing its box in the done column, and from the history
+editor, so a past session can be reclassified too. `setWarmup()` writes
 both flags together: a warm-up is performed but counts for neither volume nor
 records, which is how the seed and the import contract have always used the
 pair, and one control cannot honestly claim to set them independently. Turning
@@ -69,7 +69,10 @@ exception rather than the rule.
 
 Two entry points rather than one because the set-number cell is 34px at 480px,
 30px at 400px, and is dropped altogether below 360px when an effort column is
-on — so it cannot be the only way in. The chip is also the discoverable one.
+on — so it cannot be the only way in, and because a long press has no keyboard
+equivalent at all. The gesture is the fast one on a phone (the done cell is
+already under the thumb) and the set number is the discoverable one; the done
+cell carries the warm-up colour too, since it is now where the flag is set.
 
 ### 2.2 Added load on bodyweight exercises
 **Why:** a `bw` exercise renders a disabled weight field, so weighted dips or a
@@ -214,10 +217,11 @@ clear all) is cheap. Currently every one of them is a confirm-and-hope.
   notes would help now that notes carry machine codes and cues.
 - **Focus after deletion.** Deleting a row returns focus to `<body>`; it should
   land on the next row or the list heading.
-- ~~**Timer presets are fixed** at 60/90/120/180s.~~ **Done** — `restPresets()`
-  offers the rest times the active session actually uses, current exercise
-  first, and falls back to `REST_PRESETS` when a session has too few distinct
-  values.
+- ~~**Timer presets are fixed** at 60/90/120/180s.~~ **Withdrawn** — the
+  presets and the action-bar sheet that held them are gone. Rest length is a
+  decision made once, in Settings or on the exercise, and `+0:30` covers the
+  one-off; a sheet of alternatives was a second place to configure the same
+  number, on the screen with the least room for one.
 - **Empty-state guidance.** ~~A first-run walkthrough would beat the "load sample
   data" shortcut, which drops an opinionated program on the user.~~ The shortcut
   is gone, and Settings now documents the import format and hands out working
@@ -236,14 +240,23 @@ clear all) is cheap. Currently every one of them is a confirm-and-hope.
   wrong pattern for a phone. A five-icon bottom bar would cost less height —
   and collides with the sticky action bar, so it needs a design that shares
   that edge.
-- ~~**Reps need the keyboard when a set goes off plan.**~~ **Done** — the set
-  being logged carries `repChips()`, five tap targets around the planned value
-  (stepping by 5 for a timed exercise). They route through `cascadeReps()`, so a
-  chip does exactly what typing in the field beside it does, later sets included.
-  Weight has no equivalent yet; the same mechanism would fit it.
+- **Reps need the keyboard when a set goes off plan.** `repChips()` answered
+  this with five tap targets around the planned value, and has been removed: a
+  strip of chips under the row being logged doubled the height of the one row
+  that has to stay in view, to save a keystroke on a field that is already
+  pre-filled with the plan. Any second attempt has to fit *inside* the row —
+  stepper affordances on the field itself, say — not under it. Weight has the
+  same problem and never had chips.
 - **The set row's floor is the 44px Done target.** Rows are 57px on a phone
-  (was 74). Getting below that means rethinking how a set is marked done —
-  swipe, or completing from the action bar only — not shrinking the button.
+  (was 74). Getting below that means rethinking how a set is marked done — a
+  swipe, say — not shrinking the button, and the done cell now also carries the
+  long-press warm-up toggle, so whatever replaces it has to carry two gestures.
+- **Long press is hand-rolled.** `data-longpress` is delegated beside
+  `data-action` (500ms, cancelled by a 10px move or a scroll, and it swallows
+  the click that ends the press). It is the app's first gesture, and the
+  swallow flag is global state cleared three ways because a long press does not
+  reliably end in a click on every touch stack. A second gesture would be the
+  moment to give this a proper home.
 - **`--header-h` is measured, not declared.** `trackHeaderHeight()` writes the
   header's height to a custom property so the session strip can stick beneath
   it. A layout that did not need JS to know a CSS value would be better; it
