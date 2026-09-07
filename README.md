@@ -115,15 +115,28 @@ phone in a gym is the case that matters:
   edge, **Next exercise** / **Wrap up** at the right, skip between them. Nothing
   is stacked below it — the completed exercises used to be listed there as
   "Earlier in this workout", which put a second, half-overlapping account of the
-  session under the one you were logging into. That list lives in the drawer
-  (`htmlWorkoutOverview()`) and nowhere else.
+  session under the one you were logging into. That list lives in the session
+  sheet (`#overview-dlg`) and nowhere else.
 - **The session strip** (`.session-strip`, `htmlSessionStrip()`) is sticky
   directly under the header and answers "where am I": exercise *n* of *m*, its
   name, sets done, a finish estimate, and one progress segment per exercise
   weighted by its set count. It sticks at `top:var(--header-h)`, which
   `trackHeaderHeight()` keeps in sync with the header's real height.
+- **The session as a whole is a modal sheet, not another panel.** The strip's
+  set counter opens `#overview-dlg`: full-screen on a phone, a centred 560px
+  card on a desktop, over a scrim that dims the workout. It answers one
+  question — what am I doing next, in what order — and it used to answer it as
+  a panel rendered directly under the action bar, in the same visual language
+  as the exercise being logged, which read as more of the same screen rather
+  than a different question. The dialog is static markup outside `#main`, so a
+  render refills only `#overview-dlg-body` (`overviewSheetHTML()`): calling
+  `showModal()` on an open dialog throws, and rebuilding the element would
+  flash the backdrop on every reorder. `syncOverviewSheet()` runs before
+  `applyFocus()`, because `showModal()` takes the focus and whatever the render
+  asked for has to be put back after it — including focus the refill itself
+  destroyed.
 - **Everything occasional is one tap away, not always on screen.** Adding an
-  exercise and discarding the workout live in the session-overview drawer; the
+  exercise and discarding the workout live in that sheet; the
   session note collapses to a button until it has content; the optional effort
   column (RPE, RIR, or none) is a Settings-level choice
   (`settings.effortMetric`), off by default. Rest length is not a per-session
@@ -451,7 +464,14 @@ you can.
 - **A `<dialog>` that sets `display` must scope it to `[open]`.** An unqualified
   `display:flex` on a dialog outranks the UA sheet's
   `dialog:not([open]){display:none}`, leaving a closed dialog laid out on top of
-  the page and swallowing clicks. See `.dlg-wide[open]`.
+  the page and swallowing clicks. See `.dlg-wide[open]` and `.dlg-sheet[open]`.
+- **A dialog the app opens must be told when the user closes it.** Esc and a
+  click on the scrim close a `<dialog>` without going through an action, so
+  `#overview-dlg` listens for `close` and writes `ui.overviewOpen` back —
+  guarded, so the `close()` a render just issued does not start another render.
+  Anything gating on "is a dialog open" should ask the document
+  (`document.querySelector('dialog[open]')`) rather than naming two of them and
+  silently missing the third, which is what the shortcut guard used to do.
 - **Escape everything interpolated** with `esc()`. `setSummary()` returns escaped
   HTML because unit strings can originate in an import file.
 - **Feedback has one channel per message.** `#toast-region` is `aria-live`, so a
@@ -512,6 +532,12 @@ checking at 320px too.
 
 And the session picker: it lists the library A–Z, leaves out what is already in
 the session, and refuses a duplicate even if a stale value is submitted.
+
+The session sheet needs its modal edges checked: Esc, the scrim, the X and
+"Back to workout" all close it and return focus to the strip button; a reorder
+or an add refills it without it blinking shut; keyboard shortcuts do not fire
+behind it; discarding raises the confirm dialog *over* it and closes both; and
+on a phone the page behind must not scroll.
 
 Session movement is worth walking end to end: **Prev.** is disabled on the
 first exercise, steps back into a skipped one (un-skipping it), and still works
