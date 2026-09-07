@@ -108,8 +108,10 @@ phone in a gym is the case that matters:
   bottom edge and holds *both* the rest timer and the set actions. These used
   to be two elements — a full-width timer panel and a sticky button row — and
   the panel rendered around 500px below the fold, so on a phone the timer was
-  off-screen at exactly the moment `completeCurrentSet()` started it. Anything
-  needed between sets belongs in this bar.
+  off-screen at exactly the moment a logged set started it. Anything needed
+  between sets belongs in this bar. A set is *not* logged from here: that is the
+  done column's job (`toggleSet()`), which is also what starts auto-rest. The
+  bar carries the timer and what moves the session on.
 - **The session strip** (`.session-strip`, `htmlSessionStrip()`) is sticky
   directly under the header and answers "where am I": exercise *n* of *m*, its
   name, sets done, a finish estimate, and one progress segment per exercise
@@ -117,9 +119,11 @@ phone in a gym is the case that matters:
   `trackHeaderHeight()` keeps in sync with the header's real height.
 - **Everything occasional is one tap away, not always on screen.** Adding an
   exercise and discarding the workout live in the session-overview drawer; the
-  rest presets live in the action bar's sheet; the session note collapses to a
-  button until it has content; the optional effort column (RPE, RIR, or none)
-  is a Settings-level choice (`settings.effortMetric`), off by default.
+  session note collapses to a button until it has content; the optional effort
+  column (RPE, RIR, or none) is a Settings-level choice
+  (`settings.effortMetric`), off by default. Rest length is not a per-session
+  control at all: it comes from the exercise, else from `settings.defaultRest`,
+  and `+0:30` covers the one-off.
 - **Column templates are one custom property.** `--sets-cols` on `.sets` has a
   variant per shape (`.no-rpe`, `.no-weight`) rather than four grid
   declarations, and the narrow breakpoint overrides the same four.
@@ -449,6 +453,11 @@ timer uses `<output>`, dialogs are native `<dialog>`, and
 `prefers-reduced-motion` disables animation. Themes are token-driven, so a new
 theme is one `:root[data-theme="…"]` block plus an entry in `THEMES`.
 
+**No gesture is the only way in.** The long press that marks a warm-up
+(`data-longpress` on the done cell, delegated like `data-action`) has no
+keyboard equivalent, so the set number stays an ordinary button with the same
+toggle on it. Anything reachable only by holding a finger down is a bug.
+
 ## Testing
 
 There is no automated suite yet — see [ENHANCEMENTS.md](ENHANCEMENTS.md). When
@@ -458,12 +467,18 @@ switch, an export/import round trip, and (if touching remote storage) saving a
 config, a failed connection test, and a backup/restore round trip against a
 real S3-compatible bucket.
 
-Also exercise the set row: mark a set as a warm-up from the set number and from
-the "Warm-up" chip, confirm the session volume does not move when it is
-completed, reclassify a logged set in the history editor, and check a rep chip
-writes the value and carries it to the later uncompleted sets exactly as typing
-does. Warm-up marking has two entry points because the set-number cell is
-dropped below 360px when an effort column is on — worth checking at 320px too.
+Also exercise the set row: log a set from its own box in the done column (and
+check auto-rest starts), mark a set as a warm-up both by long-pressing that box
+and from the set number, confirm the session volume does not move when a warm-up
+is completed, and reclassify a logged set in the history editor. The long press
+needs its edges checked: a press that turns into a scroll must not mark
+anything, the tap that ends the press must not also log the set, and a plain tap
+straight afterwards must. Warm-up marking has two entry points because the
+set-number cell is dropped below 360px when an effort column is on — worth
+checking at 320px too.
+
+And the session picker: it lists the library A–Z, leaves out what is already in
+the session, and refuses a duplicate even if a stale value is submitted.
 
 For the storage and install paths specifically:
 

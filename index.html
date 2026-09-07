@@ -465,19 +465,12 @@ kbd{
 .hset-warm[aria-pressed="true"]{ background:var(--warning-soft); border-color:var(--warning); color:var(--warning); }
 .set-num .n{ font-weight:700; font-variant-numeric:tabular-nums; font-size:var(--fs-md); line-height:1; }
 .set-num .prev{ font-size:10.5px; color:var(--muted); font-variant-numeric:tabular-nums; line-height:1.2; }
-/* A full-width strip under the fields of the set being logged. */
-.rep-chips{ grid-column:1 / -1; display:flex; flex-wrap:wrap; gap:var(--sp-2); margin-top:var(--sp-2); }
-.rep-chip{
-  min-height:44px; min-width:52px; padding:0 var(--sp-3); cursor:pointer;
-  border:1px solid var(--border-strong); border-radius:var(--radius); background:var(--surface);
-  font:inherit; font-weight:650; font-variant-numeric:tabular-nums; color:var(--text);
+/* The done cell is also the warm-up control: a long press toggles it, so the
+   press must not start a selection or open the platform's callout menu. */
+.set-done-btn{
+  min-height:44px; min-width:44px; padding-inline:10px; justify-content:center; font-size:var(--fs-xs);
+  touch-action:manipulation; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none;
 }
-.rep-chip:hover{ background:var(--surface-2); }
-.rep-chip[aria-pressed="true"]{ background:var(--accent-soft); border-color:var(--accent); color:var(--accent); }
-.warm-chip{ min-width:0; font-weight:650; color:var(--muted); }
-.warm-chip[aria-pressed="true"]{ background:var(--warning-soft); border-color:var(--warning); color:var(--warning); }
-.chip-sep{ width:1px; align-self:stretch; background:var(--border); margin:0 2px; }
-.set-done-btn{ min-height:44px; min-width:44px; padding-inline:10px; justify-content:center; font-size:var(--fs-xs); }
 /* destructive, so quiet until reached for — and never wider than the Done
    control beside it, which is the one you actually aim at between sets */
 .set-del-btn{
@@ -487,6 +480,11 @@ kbd{
 .set-del-btn:hover{ color:var(--danger); border-color:var(--danger); background:var(--danger-soft); }
 .set-del-btn .ic{ width:15px; height:15px; }
 .set-done-btn[aria-pressed="true"]{ background:var(--success-soft); border-color:var(--success); color:var(--success); }
+/* Marked from here, so marked here too — and this cell survives every
+   breakpoint, unlike the set number, which is dropped below 360px when an
+   effort column is on. Outranks the "done" colours above on specificity, so a
+   completed warm-up still reads as a warm-up. */
+.set-row.is-warmup .set-done-btn{ border-color:var(--warning); color:var(--warning); }
 .sets-foot{ display:flex; gap:var(--sp-2); flex-wrap:wrap; align-items:center; margin-top:var(--sp-3); padding-top:var(--sp-3); border-top:1px solid var(--border); }
 .sets-foot .next-up{ margin-left:auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
@@ -543,16 +541,6 @@ kbd{
 .ab-actions .btn-primary{ flex:1; min-width:0; }
 .ab-actions .btn-big{ min-height:48px; }
 .ab-icon{ flex:none; min-width:44px; padding-inline:10px; }
-/* .btn-quiet drops the border entirely, which reads as flat text rather than
-   a button — but this one opens the rest-length sheet, so it needs enough of
-   a border back to look pressable. */
-#timer-sheet-btn{ border-color:var(--border-strong); }
-#timer-sheet-btn:hover{ border-color:var(--muted); }
-.ab-sheet{
-  display:flex; flex-wrap:wrap; align-items:center; gap:6px;
-  padding-bottom:var(--sp-3); border-bottom:1px solid var(--border); margin-bottom:var(--sp-3);
-}
-.ab-sheet .sheet-cap{ font-size:var(--fs-xs); font-weight:650; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
 .actionbar .timer-status{ margin-top:var(--sp-2); }
 @keyframes flash-done{ 0%,100%{ background:var(--surface);} 30%{ background:var(--success-soft);} }
 .actionbar.is-done{ animation:flash-done 1.2s ease 2; }
@@ -603,17 +591,8 @@ kbd{
 }
 
 /* ============================================================
-   REST TIMER  (rendered inside the action bar; presets live in its sheet)
+   REST TIMER  (rendered inside the action bar)
    ============================================================ */
-.presets{ display:flex; gap:6px; flex-wrap:wrap; }
-.preset-btn{
-  min-height:44px; padding:2px var(--sp-4); font-size:var(--fs-sm); font-weight:650;
-  border:1px solid var(--border-strong); border-radius:99px; background:var(--surface);
-  cursor:pointer; color:var(--muted); font-variant-numeric:tabular-nums;
-  transition:all .12s ease;
-}
-.preset-btn:hover{ color:var(--text); border-color:var(--muted); }
-.preset-btn[aria-pressed="true"]{ background:var(--accent-soft); border-color:var(--accent); color:var(--accent); }
 .timer-status{ font-size:var(--fs-sm); color:var(--muted); }
 
 /* ============================================================
@@ -944,6 +923,9 @@ pre.code code{ background:none; border:0; padding:0; font-size:inherit; white-sp
     <h2 id="help-title">Keyboard shortcuts</h2>
     <div id="help-shortcuts"></div>
     <p class="mt-3">Shortcuts are disabled while you are typing in a field.</p>
+    <p class="mt-3 muted small">In a workout, a set is logged from its own box in the Done
+      column — hold that box to mark the set a warm-up instead. Tapping the set number does
+      the same, for anyone without a long press.</p>
   </div>
   <div class="dlg-actions">
     <button type="button" class="btn" data-action="help-close">Close</button>
@@ -1141,7 +1123,6 @@ const SET_TYPES = ['reps','time','hold','distance'];
 
 /* Rest timer bounds, shared by the settings field and the routine editor. */
 const REST_MIN = 15, REST_MAX = 600;
-const REST_PRESETS = [60, 90, 120, 180];
 
 /* Routine item bounds, applied on save and on import alike. */
 const ITEM_LIMITS = { sets:[1,12], reps:[0,999], rest:[0,900] };
@@ -1158,7 +1139,6 @@ const SHORTCUTS = [
   { keys:['h'], text:'Go to History' },
   { keys:['e'], text:'Go to Exercises' },
   { keys:['s'], text:'Start selected routine · save current edit' },
-  { keys:['c'], text:'Complete the current set' },
   { keys:['n'], text:'Next exercise' },
   { keys:['space'], text:'Start / pause rest timer' },
   { keys:['esc'], text:'Cancel inline edit / close dialog' }
@@ -1463,7 +1443,6 @@ function freshUI(){
     expandedWorkouts:new Set(),
     expandedDone:new Set(),     /* keyed by exercise index within the active workout */
     overviewOpen:false,         /* whether the session-overview drawer is expanded */
-    timerSheetOpen:false,       /* rest-length presets expanded in the action bar */
     notesOpen:false,            /* session-notes field expanded (auto if a note exists) */
     routineDraft:null,          /* object while editing a routine */
     routineError:'',
@@ -1583,31 +1562,11 @@ function confirmDlg(title, body, confirmLabel, danger){
 /* ============================================================
    REST TIMER  (kept in module scope; persisted on activeWorkout)
    ============================================================ */
-/* `seconds` is the rest length the user chose (it drives which preset reads as
-   selected); `total` is the denominator the drain bar divides by. They are
-   separate because +0:30 must extend the countdown without silently
-   re-selecting a different preset. */
+/* `seconds` is the rest length in force (the exercise's own, else the default
+   from Settings); `total` is the denominator the drain bar divides by. They are
+   separate because +0:30 must extend the countdown without changing the length
+   the next rest starts from. */
 const timer = { seconds:90, total:90, remaining:90, running:false, endsAt:0, done:false, beepScheduled:false };
-
-/* Rest presets are the rest times this session actually uses, so tapping one
-   is a real choice rather than a coincidence. Falls back to REST_PRESETS when
-   a session has too few distinct values to be useful. */
-function restPresets(){
-  const w = state.activeWorkout;
-  const seen = new Set(), out = [];
-  const add = v => {
-    const n = toNum(v);
-    if (n == null) return;
-    const c = clamp(Math.round(n), REST_MIN, REST_MAX);
-    if (!seen.has(c)){ seen.add(c); out.push(c); }
-  };
-  const cur = w && w.exercises[w.currentExerciseIndex];
-  if (cur) add(cur.restSeconds);                                  /* the one in play first */
-  if (w) w.exercises.forEach(ex => add(ex.restSeconds));
-  add(state.settings.defaultRest);
-  if (out.length < 3) REST_PRESETS.forEach(add);
-  return out.slice(0, 4).sort((a,b) => a - b);
-}
 
 function persistTimer(){
   if (state.activeWorkout){
@@ -1660,16 +1619,9 @@ function pauseTimer(){
   cancelRestBeep(); timer.beepScheduled = false;
   persistTimer(); drawTimer();
 }
-function resetTimer(){
-  timer.running = false; timer.done = false;
-  timer.remaining = timer.seconds;
-  timer.total = timer.seconds;
-  cancelRestBeep(); timer.beepScheduled = false;
-  persistTimer(); drawTimer();
-}
 /* Extends the countdown only. `total` grows with it so the drain bar stays a
-   fraction of a whole; `seconds` is left alone so the chosen preset stays
-   chosen. */
+   fraction of a whole; `seconds` is left alone so the next rest still starts
+   from the configured length. */
 function addThirty(){
   timer.remaining += 30;
   timer.total = Math.max(timer.total, timer.remaining);
@@ -1735,8 +1687,6 @@ function drawTimer(){
     toggle.innerHTML = (timer.running ? IC.pause : IC.play) + '<span>' + label + '</span>';
     toggle.setAttribute('aria-label', timer.running ? 'Pause rest timer' : label + ' rest timer');
   }
-  $$('.preset-btn').forEach(b =>
-    b.setAttribute('aria-pressed', String(Number(b.dataset.sec) === timer.seconds)));
 }
 /* One place the rest-finished transition happens, so the wall-clock tick and a
    late wake-up cannot both run it. */
@@ -1911,40 +1861,6 @@ const lastPerformance = exId => exerciseStats(exId).last;
 
 const setDuration = s => s.durationSeconds != null ? s.durationSeconds : (s.unit === 'time' ? s.reps : null); /* reps fallback: pre-v3 data */
 /* Returns escaped HTML: distanceUnit and unit can originate in an import file. */
-/* Deviating from the plan is the one thing that still costs a keyboard: the
-   planned value is already in the field, so hitting your target is a single tap
-   on Done. These offer that value's neighbours as targets, which is what a set
-   that went differently nearly always is — a rep or two either way. Only the
-   current set gets them: it is the one being logged, and six rows of chips
-   would bury the fields they belong to. */
-function repChips(ex, s, isCur){
-  if (!isCur || s.completed) return '';
-  const timed = ex.unit === 'time';
-  const step = timed ? 5 : 1;
-  const field = timed ? 'durationSeconds' : 'reps';
-  const base = toNum(s[field]);
-  const target = toNum(ex.targetReps);
-  const centre = base != null ? base : (target != null ? target : (timed ? 30 : 8));
-  const seen = new Set(), vals = [];
-  for (let d = -2; d <= 2; d++){
-    const v = centre + d * step;
-    if (v < 0 || seen.has(v)) continue;
-    seen.add(v); vals.push(v);
-  }
-  /* The warm-up toggle rides along here as well as on the set number. The
-     number cell shrinks to 30px on a phone and is dropped entirely below 360px
-     when an effort column is on, so it cannot be the only way in — and a
-     labelled button is the discoverable one of the two. */
-  return '<div class="rep-chips" role="group" aria-label="Quick ' + (timed ? 'seconds' : 'reps') + ' for this set">' +
-    '<button type="button" id="wc-' + s.id + '" class="rep-chip warm-chip" data-action="toggle-warmup" data-id="' + s.id + '" ' +
-      'aria-pressed="' + isWarmup(s) + '" ' +
-      'title="Performed, but out of volume and records">Warm-up</button>' +
-    '<span class="chip-sep" aria-hidden="true"></span>' +
-    vals.map(v => '<button type="button" id="rc-' + s.id + '-' + v + '" class="rep-chip" ' +
-      'data-action="set-rep-chip" data-id="' + s.id + '" data-v="' + v + '" ' +
-      'aria-pressed="' + (v === base) + '" aria-label="' + v + (timed ? ' seconds' : ' reps') + '">' + v + '</button>').join('') +
-  '</div>';
-}
 function setSummary(s){
   if (s.distance != null) return fmtNum(s.distance) + ' ' + esc(s.distanceUnit || 'm');
   const dur = setDuration(s);
@@ -2032,7 +1948,6 @@ function beginWorkout(workout){
   ui.expandedDone.clear();   /* keys are indexes into the previous workout */
   /* nothing to log yet means the drawer is where the user needs to be */
   ui.overviewOpen = workout.exercises.length === 0;
-  ui.timerSheetOpen = false;
   ui.notesOpen = false;
   ui.focus = 'workout-title';
   render();
@@ -2078,6 +1993,14 @@ function addExerciseToWorkout(exId){
   const w = state.activeWorkout;
   if (!w || !exId) return;
   const def = exerciseById(exId);
+  /* The picker already leaves out what is in the session, so this catches the
+     stale-value case (a submit against a list rendered before another add).
+     One movement, one panel: a second copy would split its sets and its volume
+     across two rows of the same session. */
+  if (w.exercises.some(x => x.exerciseId === exId)){
+    toast((def ? def.name : 'That exercise') + ' is already in this session');
+    return;
+  }
   w.exercises.push(buildWorkoutExercise(newRoutineItem(exId)));
   if (w.currentExerciseIndex >= w.exercises.length - 1 || allSetsDone(w.exercises[w.currentExerciseIndex]))
     w.currentExerciseIndex = w.exercises.length - 1;
@@ -2097,26 +2020,6 @@ function fillSetDefaults(ex, s){
   if (toNum(s[field]) == null) s[field] = ex.targetReps != null ? ex.targetReps : 0;
   if (!s.unit) s.unit = ex.unit === 'time' ? 'time' : (ex.unit === 'bw' ? 'bw' : state.settings.unit);
 }
-function completeCurrentSet(){
-  const w = state.activeWorkout; const ex = currentExercise();
-  if (!w || !ex) return;
-  const idx = ex.sets.findIndex(s => !s.completed);
-  if (idx === -1) return;
-  const s = ex.sets[idx];
-  fillSetDefaults(ex, s);
-  s.completed = true; s.completedAt = Date.now();
-  save();
-  announce('Set ' + (idx+1) + ' of ' + ex.sets.length + ' complete.');
-  const next = ex.sets.find(x => !x.completed);
-  /* the last set done means there's nothing left to log here — move on rather
-     than making the user tap "Next exercise" for a foregone conclusion */
-  if (next){ ui.focus = 'sw-' + next.id; render(); }
-  else advanceExercise(false);
-  if (state.settings.autoRest){
-    loadTimer(ex.restSeconds || state.settings.defaultRest);
-    startTimer();
-  }
-}
 function toggleWarmup(setId, focusId){
   const ex = currentExercise(); if (!ex) return;
   const s = ex.sets.find(x => x.id === setId); if (!s) return;
@@ -2128,15 +2031,27 @@ function toggleWarmup(setId, focusId){
   announce(on ? 'Marked as a warm-up: it no longer counts toward volume or records.'
               : 'Marked as a working set.');
 }
+/* The one way a set is logged: its own box in the done column. It therefore
+   also owns what used to hang off the "Set N done" button — the announcement
+   and the auto-rest that starts the moment a set lands. */
 function toggleSet(setId){
   const ex = currentExercise(); if (!ex) return;
-  const s = ex.sets.find(x => x.id === setId); if (!s) return;
+  const i = ex.sets.findIndex(x => x.id === setId);
+  if (i === -1) return;
+  const s = ex.sets[i];
   s.completed = !s.completed;
   if (s.completed){ s.completedAt = Date.now(); fillSetDefaults(ex, s); }
   else s.completedAt = null;
   save();
-  /* same rule as completeCurrentSet: checking the last open box also finishes
-     the exercise, so advance rather than sit on a fully-done set list */
+  if (s.completed){
+    announce('Set ' + (i+1) + ' of ' + ex.sets.length + ' complete.');
+    if (state.settings.autoRest){
+      loadTimer(ex.restSeconds || state.settings.defaultRest);
+      startTimer();
+    }
+  }
+  /* checking the last open box leaves nothing to log here, so move on rather
+     than sit on a fully-done set list */
   if (s.completed && allSetsDone(ex)) advanceExercise(false);
   else { ui.focus = 'sd-' + setId; render(); }
 }
@@ -3445,12 +3360,17 @@ function htmlCurrentExercise(w, ex){
         'data-bind="set" data-id="' + s.id + '" data-field="' + metricField + '" ' +
         'value="' + (mv != null ? mv : '') + '" placeholder="–"></label>';
     }
-    setsHTML += '<button type="button" id="sd-' + s.id + '" class="btn set-done-btn" data-action="toggle-set" data-id="' + s.id + '" ' +
-      'aria-pressed="' + s.completed + '" aria-label="' + (s.completed ? 'Mark set ' + n + ' as not done' : 'Mark set ' + n + ' as done') + '">' +
+    /* A long press here toggles the warm-up flag (data-longpress); a tap still
+       logs the set. The set number keeps the same toggle as a plain button, so
+       the gesture is never the only way in — a keyboard has no long press. */
+    setsHTML += '<button type="button" id="sd-' + s.id + '" class="btn set-done-btn" data-action="toggle-set" ' +
+      'data-longpress="toggle-warmup" data-id="' + s.id + '" ' +
+      'aria-pressed="' + s.completed + '" aria-label="' + (s.completed ? 'Mark set ' + n + ' as not done' : 'Mark set ' + n + ' as done') +
+      '" title="' + (s.completed ? 'Mark set ' + n + ' as not done' : 'Mark set ' + n + ' as done') +
+      ' · hold to mark it a warm-up">' +
       (s.completed ? IC.boxcheck : IC.box) + '</button>';
     setsHTML += '<button type="button" class="btn set-del-btn" data-action="delete-set" data-id="' + s.id + '" ' +
       'aria-label="Delete set ' + n + '" title="Delete set ' + n + '">' + IC.trash + '</button>';
-    setsHTML += repChips(ex, s, isCur);
     setsHTML += '</div>';
   });
 
@@ -3563,29 +3483,14 @@ function htmlWorkoutOverview(w){
    element, which is also why the timer ids live here — drawTimer() looks each
    one up singly, so exactly one copy may be in the document. */
 function htmlActionBar(w, ex){
-  const hasOpen = ex && ex.sets.some(s => !s.completed);
-  const openIdx = ex ? ex.sets.findIndex(s => !s.completed) : -1;
   const last = ex && w.currentExerciseIndex + 1 >= w.exercises.length;
 
-  const sheet = ui.timerSheetOpen
-    ? '<div class="ab-sheet" id="timer-sheet">' +
-        '<span class="sheet-cap">Rest</span>' +
-        '<span class="presets" role="group" aria-label="Rest length presets">' +
-          restPresets().map(sec =>
-            '<button type="button" class="preset-btn" data-action="timer-preset" data-sec="' + sec + '" aria-pressed="false">' +
-            fmtClock(sec) + '</button>').join('') +
-        '</span>' +
-        '<button type="button" class="btn btn-sm push-right" data-action="timer-reset">Reset</button>' +
-      '</div>'
-    : '';
-
+  /* Logging a set happens in its own row's done column, so the bar carries
+     only what moves the session on. */
   const setRow = ex
     ? '<div class="ab-row ab-actions">' +
-        (hasOpen
-          ? '<button type="button" class="btn btn-primary btn-big" data-action="complete-current" id="btn-complete">' +
-            IC.check + '<span>Set ' + (openIdx + 1) + ' done</span><span class="mono xs key-hint">(c)</span></button>'
-          : '<button type="button" class="btn btn-primary btn-big" data-action="next-exercise" id="btn-next-ex">' +
-            IC.skip + '<span>' + (last ? 'Wrap up' : 'Next exercise') + '</span><span class="mono xs key-hint">(n)</span></button>') +
+        '<button type="button" class="btn btn-primary btn-big" data-action="next-exercise" id="btn-next-ex">' +
+          IC.skip + '<span>' + (last ? 'Wrap up' : 'Next exercise') + '</span><span class="mono xs key-hint">(n)</span></button>' +
         '<button type="button" class="btn btn-big ab-icon" data-action="add-set" aria-label="Add a set">' + IC.plus + '</button>' +
         '<button type="button" class="btn btn-big btn-quiet ab-icon" data-action="skip-exercise" aria-label="Skip this exercise">' + IC.skip + '</button>' +
       '</div>'
@@ -3593,14 +3498,11 @@ function htmlActionBar(w, ex){
 
   return '<div class="actionbar" id="timer-panel" aria-label="Rest timer and set actions">' +
     '<div class="ab-drain" aria-hidden="true"><i id="timer-fill"></i></div>' +
-    sheet +
     '<div class="ab-rows">' +
       '<div class="ab-row ab-timer">' +
         '<output id="timer-time" class="ab-time" aria-label="Rest time remaining">' + fmtClock(timer.remaining) + '</output>' +
         '<button type="button" class="btn" id="timer-toggle" data-action="timer-toggle">' + IC.play + '<span>Start</span></button>' +
         '<button type="button" class="btn ab-icon" data-action="timer-add30" aria-label="Add 30 seconds to rest">+0:30</button>' +
-        '<button type="button" class="btn btn-quiet ab-icon" data-action="timer-sheet" id="timer-sheet-btn" ' +
-          'aria-expanded="' + !!ui.timerSheetOpen + '" aria-controls="timer-sheet" aria-label="Rest length options">' + IC.timer + '</button>' +
       '</div>' +
       setRow +
     '</div>' +
@@ -3613,17 +3515,28 @@ function htmlActionBar(w, ex){
    timer needed to be. */
 function htmlAddExercise(){
   if (!state.activeWorkout || state.exercises.length === 0) return '';
+  /* What is already in the session is dropped from the list rather than
+     offered and then refused. */
+  const inSession = new Set(state.activeWorkout.exercises.map(ex => ex.exerciseId));
+  const opts = exerciseOptions(null, inSession);
+  const off = opts ? '' : ' disabled';
   return '<div class="pad divider-top">' +
     '<form class="form-row" data-form="add-workout-exercise">' +
       '<label class="field"><span class="cap">Add exercise to session</span>' +
-      '<select id="add-ex-select">' + exerciseOptions() + '</select></label>' +
-      '<button type="submit" class="btn">' + IC.plus + '<span>Add</span></button>' +
+      '<select id="add-ex-select"' + off + '>' +
+      (opts || '<option value="">Every exercise is already in this session</option>') + '</select></label>' +
+      '<button type="submit" class="btn"' + off + '>' + IC.plus + '<span>Add</span></button>' +
     '</form></div>';
 }
-/* the exercise library as <option>s — used by both "add" pickers */
-function exerciseOptions(selected){
-  return state.exercises.map(e =>
-    '<option value="' + e.id + '"' + (e.id === selected ? ' selected' : '') + '>' + esc(e.name) + '</option>').join('');
+/* The exercise library as <option>s, by name — used by both "add" pickers: a
+   library long enough to need scrolling is unusable in insertion order.
+   `skip` is a Set of ids to leave out (see htmlAddExercise). */
+function exerciseOptions(selected, skip){
+  return state.exercises
+    .filter(e => !(skip && skip.has(e.id)))
+    .sort((a,b) => String(a.name).localeCompare(String(b.name), undefined, { numeric:true, sensitivity:'base' }))
+    .map(e => '<option value="' + e.id + '"' + (e.id === selected ? ' selected' : '') + '>' + esc(e.name) + '</option>')
+    .join('');
 }
 
 /* ---------- ROUTINES ---------- */
@@ -4256,17 +4169,8 @@ const actions = {
   'start-empty'(){ startEmpty(); },
   'add-workout-exercise'(d){ addExerciseToWorkout(d.id); },
 
-  'complete-current'(){ completeCurrentSet(); },
   'toggle-set'(d){ toggleSet(d.id); },
   'toggle-warmup'(d, el){ toggleWarmup(d.id, el && el.id); },
-  /* Routed through cascadeReps, exactly as typing in the field is: a chip that
-     behaved differently from the input beside it would be worse than either
-     rule on its own. */
-  'set-rep-chip'(d){
-    cascadeReps(d.id, toNum(d.v));
-    ui.focus = 'rc-' + d.id + '-' + d.v;
-    render();
-  },
   'add-set'(){ addSet(); },
   'delete-set'(d){ deleteSet(d.id); },
   'skip-exercise'(){ advanceExercise(true); },
@@ -4292,14 +4196,7 @@ const actions = {
   'finish-workout'(){ finishWorkout(); },
   'discard-workout'(){ discardWorkout(); },
 
-  'timer-preset'(d){ loadTimer(Number(d.sec)); toast('Rest set to ' + fmtClock(Number(d.sec))); },
-  'timer-sheet'(){
-    ui.timerSheetOpen = !ui.timerSheetOpen;
-    ui.focus = 'timer-sheet-btn';
-    render();
-  },
   'timer-toggle'(){ toggleTimer(); },
-  'timer-reset'(){ resetTimer(); },
   'timer-add30'(){ addThirty(); },
 
   'routine-new'(){ ui.routineDraft = newRoutineDraft(null); ui.routineError = ''; render(); },
@@ -4397,7 +4294,55 @@ const actions = {
   'sample-history'(){ downloadSample('history'); }
 };
 
+/* Long press, delegated the same way clicks are: `data-longpress` names an
+   action in the table above, and it fires on the same dataset as a tap would.
+   The press has to be swallowed afterwards — it ends in a click, and the
+   element's own data-action would then run on top of the gesture. `render()`
+   replaces the node, so that state lives here rather than on the element. */
+const LONGPRESS_MS = 500;
+/* The swallow flag is cleared by the click it exists to eat, by the next press,
+   and failing both by a short timer: a long press that ends without a click at
+   all (which touch stacks do not all guarantee) must not leave it set to eat
+   the next real one, a keyboard Enter included. */
+const LONGPRESS_STALE_MS = 400;
+let lpTimer = 0, lpStale = 0, lpFired = false, lpFrom = null;
+function lpCancel(){ clearTimeout(lpTimer); lpTimer = 0; lpFrom = null; }
+document.addEventListener('pointerdown', e => {
+  if (e.button != null && e.button !== 0) return;
+  const el = e.target.closest('[data-longpress]');
+  lpCancel();
+  clearTimeout(lpStale); lpFired = false;      /* a new press starts clean */
+  if (!el) return;
+  lpFrom = { x:e.clientX, y:e.clientY };
+  lpTimer = setTimeout(() => {
+    lpTimer = 0;
+    const fn = actions[el.dataset.longpress];
+    if (!fn) return;
+    lpFired = true;
+    /* the press is the whole feedback on a phone, where there is no hover */
+    if (navigator.vibrate) navigator.vibrate(20);
+    fn(el.dataset, el, e);
+  }, LONGPRESS_MS);
+});
+/* A press that turns into a scroll or a drag is not a long press. */
+document.addEventListener('pointermove', e => {
+  if (!lpTimer || !lpFrom) return;
+  if (Math.abs(e.clientX - lpFrom.x) > 10 || Math.abs(e.clientY - lpFrom.y) > 10) lpCancel();
+});
+document.addEventListener('pointerup', () => {
+  lpCancel();
+  if (lpFired){ clearTimeout(lpStale); lpStale = setTimeout(() => { lpFired = false; }, LONGPRESS_STALE_MS); }
+});
+document.addEventListener('pointercancel', () => { lpCancel(); lpFired = false; });
+window.addEventListener('scroll', lpCancel, { passive:true });
+/* iOS Safari raises the callout menu on a long press even with
+   -webkit-touch-callout:none on the button's own text. */
+document.addEventListener('contextmenu', e => {
+  if (e.target.closest('[data-longpress]')) e.preventDefault();
+});
+
 document.addEventListener('click', e => {
+  if (lpFired){ lpFired = false; return; }
   const el = e.target.closest('[data-action]');
   if (!el) return;
   const fn = actions[el.dataset.action];
@@ -4540,9 +4485,6 @@ document.addEventListener('keydown', e => {
         const id = ui.selectedRoutineId || (state.routines[0] && state.routines[0].id);
         if (id) startRoutine(id);
       }
-      break;
-    case 'c':
-      if (state.activeWorkout && ui.view === 'today') completeCurrentSet();
       break;
     case 'n':
       if (state.activeWorkout && ui.view === 'today') advanceExercise(false);
