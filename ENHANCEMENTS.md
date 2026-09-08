@@ -214,9 +214,17 @@ clear all) is cheap. Currently every one of them is a confirm-and-hope.
 - **Routine picker semantics.** The rows are a single-select group implemented
   with `aria-pressed` toggle buttons. `role="radiogroup"` + `role="radio"` with
   roving tabindex and arrow-key navigation would match the actual behaviour.
-- **Reordering without buttons.** Routine items move with up/down icon buttons.
-  Drag-and-drop (with a keyboard equivalent kept) would be faster for long
-  routines.
+- **Reordering without buttons — done for the session, open for routines.**
+  The session sheet's upcoming exercises now drag by a grip (pointer events;
+  the grip answers the arrow keys, and the up/down buttons stay beside it).
+  The routine editor still has only its up/down buttons; the same handle
+  belongs there, and `reorderMovable()` is the shape to copy — though a routine
+  draft has no done/current range to protect, so it is the simpler case.
+- **A drag does not scroll the list it is in.** Dragging a row to the edge of
+  the session sheet stops there rather than scrolling the sheet under it. It
+  matters from roughly eight upcoming exercises up, which no seed routine
+  reaches; the fix is a rAF loop while the pointer sits within ~40px of an
+  edge.
 - **Exercise search scope.** `/` filters by name and category only; searching
   notes would help now that notes carry machine codes and cues.
 - **Focus after deletion.** Deleting a row returns focus to `<body>`; it should
@@ -276,12 +284,15 @@ clear all) is cheap. Currently every one of them is a confirm-and-hope.
   put. Going further means the routine name and *Finish* giving up their row —
   which needs *Finish* to have a second home first (the session sheet is the
   obvious one, and it already holds *Discard*).
-- **Long press is hand-rolled.** `data-longpress` is delegated beside
-  `data-action` (500ms, cancelled by a 10px move or a scroll, and it swallows
-  the click that ends the press). It is the app's first gesture, and the
-  swallow flag is global state cleared three ways because a long press does not
-  reliably end in a click on every touch stack. A second gesture would be the
-  moment to give this a proper home.
+- **Two gestures, two hand-rolled implementations.** `data-longpress` is
+  delegated beside `data-action` (500ms, cancelled by a 10px move or a scroll,
+  and it swallows the click that ends the press); `data-drag` runs its own
+  pointerdown/move/up cycle in the session sheet. They want opposite things
+  from the same 10px — one cancels there, the other starts — so they do not
+  share code, and both keep global state that has to be cleared on paths that
+  do not fire reliably on every touch stack (a long press that ends without a
+  click; a drag whose sheet closes underneath it). A third gesture is the point
+  at which this needs one owner rather than two.
 - **`--header-h` is measured, not declared.** `trackHeaderHeight()` writes the
   header's height to a custom property so the session strip can stick beneath
   it. A layout that did not need JS to know a CSS value would be better; it
