@@ -251,10 +251,31 @@ clear all) is cheap. Currently every one of them is a confirm-and-hope.
   pre-filled with the plan. Any second attempt has to fit *inside* the row —
   stepper affordances on the field itself, say — not under it. Weight has the
   same problem and never had chips.
-- **The set row's floor is the 44px Done target.** Rows are 57px on a phone
-  (was 74). Getting below that means rethinking how a set is marked done — a
-  swipe, say — not shrinking the button, and the done cell now also carries the
-  long-press warm-up toggle, so whatever replaces it has to carry two gestures.
+- **The set row's floor is the 44px Done target.** Rows are 57px on a phone.
+  Getting below that means rethinking how a set is marked done — a swipe, say —
+  not shrinking the button, and the done cell now also carries the long-press
+  warm-up toggle, so whatever replaces it has to carry two gestures.
+- **The software keyboard still covers the action bar.** The bar is pinned to
+  the layout viewport's bottom edge, which iOS does not shrink when the
+  keyboard opens, so focusing a weight field hides the rest timer behind it.
+  `visualViewport`'s `resize`/`scroll` events are the fix (translate the bar by
+  `innerHeight - visualViewport.height - visualViewport.offsetTop`); it is the
+  one piece of mobile layout that cannot be done in CSS. Low urgency: the pager
+  moved to the strip, so nothing you need *while typing* is down there any
+  more, and the timer is not usually running while you type.
+- **Deleting an unlogged set is still one tap with no way back.** Only a
+  completed set raises a confirm, on the reasoning that an empty row is a plan
+  rather than data. That reasoning holds for a mouse. On a phone the control
+  sits one column from the target a thumb aims at between sets; it now gives up
+  8px of its column under a coarse pointer, which reduces the mis-tap without
+  removing it. An undo (4.5) is the real answer, and would let the confirm on a
+  logged set go too.
+- **Landscape is usable, not designed for.** `@media (max-height:560px)` gets a
+  phone on its side down to roughly one visible set row at the top of the page;
+  the rest are a scroll away, behind a strip and an action bar that both stay
+  put. Going further means the routine name and *Finish* giving up their row —
+  which needs *Finish* to have a second home first (the session sheet is the
+  obvious one, and it already holds *Discard*).
 - **Long press is hand-rolled.** `data-longpress` is delegated beside
   `data-action` (500ms, cancelled by a 10px move or a scroll, and it swallows
   the click that ends the press). It is the app's first gesture, and the

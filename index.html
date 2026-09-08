@@ -239,7 +239,6 @@ strong{ font-weight:650; }
   padding:14px var(--sp-3) 12px; font-size:var(--fs-sm); font-weight:550; color:var(--muted);
   cursor:pointer; white-space:nowrap; transition:color .12s ease, border-color .12s ease;
 }
-.nav-btn:hover{ color:var(--text); }
 .nav-btn[aria-current="page"]{ color:var(--text); border-bottom-color:var(--accent); font-weight:650; }
 .nav-btn .dot{
   display:inline-block; width:7px; height:7px; border-radius:50%;
@@ -249,7 +248,39 @@ strong{ font-weight:650; }
 /* ============================================================
    LAYOUT HELPERS
    ============================================================ */
-main{ padding-top:var(--sp-5); padding-bottom:var(--sp-7); min-height:70vh; }
+/* No vertical padding here: main carries `.wrap`, whose padding shorthand
+   (0 var(--sp-4)) outranks an element selector and zeroes it. The space at
+   the top of a view is the strip's or the view head's; at the bottom it was
+   the footer's all along. */
+main{ min-height:70vh; }
+/* While a session is on screen the workout owns the bottom edge, and the
+   action bar has to hold it whatever the exercise happens to contain.
+
+   `position:sticky` with `bottom` only ever pulls an element *up* into the
+   scrollport — it never pushes one down. So the bar held the bottom edge for a
+   six-set exercise, whose static position is below the fold, and simply sat
+   wherever the content ended for a two-set one: three exercises, three
+   different heights for the same control. Making main a screen-tall flex
+   column with `margin-top:auto` on the bar puts its static position *at* the
+   bottom edge, so both cases resolve to the same line — and dropping the
+   footer below it stops the last 78px of the page lifting the bar by the
+   footer's height as you reach the end. dvh rather than vh so a mobile
+   browser's collapsing toolbar is not counted twice.
+
+   A flex main is also an independent formatting context, so the strip's
+   negative top margin no longer collapses out through main: it now does what
+   it reads as, pulling the strip (and the panel behind it) up under the
+   header, while main's own box starts where the header ends. Same picture,
+   and a box whose bottom edge means something. */
+html.session-active main{
+  display:flex; flex-direction:column;
+  min-height:calc(100vh - var(--header-h));
+  min-height:calc(100dvh - var(--header-h));
+}
+html.session-active .ex-panel{ margin-bottom:var(--sp-4); }
+html.session-active .actionbar{ margin-top:auto; }
+html.session-active body{ padding-bottom:0; }        /* the bar pads its own safe area */
+html.session-active .app-footer{ display:none; }     /* keyboard help is still ? and Settings */
 .view-head{ display:flex; align-items:baseline; justify-content:space-between; gap:var(--sp-4); flex-wrap:wrap; margin-bottom:var(--sp-5); }
 .view-head h1{ font-weight:700; letter-spacing:-.022em; }
 .view-sub{ color:var(--muted); font-size:var(--fs-sm); }
@@ -275,17 +306,12 @@ main{ padding-top:var(--sp-5); padding-bottom:var(--sp-7); min-height:70vh; }
   transition:background .12s ease, border-color .12s ease, transform .05s ease;
   user-select:none;
 }
-.btn:hover{ background:var(--surface-2); }
 .btn:active{ transform:translateY(1px); }
 .btn:disabled{ opacity:.45; cursor:not-allowed; transform:none; }
 .btn-primary{ background:var(--accent-strong); border-color:var(--accent-strong); color:var(--on-accent); }
-.btn-primary:hover{ background:var(--accent-strong); filter:brightness(1.07); }
 .btn-danger{ color:var(--danger); border-color:var(--border-strong); }
-.btn-danger:hover{ background:var(--danger-soft); border-color:var(--danger); }
 .btn-danger-solid{ background:var(--danger-strong); border-color:var(--danger-strong); color:#fff; }
-.btn-danger-solid:hover{ filter:brightness(1.07); background:var(--danger-strong); }
 .btn-quiet{ border-color:transparent; background:transparent; color:var(--muted); }
-.btn-quiet:hover{ background:var(--surface-2); color:var(--text); }
 .btn-big{ min-height:52px; font-size:var(--fs-md); padding:var(--sp-3) var(--sp-5); border-radius:8px; }
 .btn-sm{ min-height:30px; padding:3px var(--sp-3); font-size:var(--fs-xs); }
 .btn .ic{ width:15px; height:15px; flex:none; }
@@ -301,7 +327,6 @@ input[type="text"],input[type="number"],input[type="search"],input[type="datetim
   transition:border-color .12s ease, background .12s ease;
 }
 textarea{ resize:vertical; min-height:64px; }
-input:hover,select:hover,textarea:hover{ border-color:var(--muted); }
 input:focus,select:focus,textarea:focus{ outline:2px solid var(--focus); outline-offset:1px; border-color:var(--focus); }
 input[type="number"]{ font-variant-numeric:tabular-nums; }
 input::placeholder,textarea::placeholder{ color:var(--muted); opacity:.7; }
@@ -349,7 +374,6 @@ kbd{
 .divider-top{ border-top:1px solid var(--border); }
 .panel-title{ font-size:var(--fs-md); font-weight:700; }
 .quote{ font-style:italic; }
-.key-hint{ opacity:.75; }
 .ic-xs{ width:11px; height:11px; display:inline-block; vertical-align:-1px; }
 .ic-inline{ display:inline-block; vertical-align:-2px; }
 
@@ -363,7 +387,6 @@ kbd{
   padding:var(--sp-2) var(--sp-3) var(--sp-2) 0;
   transition:border-color .12s ease, background .12s ease;
 }
-.routine-pick-row:hover{ border-color:var(--border-strong); background:var(--surface-2); }
 .routine-pick-row.is-selected{ border-color:var(--accent); box-shadow:inset 3px 0 0 var(--accent); }
 /* the label fills the row so the whole card is a selection target */
 .rp-select{
@@ -394,19 +417,41 @@ kbd{
   margin:calc(-1 * var(--sp-5)) 0 var(--sp-4);
   box-shadow:var(--shadow-sm);
 }
-.strip-line{ display:flex; align-items:baseline; justify-content:space-between; gap:var(--sp-3); }
-.strip-pos{ font-size:var(--fs-sm); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.strip-pos .ex-of{ font-weight:700; font-variant-numeric:tabular-nums; }
-/* the set count doubles as the drawer toggle: a big tap target for the one
-   control that answers "where am I", without a second row to hold it */
-.strip-num{
-  flex:none; display:inline-flex; align-items:center; gap:2px;
-  font:inherit; font-size:var(--fs-xs); color:var(--muted); font-variant-numeric:tabular-nums;
-  background:none; border:1px solid transparent; border-radius:var(--radius);
-  min-height:34px; padding:0 4px 0 var(--sp-2); cursor:pointer; white-space:nowrap;
+/* The strip is also the pager. Moving through the session used to live in the
+   action bar, whose sticky bottom edge lands in a different place for a
+   two-set exercise than for a six-set one, and in a third place again once the
+   page is scrolled to its end. The strip is pinned to the header, so these two
+   never move: the same two pixels of screen, every exercise, every scroll
+   position. */
+.strip-line{ display:flex; align-items:center; gap:var(--sp-2); }
+.strip-step{
+  flex:none; display:inline-flex; align-items:center; justify-content:center;
+  width:44px; height:44px; padding:0; cursor:pointer;
+  background:var(--surface); color:var(--text);
+  border:1px solid var(--border-strong); border-radius:var(--radius);
 }
-.strip-num:hover{ background:var(--surface-2); color:var(--text); border-color:var(--border); }
-.strip-num .ic{ width:14px; height:14px; }
+.strip-step .ic{ width:20px; height:20px; }
+.strip-step[disabled]{ opacity:.35; cursor:not-allowed; }
+.strip-step.is-last{ background:var(--accent-strong); border-color:var(--accent-strong); color:var(--on-accent); }
+/* Everything between the two arrows opens the session sheet: where you are and
+   how much is left is one statement, and one target the width of the screen is
+   easier to hit than the set counter alone ever was. */
+.strip-num{
+  flex:1; min-width:0; display:inline-flex; align-items:center; gap:var(--sp-2);
+  font:inherit; font-size:var(--fs-sm); color:var(--text);
+  background:none; border:1px solid transparent; border-radius:var(--radius);
+  min-height:44px; padding:0 4px 0 var(--sp-2); cursor:pointer; text-align:left;
+}
+/* The button fills the space between the arrows, so it is a target the width
+   of the screen; its text does not, so on a wide screen the counter follows
+   the name instead of drifting over to sit beside the forward arrow. */
+.strip-pos{ flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.strip-pos .ex-of{ font-weight:700; font-variant-numeric:tabular-nums; }
+.strip-count{
+  flex:none; font-size:var(--fs-xs); color:var(--muted);
+  font-variant-numeric:tabular-nums; white-space:nowrap;
+}
+.strip-num .ic{ width:14px; height:14px; flex:none; color:var(--muted); }
 /* one segment per exercise, weighted by its set count: position in the session
    is spatial, not a percentage */
 .seg-track{ display:flex; gap:2px; height:8px; margin-top:6px; }
@@ -424,6 +469,11 @@ kbd{
   font-size:var(--fs-xs); font-weight:650; padding:2px 8px; border-radius:99px;
   border:1px solid var(--border-strong); color:var(--muted); background:var(--surface-2);
 }
+/* Reference, not the task. On a phone this block wrapped to four lines and
+   took 128px of the ~250px between the sticky strip and the sticky action bar
+   — the space the set rows have to live in. Below 640px it becomes one
+   scrolling line instead: the last session, which is the figure you act on,
+   stays in view and the bests are a swipe away rather than a screenful. */
 .prev-perf{
   margin-top:var(--sp-3); padding:var(--sp-2) var(--sp-3);
   background:var(--surface-2); border-radius:var(--radius); border:1px solid var(--border);
@@ -432,6 +482,20 @@ kbd{
 .prev-perf strong{ color:var(--text); font-variant-numeric:tabular-nums; }
 .prev-perf .pp-item{ display:flex; gap:6px; align-items:baseline; }
 .prev-perf .pp-k{ font-size:var(--fs-xs); text-transform:uppercase; letter-spacing:.04em; font-weight:650; }
+@media (max-width:640px),(max-height:560px){
+  .prev-perf{
+    flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none;
+    -webkit-overflow-scrolling:touch; overscroll-behavior-x:contain;
+  }
+  .prev-perf::-webkit-scrollbar{ display:none; }
+  .prev-perf .pp-item{ flex:none; white-space:nowrap; }
+  /* the same fade the nav uses, so a row that continues past the edge says so */
+  .prev-perf::after{
+    content:""; position:sticky; right:0; flex:none; align-self:stretch;
+    width:20px; margin-right:calc(-1 * var(--sp-3)); pointer-events:none;
+    background:linear-gradient(90deg,transparent,var(--surface-2));
+  }
+}
 .ex-notes{ margin-top:var(--sp-3); font-size:var(--fs-sm); color:var(--muted); font-style:italic; }
 
 /* sets table — the column template varies with what the exercise needs
@@ -455,7 +519,6 @@ kbd{
   padding-bottom:8px; min-height:44px; background:none; border:0; border-radius:var(--radius);
   font:inherit; color:inherit; text-align:left; cursor:pointer; overflow:hidden;
 }
-.set-num:hover{ background:var(--surface-2); }
 .set-num .wu{ font-size:10px; font-weight:650; line-height:1.2; color:var(--warning); white-space:nowrap; max-width:100%; }
 /* Performed, but out of the totals — so it reads as present and discounted
    rather than as an ordinary set. */
@@ -477,7 +540,6 @@ kbd{
   min-height:44px; padding-inline:0; justify-content:center;
   border-color:transparent; background:transparent; color:var(--muted);
 }
-.set-del-btn:hover{ color:var(--danger); border-color:var(--danger); background:var(--danger-soft); }
 .set-del-btn .ic{ width:15px; height:15px; }
 .set-done-btn[aria-pressed="true"]{ background:var(--success-soft); border-color:var(--success); color:var(--success); }
 /* Marked from here, so marked here too — and this cell survives every
@@ -501,7 +563,6 @@ kbd{
 .hset-done,.hset-del{ min-height:44px; min-width:44px; padding-inline:9px; justify-content:center; }
 .hset-done[aria-pressed="true"]{ background:var(--success-soft); border-color:var(--success); color:var(--success); }
 .hset-del{ color:var(--muted); }
-.hset-del:hover{ color:var(--danger); border-color:var(--danger); }
 .hset-row.done .field input{ opacity:.55; }
 @media (max-width:620px){
   .hset-row{ grid-template-columns:1fr 1fr 1fr; }
@@ -538,26 +599,19 @@ kbd{
 .actionbar.is-done .ab-time{ color:var(--success); }
 .ab-row .ab-grow{ flex:1; min-width:0; }
 .ab-row .btn{ white-space:nowrap; }
-.ab-actions .btn-primary{ flex:1; min-width:0; }
-/* The two ends of the bar. They share what the middle icon leaves, so neither
-   can push the other off a 320px row. */
-.ab-nav{ flex:1; min-width:0; justify-content:center; padding-inline:var(--sp-2); }
-.ab-nav > span:not(.key-hint){ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.ab-nav[disabled]{ opacity:.45; }
-.ab-actions .btn-big{ min-height:48px; }
 .ab-icon{ flex:none; min-width:44px; padding-inline:10px; }
 .actionbar .timer-status{ margin-top:var(--sp-2); }
 @keyframes flash-done{ 0%,100%{ background:var(--surface);} 30%{ background:var(--success-soft);} }
 .actionbar.is-done{ animation:flash-done 1.2s ease 2; }
-/* room to breathe once the width is there: timer and set actions side by side */
-@media (min-width:720px){
+/* Width alone is the wrong test: a phone in landscape is wider than 720px and
+   about 360px tall, and the desktop treatment there left no room for a single
+   set row. */
+@media (min-width:720px) and (min-height:600px){
   /* 1fr columns across a 920px page made a weight field 340px wide */
   .sets{ max-width:600px; }
-  .ab-rows{ flex-direction:row; align-items:center; gap:var(--sp-5); }
-  .ab-rows > .ab-actions{ flex:1; }
   .ab-time{ font-size:34px; min-width:92px; }
 }
-@media (max-width:719px){
+@media (max-width:719px),(max-height:599px){
   .actionbar .timer-status{
     position:absolute; width:1px; height:1px; padding:0; margin:-1px;
     overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0;
@@ -569,7 +623,6 @@ kbd{
   background:none; border:0; border-bottom:1px solid var(--border); cursor:pointer;
   padding:var(--sp-3) var(--sp-2); transition:background .12s ease;
 }
-.done-ex-row:hover{ background:var(--surface-2); }
 .done-ex-row .chev{ margin-left:auto; transition:transform .15s ease; color:var(--muted); }
 .done-ex-row[aria-expanded="true"] .chev{ transform:rotate(90deg); }
 .done-ex-detail{ padding:var(--sp-2) var(--sp-4) var(--sp-4); border-bottom:1px solid var(--border); font-size:var(--fs-sm); }
@@ -583,7 +636,6 @@ kbd{
 .overview-toggle .chev{ transition:transform .15s ease; }
 .overview-toggle[aria-expanded="true"] .chev{ transform:rotate(90deg); }
 .done-ex-row.is-current-row{ cursor:default; }
-.done-ex-row.is-current-row:hover{ background:none; }
 .overview-row{
   display:grid; grid-template-columns:24px 1fr auto; gap:var(--sp-2); align-items:center;
   padding:var(--sp-3) var(--sp-2); border-bottom:1px solid var(--border);
@@ -606,14 +658,12 @@ kbd{
 .list{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow-sm); overflow:hidden; }
 .list-row{ display:flex; align-items:center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-4); border-bottom:1px solid var(--border); flex-wrap:wrap; }
 .list-row:last-child{ border-bottom:0; }
-.list-row:hover{ background:var(--surface-2); }
 .list-main{ flex:1; min-width:180px; }
 .list-name{ font-weight:650; }
 .list-meta{ color:var(--muted); font-size:var(--fs-xs); margin-top:1px; }
 .list-actions{ display:flex; gap:6px; flex-wrap:wrap; }
 
 .hist-row{ width:100%; text-align:left; background:none; border:0; border-bottom:1px solid var(--border); cursor:pointer; padding:var(--sp-3) var(--sp-4); display:grid; grid-template-columns:minmax(150px,1.2fr) 2fr repeat(3,minmax(70px,1fr)) 24px; gap:var(--sp-3); align-items:baseline; }
-.hist-row:hover{ background:var(--surface-2); }
 .hist-row:last-child{ border-bottom:0; }
 .hist-cell{ font-variant-numeric:tabular-nums; font-size:var(--fs-sm); }
 .hist-cell .k{ color:var(--muted); font-size:var(--fs-xs); }
@@ -660,8 +710,6 @@ kbd{
   width:30px; height:30px; display:inline-flex; align-items:center; justify-content:center;
   color:var(--muted); cursor:pointer; transition:all .12s ease;
 }
-.icon-btn:hover{ background:var(--surface-2); color:var(--text); border-color:var(--border); }
-.icon-btn.danger:hover{ color:var(--danger); border-color:var(--danger); background:var(--danger-soft); }
 .icon-btn .ic{ width:15px; height:15px; }
 @media (max-width:640px){
   .item-row{ grid-template-columns:1fr 1fr 1fr; }
@@ -719,7 +767,6 @@ table.shortcuts tr:last-child td{ border-bottom:0; }
   border:1px solid var(--border-strong); border-radius:var(--radius); background:var(--surface);
   font-size:var(--fs-sm); font-weight:600; transition:background .12s ease;
 }
-.file-btn:hover span{ background:var(--surface-2); }
 .file-btn:focus-within span{ outline:2px solid var(--focus); outline-offset:2px; }
 
 /* ============================================================
@@ -807,7 +854,6 @@ pre.code code{ background:none; border:0; padding:0; font-size:inherit; white-sp
   background:none; border:0; padding:0; font:inherit; color:var(--accent);
   text-decoration:underline; cursor:pointer;
 }
-.link-btn:hover{ text-decoration:none; }
 .block-head{ display:flex; align-items:center; gap:var(--sp-1); margin-bottom:var(--sp-1); }
 .block-head h3{ margin-bottom:0; }
 @media (max-width:560px){
@@ -835,7 +881,6 @@ pre.code code{ background:none; border:0; padding:0; font-size:inherit; white-sp
 .app-footer{ border-top:1px solid var(--border); padding:var(--sp-5) 0 var(--sp-6); color:var(--muted); font-size:var(--fs-xs); }
 .app-footer .wrap{ display:flex; justify-content:flex-end; gap:var(--sp-3); flex-wrap:wrap; align-items:center; }
 .footer-btn{ background:none; border:0; color:var(--muted); font-size:var(--fs-xs); cursor:pointer; text-decoration:underline; padding:2px; }
-.footer-btn:hover{ color:var(--text); }
 
 .empty{
   text-align:center; padding:var(--sp-7) var(--sp-4); color:var(--muted);
@@ -857,8 +902,6 @@ pre.code code{ background:none; border:0; padding:0; font-size:inherit; white-sp
   .workout-head > div:first-child{ min-width:0; }
   .workout-title{ font-size:var(--fs-md); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .workout-head-actions{ flex:none; flex-wrap:nowrap; }
-  /* a keyboard hint is noise on a touch device */
-  .key-hint{ display:none; }
   /* weight and reps are not the same size problem: "142.5" needs room, "12"
      does not, and the fixed columns leave little to share out at 320px */
   .sets{ --sets-cols:34px 1.4fr 1fr 50px 46px 40px; gap:6px; }
@@ -877,16 +920,45 @@ pre.code code{ background:none; border:0; padding:0; font-size:inherit; white-sp
   .set-row input{ min-height:40px; }
   .set-done-btn{ padding-inline:0; }
 }
+/* The exercise name is stated once. Below 640px the strip is pinned to the
+   header for the whole session and already carries it, so the panel heading
+   was a second copy of a label that never scrolls away — 44px of the ~230px
+   the set rows have to live in. It stays in the accessibility tree, because
+   the sets group needs a heading above it. */
+@media (max-width:640px){
+  .ex-name{
+    position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+    overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0;
+  }
+  /* the routine name and totals are session furniture, not the task */
+  .workout-pad{ padding-top:var(--sp-2); padding-bottom:var(--sp-2); }
+  /* a standing coaching note, not this set's instructions */
+  .ex-notes{ display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
+}
+/* A phone in landscape is 360-420px tall. Everything above was sized against
+   width, so the panel's own furniture filled the screen and the set rows —
+   the only reason the screen exists — rendered below the action bar. What goes
+   here is what can be read somewhere else: the exercise's standing note, the
+   session totals, and the per-exercise progress segments (the strip still
+   says "2/6" in words). */
+@media (max-height:560px){
+  .ex-notes,.workout-meta,.seg-track{ display:none; }
+  .ex-panel .pad{ padding-top:var(--sp-2); padding-bottom:var(--sp-2); }
+  .session-strip{ padding-bottom:var(--sp-2); margin-bottom:var(--sp-3); }
+  .workout-title{ font-size:var(--fs-md); }
+  .ex-name{ font-size:var(--fs-md); }
+  /* the head row names the columns; a caption per row costs ~19px per set,
+     which is a whole extra row's worth every three sets */
+  .set-row .field > .cap{ display:none; }
+  .set-row{ padding:5px 0; }
+  .set-num .prev{ display:none; }
+}
 /* At 320px the sets grid has 256px to work with once .wrap and .pad take
    their padding, so the fixed columns get trimmed rather than the weight
    field. 36x44 for delete still clears the WCAG 2.2 minimum comfortably; it
    is the Done control beside it that stays a full 44 wide, because that is
    the one aimed at between sets. */
 @media (max-width:400px){
-  /* 24px of button padding either side left "Wrap up" 30px to render in. The
-     chevrons go before the words do — which end of the bar a button sits at
-     already says which way it goes. */
-  .ab-nav .ic{ display:none; }
   .sets{ --sets-cols:30px 1.4fr 1fr 46px 44px 36px; }
   .sets.no-rpe{ --sets-cols:30px 1.4fr 1fr 44px 36px; }
   .sets.no-weight{ --sets-cols:30px 1fr 46px 44px 36px; }
@@ -899,6 +971,12 @@ pre.code code{ background:none; border:0; padding:0; font-size:inherit; white-sp
    and every input names itself ("Set 3 weight in kg") for anyone not reading
    position. Only here — 360px up keeps the number in every configuration. */
 @media (max-width:360px){
+  /* Four controls on the bar's one row need 316px at 320px wide, so the play
+     icon and the countdown next to it carry the toggle on their own — the
+     button's aria-label still reads "Start rest timer". */
+  #timer-toggle span{ display:none; }
+  #timer-toggle{ min-width:44px; padding-inline:10px; }
+  .ab-time{ min-width:64px; font-size:23px; }
   .sets{ --sets-cols:1.4fr 1fr 46px 44px 36px; }
   .sets.no-weight{ --sets-cols:1fr 46px 44px 36px; }
   .sets:not(.no-rpe) .set-num,
@@ -910,6 +988,75 @@ pre.code code{ background:none; border:0; padding:0; font-size:inherit; white-sp
      is the useful figure) and the word "workout" on the finish button */
   .narrow-hide{ display:none; }
 }
+/* ============================================================
+   TOUCH
+   A gym phone is the primary device: a coarse pointer, one thumb, and no
+   pointer that can be moved away again. These are the rules that only make
+   sense once that is the assumption.
+   ============================================================ */
+/* Every hover affordance in the app, and only for a device that can hover. On
+   a touchscreen :hover latches onto whatever was tapped last and stays there
+   until something else is tapped — which lit the delete control beside a
+   logged set bright red and left it that way for the rest of the exercise. */
+@media (hover:hover){
+  .nav-btn:hover{ color:var(--text); }
+  .btn:hover:not([aria-pressed="true"]){ background:var(--surface-2); }
+  .btn-primary:hover{ background:var(--accent-strong); filter:brightness(1.07); }
+  .btn-danger:hover{ background:var(--danger-soft); border-color:var(--danger); }
+  .btn-danger-solid:hover{ filter:brightness(1.07); background:var(--danger-strong); }
+  .btn-quiet:hover{ background:var(--surface-2); color:var(--text); }
+  input:hover:not(:focus),select:hover:not(:focus),textarea:hover:not(:focus){ border-color:var(--muted); }
+  .routine-pick-row:not(.is-selected):hover{ border-color:var(--border-strong); background:var(--surface-2); }
+  .strip-step:hover:not([disabled]){ background:var(--surface-2); border-color:var(--muted); }
+  .strip-step.is-last:hover{ background:var(--accent-strong); filter:brightness(1.07); }
+  .strip-num:hover{ background:var(--surface-2); border-color:var(--border); }
+  .set-num:hover{ background:var(--surface-2); }
+  .set-del-btn:hover{ color:var(--danger); border-color:var(--danger); background:var(--danger-soft); }
+  .hset-del:hover{ color:var(--danger); border-color:var(--danger); }
+  .done-ex-row:hover{ background:var(--surface-2); }
+  .done-ex-row.is-current-row:hover{ background:none; }
+  .list-row:not(.is-editing):hover{ background:var(--surface-2); }
+  .hist-row:hover{ background:var(--surface-2); }
+  .icon-btn:hover{ background:var(--surface-2); color:var(--text); border-color:var(--border); }
+  .icon-btn.danger:hover{ color:var(--danger); border-color:var(--danger); background:var(--danger-soft); }
+  .file-btn:hover span{ background:var(--surface-2); }
+  .link-btn:hover{ text-decoration:none; }
+  .footer-btn:hover{ color:var(--text); }
+}
+/* iOS Safari zooms the page in whenever a field under 16px takes focus, and
+   does not zoom back out. At 13px that fired on every weight and rep field,
+   several times per exercise. 16px is a threshold, not a type choice. */
+@media (pointer:coarse){
+  input[type="text"],input[type="number"],input[type="search"],input[type="datetime-local"],select,textarea{
+    font-size:16px; min-height:44px;
+  }
+  /* 44px is the floor for anything on the logging path: the base sizes are
+     tuned for a mouse, and these are the same controls under a thumb. */
+  .btn{ min-height:44px; }
+  .btn-big{ min-height:52px; }
+  .btn-sm{ min-height:36px; }
+  .set-row input{ min-height:44px; }
+  /* Destructive, and its neighbour is the control a thumb aims at between
+     sets. It keeps its column but gives up the left 8px of it, so a miss to
+     the right of Done lands on nothing rather than on delete. */
+  .set-del-btn{ margin-left:8px; }
+  .nav-btn{ padding-top:16px; padding-bottom:14px; }
+  .footer-btn{ padding:10px 2px; }
+}
+/* The platform's own tap flash fights .btn:active, and double-tap-to-zoom puts
+   a delay on every control that sits close to its neighbour by design. */
+button,input,select,textarea,label,a{ -webkit-tap-highlight-color:transparent; }
+button,.btn,.icon-btn,.nav-btn,.strip-step,.strip-num,.set-num,.done-ex-row,.hist-row{
+  touch-action:manipulation;
+}
+/* After the coarse-pointer block above, which grows the tabs: on a landscape
+   phone the vertical budget is worth more than the extra thumb margin, and the
+   tabs are still 40px tall. */
+@media (max-height:560px){
+  .header-inner{ min-height:40px; }
+  .nav-btn{ padding-top:10px; padding-bottom:8px; }
+}
+
 @media (prefers-reduced-motion: reduce){
   *,*::before,*::after{ animation:none !important; transition:none !important; scroll-behavior:auto !important; }
 }
@@ -3210,6 +3357,10 @@ function render(){
   const switched = ui.prevView !== ui.view;
   ui.prevView = ui.view;
   main.innerHTML = viewHTML();
+  /* The action bar can only stay put if main reaches the bottom of the
+     viewport — see html.session-active in the stylesheet. */
+  document.documentElement.classList.toggle('session-active',
+    !!state.activeWorkout && ui.view === 'today');
   if (switched) window.scrollTo(0,0);
   drawTimer();
   liftToasts();      /* the bar's height changes with the sheet and the set row */
@@ -3378,7 +3529,7 @@ function htmlActiveWorkout(w){
   let html = htmlSessionStrip(w);
 
   html += '<section class="panel ex-panel" aria-label="Active workout">' +
-    '<div class="pad">' +
+    '<div class="pad workout-pad">' +
       '<div class="workout-head">' +
         '<div>' +
           '<h1 class="workout-title" id="workout-title" tabindex="-1">' + esc(w.routineName) + '</h1>' +
@@ -3416,15 +3567,19 @@ function htmlActiveWorkout(w){
   html += htmlSessionNote(w);
   html += '</section>';
 
-  html += htmlActionBar(w, ex);
+  html += htmlActionBar(ex);
   /* The screen ends at the action bar. Everything about the session as a whole
      is in the sheet, which is a dialog outside #main — see syncOverviewSheet(). */
   return html;
 }
 
-/* The where-am-I strip, sticky under the header for the whole session. One
-   segment per exercise, weighted by its set count, so how far through the
-   session you are is a position rather than a percentage. */
+/* The where-am-I strip, sticky under the header for the whole session. It
+   answers where you are, and it is also how you move: one segment per exercise
+   weighted by its set count, and the two pager arrows that used to sit in the
+   action bar. They moved here because the bar's bottom edge is a function of
+   how much content is above it — a two-set exercise put "Next" in a different
+   place from a six-set one, and scrolling to the end of the page moved it
+   again. Pinned under the header, these never move. */
 function htmlSessionStrip(w){
   const doneSets = workoutSets(w);
   const planned = workoutPlannedSets(w);
@@ -3445,14 +3600,30 @@ function htmlSessionStrip(w){
     return '<span class="' + cls + '" style="flex:' + n + '"><i style="width:' + fill + '%"></i></span>';
   }).join('');
 
+  /* On the last exercise, forward means wrap up rather than "next" — the
+     button says so in its label and carries the finish icon, so the arrow is
+     never a lie about what is on the other side of it. */
+  const canPrev = Math.min(idx, total) > 0;
+  const atEnd = idx >= total;
+  const last = !!cur && idx + 1 >= total;
+
   return '<div class="session-strip">' +
     '<div class="strip-line">' +
-      '<span class="strip-pos">' + where + '</span>' +
+      '<button type="button" class="strip-step" id="btn-prev-ex" data-action="prev-exercise"' +
+        (canPrev ? '' : ' disabled') + ' aria-label="Previous exercise" title="Previous exercise (p)">' +
+        IC.chevL + '</button>' +
       '<button type="button" id="overview-toggle-btn" class="strip-num overview-toggle" ' +
         'data-action="toggle-overview" aria-haspopup="dialog" aria-expanded="' + ui.overviewOpen + '" ' +
-        'aria-controls="overview-dlg">' +
-        doneSets + '/' + planned + ' sets' + (mins != null ? ' · ~' + mins + ' min' : '') +
+        'aria-controls="overview-dlg" aria-label="Session overview — ' + doneSets + ' of ' + planned + ' sets done">' +
+        '<span class="strip-pos">' + where + '</span>' +
+        '<span class="strip-count">' + doneSets + '/' + planned +
+          (mins != null ? ' · ~' + mins + 'm' : '') + '</span>' +
         IC.chev + '</button>' +
+      '<button type="button" class="strip-step' + (last ? ' is-last' : '') + '" id="btn-next-ex" ' +
+        'data-action="next-exercise"' + (atEnd ? ' disabled' : '') +
+        ' aria-label="' + (last ? 'Wrap up' : 'Next exercise') + '"' +
+        ' title="' + (last ? 'Wrap up (n)' : 'Next exercise (n)') + '">' +
+        (last ? IC.flag : IC.chev) + '</button>' +
     '</div>' +
     (total
       ? '<div class="seg-track" role="img" aria-label="Exercise ' + (cur ? (idx+1) : total) + ' of ' + total +
@@ -3505,7 +3676,7 @@ function htmlCurrentExercise(w, ex){
   let setsHTML =
     '<div class="sets-head" aria-hidden="true">' +
       '<span>Set</span>' +
-      (showWeight ? '<span>Weight (' + esc(wLabel) + ')</span>' : '') +
+      (showWeight ? '<span>Weight<span class="narrow-hide"> (' + esc(wLabel) + ')</span></span>' : '') +
       '<span>' + esc(repsLabel) + '</span>' +
       (showMetric ? '<span>' + metricLabel + '</span>' : '') +
       '<span>Done</span><span></span>' +
@@ -3668,46 +3839,27 @@ function overviewSubtitle(w){
   return 'Exercise ' + at + ' of ' + n + ' · ' + workoutSets(w) + '/' + workoutPlannedSets(w) + ' sets done';
 }
 
-/* The action bar: the rest timer and the set actions in the one region a phone
-   can always see. It replaces the old full-width timer panel (which rendered
-   ~500px below the fold on a phone, i.e. invisible at exactly the moment rest
-   starts) and the old sticky button row. Both used to exist; they are now one
-   element, which is also why the timer ids live here — drawTimer() looks each
-   one up singly, so exactly one copy may be in the document. */
-function htmlActionBar(w, ex){
-  const last = ex && w.currentExerciseIndex + 1 >= w.exercises.length;
+/* The action bar: the rest timer, in the one region a phone can always see. It
+   replaces the old full-width timer panel, which rendered ~500px below the
+   fold on a phone — invisible at exactly the moment rest starts — and it is
+   why the timer ids live here: drawTimer() looks each one up singly, so
+   exactly one copy may be in the document.
 
-  /* Logging a set happens in its own row's done column, so the bar carries
-     only movement through the session: back on the left, forward on the right,
-     with the two edges of the bar being the two easiest places to hit. "Add
-     set" is not here — the sets list has its own, right under the row it adds
-     to, and this row has no width to spare on a phone. */
-  const atEnd = w.currentExerciseIndex >= w.exercises.length;
-  const canPrev = Math.min(w.currentExerciseIndex, w.exercises.length) > 0;
-  const setRow = w.exercises.length
-    ? '<div class="ab-row ab-actions">' +
-        '<button type="button" class="btn btn-big ab-nav" data-action="prev-exercise" id="btn-prev-ex"' +
-          (canPrev ? '' : ' disabled') + ' aria-label="Go back to the previous exercise">' +
-          IC.chevL + '<span>Prev.<span class="narrow-hide"> exercise</span></span>' +
-          '<span class="mono xs key-hint">(p)</span></button>' +
-        (ex ? '<button type="button" class="btn btn-big btn-quiet ab-icon" data-action="skip-exercise" ' +
-          'aria-label="Skip this exercise">' + IC.skip + '</button>' : '') +
-        '<button type="button" class="btn btn-primary btn-big ab-nav" data-action="next-exercise" id="btn-next-ex"' +
-          (atEnd ? ' disabled' : '') + ' aria-label="' + (last ? 'Wrap up' : 'Go on to the next exercise') + '">' +
-          '<span>' + (last ? 'Wrap up' : 'Next<span class="narrow-hide"> exercise</span>') + '</span>' +
-          '<span class="mono xs key-hint">(n)</span>' + IC.chev + '</button>' +
-      '</div>'
-    : '';
-
-  return '<div class="actionbar" id="timer-panel" aria-label="Rest timer and set actions">' +
+   It carries the timer and nothing else that has a fixed home elsewhere. A set
+   is logged from its own row's done column (`toggleSet()`); moving through the
+   session is the strip's pager. Skip stays here because it is a statement
+   about this exercise rather than navigation, and because it is rare. */
+function htmlActionBar(ex){
+  return '<div class="actionbar" id="timer-panel" aria-label="Rest timer">' +
     '<div class="ab-drain" aria-hidden="true"><i id="timer-fill"></i></div>' +
     '<div class="ab-rows">' +
       '<div class="ab-row ab-timer">' +
         '<output id="timer-time" class="ab-time" aria-label="Rest time remaining">' + fmtClock(timer.remaining) + '</output>' +
         '<button type="button" class="btn" id="timer-toggle" data-action="timer-toggle">' + IC.play + '<span>Start</span></button>' +
         '<button type="button" class="btn ab-icon" data-action="timer-add30" aria-label="Add 30 seconds to rest">+0:30</button>' +
+        (ex ? '<button type="button" class="btn btn-quiet ab-icon push-right" data-action="skip-exercise" ' +
+          'aria-label="Skip this exercise" title="Skip this exercise">' + IC.skip + '</button>' : '') +
       '</div>' +
-      setRow +
     '</div>' +
     '<p class="timer-status" id="timer-status">Ready.</p>' +
   '</div>';

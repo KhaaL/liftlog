@@ -104,26 +104,44 @@ Handlers receive the element's `dataset`, so parameters travel as `data-id`,
 The active-workout screen is built around a fixed vertical budget, because a
 phone in a gym is the case that matters:
 
+- **The session strip is the pager** (`.session-strip`, `htmlSessionStrip()`).
+  Sticky directly under the header, it answers "where am I" — exercise *n* of
+  *m*, its name, sets done, a finish estimate, one progress segment per
+  exercise weighted by its set count — and it is also how you move: `‹` and `›`
+  at the two ends, 44px each. It sticks at `top:var(--header-h)`, which
+  `trackHeaderHeight()` keeps in sync with the header's real height, so those
+  two controls occupy the same pixels for the whole session.
+
+  They used to live at the bottom of the action bar, and that is the reason
+  they moved. A sticky bottom edge is a function of everything above it: a
+  two-set exercise put **Next** in one place and a six-set exercise put it
+  ~80px lower, and scrolling to the end of the page moved it again by the
+  footer's height. Nothing about a pager should depend on how many sets an
+  exercise happens to have. On the last exercise the forward
+  button carries the finish icon and is labelled *Wrap up*, so the arrow never
+  lies about what is on the other side of it.
 - **The action bar** (`.actionbar`, `htmlActionBar()`) is sticky along the
-  bottom edge and holds *both* the rest timer and the set actions. These used
-  to be two elements — a full-width timer panel and a sticky button row — and
-  the panel rendered around 500px below the fold, so on a phone the timer was
-  off-screen at exactly the moment a logged set started it. Anything needed
-  between sets belongs in this bar. A set is *not* logged from here: that is the
-  done column's job (`toggleSet()`), which is also what starts auto-rest. The
-  bar carries the timer and movement through the session: **Prev.** at the left
-  edge, **Next exercise** / **Wrap up** at the right, skip between them. Nothing
+  bottom edge and holds the rest timer. It replaced a full-width timer panel
+  that rendered around 500px below the fold, so on a phone the timer was
+  off-screen at exactly the moment a logged set started it. A set is *not*
+  logged from here: that is the done column's job (`toggleSet()`), which is
+  also what starts auto-rest. Skip stays in the bar because it is a statement
+  about this exercise rather than navigation, and because it is rare. Nothing
   is stacked below it — the completed exercises used to be listed there as
   "Earlier in this workout", which put a second, half-overlapping account of the
   session under the one you were logging into. That list lives in the session
   sheet (`#overview-dlg`) and nowhere else.
-- **The session strip** (`.session-strip`, `htmlSessionStrip()`) is sticky
-  directly under the header and answers "where am I": exercise *n* of *m*, its
-  name, sets done, a finish estimate, and one progress segment per exercise
-  weighted by its set count. It sticks at `top:var(--header-h)`, which
-  `trackHeaderHeight()` keeps in sync with the header's real height.
+
+  `position:sticky` with `bottom` only ever pulls an element *up* into the
+  scrollport; it never pushes one down. A bar whose static position is already
+  above the fold — a two-set exercise — is therefore not pinned by anything. So
+  `html.session-active` (set in `render()`) makes `main` a screen-tall
+  (`100dvh`) flex column with `margin-top:auto` on the bar and no footer
+  beneath it: the bar's static position *is* the bottom edge, in both the short
+  and the long case.
 - **The session as a whole is a modal sheet, not another panel.** The strip's
-  set counter opens `#overview-dlg`: full-screen on a phone, a centred 560px
+  middle — position, counter and estimate, the full width between the two
+  arrows — opens `#overview-dlg`: full-screen on a phone, a centred 560px
   card on a desktop, over a scrim that dims the workout. It answers one
   question — what am I doing next, in what order — and it used to answer it as
   a panel rendered directly under the action bar, in the same visual language
@@ -147,6 +165,44 @@ phone in a gym is the case that matters:
   declarations, and the narrow breakpoint overrides the same four.
 - Below 640px the per-row field captions are hidden — the head row already
   names the columns — so every set input carries an explicit `aria-label`.
+- **Each fact is on screen once.** Below 640px the exercise heading
+  (`.ex-name`) is screen-reader-only: the strip is pinned above it and already
+  carries the name, so the `<h2>` was a second copy of a label that never
+  scrolls away, 44px into the ~230px the set rows have to live in. For the same
+  reason `.prev-perf` becomes one horizontally-scrolling line there — the last
+  session, the figure you act on, stays in view and the bests are a swipe away
+  rather than a screenful (128px down to 38px).
+- **Short viewports are their own case, not a narrow one.** A phone in
+  landscape is wider than 720px and about 360px tall, so every rule keyed on
+  width alone gave it the desktop treatment and left no room for a single set
+  row. `@media (min-width:720px)` therefore also requires `min-height:600px`,
+  and `@media (max-height:560px)` drops what can be read elsewhere: the
+  exercise's standing note, the session totals, the progress segments.
+
+## Touch
+
+The primary device is a phone held in one hand in a gym, which is a set of
+concrete constraints rather than a style. They are collected under `TOUCH` at
+the end of the stylesheet:
+
+- **Every `:hover` rule in the app lives in one `@media (hover:hover)` block.**
+  A touchscreen has no pointer to move away, so `:hover` latches onto whatever
+  was tapped last and stays there — which lit the delete control beside a
+  logged set bright red and left it that way for the rest of the exercise. Two
+  of the moved rules gained a `:not()` (`.list-row:not(.is-editing)`,
+  `input:hover:not(:focus)`) to keep the state they used to lose to source
+  order.
+- **Fields are 16px under a coarse pointer.** iOS Safari zooms the page in
+  whenever a field below that takes focus, and does not zoom back out; at the
+  13px used elsewhere that fired on every weight and rep field. It is a
+  threshold, not a type choice.
+- **44px is the floor on the logging path** under `pointer:coarse` — buttons,
+  fields, set rows, nav tabs. The delete control is the deliberate exception:
+  it keeps its column but gives up the left 8px of it, so a thumb that misses
+  Done to the right lands on nothing.
+- `-webkit-tap-highlight-color:transparent` and `touch-action:manipulation`,
+  because the platform's tap flash fights `.btn:active` and double-tap-to-zoom
+  delays every control that sits close to its neighbour by design.
 
 ## Data model
 
@@ -539,11 +595,14 @@ or an add refills it without it blinking shut; keyboard shortcuts do not fire
 behind it; discarding raises the confirm dialog *over* it and closes both; and
 on a phone the page behind must not scroll.
 
-Session movement is worth walking end to end: **Prev.** is disabled on the
-first exercise, steps back into a skipped one (un-skipping it), and still works
-from the end-of-session state, where **Next** is disabled instead; <kbd>p</kbd>
-and <kbd>n</kbd> do the same. Check the labels are not truncated at 320px,
-where the chevrons drop out.
+Session movement is worth walking end to end from the strip's pager: `‹` is
+disabled on the first exercise, steps back into a skipped one (un-skipping it),
+and still works from the end-of-session state, where `›` is disabled instead;
+<kbd>p</kbd> and <kbd>n</kbd> do the same. On the last exercise `›` carries the
+finish icon and reads *Wrap up*. Both arrows must land on the same pixels for
+every exercise in the routine, whatever its set count, and at every scroll
+position — that is what they are up there for, and the same test applies to the
+action bar's bottom edge.
 
 Storage durability is testable without four browsers: stub `navigator.storage`
 and `navigator.permissions` before the page scripts run and check Settings
