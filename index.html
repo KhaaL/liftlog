@@ -279,6 +279,9 @@ html.session-active .app-footer{ display:none; }     /* keyboard help is still ?
 .view-head{ display:flex; align-items:baseline; justify-content:space-between; gap:var(--sp-4); flex-wrap:wrap; margin-bottom:var(--sp-5); }
 .view-head h1{ font-weight:700; letter-spacing:-.022em; }
 .view-sub{ color:var(--muted); font-size:var(--fs-sm); }
+/* Today's idle view has no view-head of its own to carry the top-of-view
+   gap (see the note on `main` above), so it supplies the same sp-5 itself. */
+.today-idle{ margin-top:var(--sp-5); }
 .section-title{ display:flex; align-items:center; gap:var(--sp-3); margin:var(--sp-6) 0 var(--sp-3); }
 .section-title h2{ font-weight:700; font-size:var(--fs-md); }
 .section-title .rule{ flex:1; border-top:1px solid var(--border); }
@@ -1202,9 +1205,6 @@ function fmtDuration(ms){
 }
 function fmtDate(ts){
   return new Date(ts).toLocaleDateString(undefined,{ weekday:'short', month:'short', day:'numeric' });
-}
-function fmtDateLong(ts){
-  return new Date(ts).toLocaleDateString(undefined,{ weekday:'long', month:'long', day:'numeric' });
 }
 function fmtTime(ts){
   return new Date(ts).toLocaleTimeString(undefined,{ hour:'numeric', minute:'2-digit' });
@@ -3516,13 +3516,8 @@ function viewHTML(){
 /* ---------- TODAY ---------- */
 function viewToday(){
   const w = state.activeWorkout;
-  /* Mid-session the "Today / <date>" head is 100px of chrome above the thing
-     you came to do, saying what the current nav tab already says — and the
-     workout supplies its own h1. So it only appears when idle. */
   if (w) return htmlActiveWorkout(w);
-  return '<div class="view-head">' +
-      '<div><h1>Today</h1><p class="view-sub">' + esc(fmtDateLong(Date.now())) + '</p></div>' +
-    '</div>' + htmlPicker();
+  return '<div class="today-idle">' + htmlPicker() + '</div>';
 }
 
 function htmlPicker(){
