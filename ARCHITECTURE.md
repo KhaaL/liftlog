@@ -707,3 +707,10 @@ For the storage and install paths specifically:
   errors.
 - **`file://` still works.** Open the file directly and start a workout: no
   service worker, no console errors, everything else unchanged.
+- **An update while the app is already open surfaces itself.** Load the app,
+  edit `index.html` (a plain content change, not `sw.js`), and reload twice —
+  the first reload still shows the old page but a toast should say an update
+  is ready; the second shows the new one. Separately, editing `sw.js` itself
+  (e.g. bumping `CACHE`) should produce the same toast via the older
+  `updatefound`/`SKIP_WAITING` path — the two are independent signals for the
+  same message, and a release can trip either one.

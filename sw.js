@@ -51,22 +51,45 @@ self.addEventListener('fetch', event => {
   if (new URL(req.url).origin !== self.location.origin) return;
 
   if (req.mode === 'navigate'){
-    event.respondWith(freshOrCachedDocument(req));
+    event.respondWith(cachedDocument(req));
+    /* respondWith already answered from cache; this is purely background
+       work, so it needs its own waitUntil or the worker can be recycled
+       mid-fetch and the refresh silently never happens. */
+    event.waitUntil(refreshDocument(req));
     return;
   }
   event.respondWith(caches.match(req).then(hit => hit || fetch(req)));
 });
 
-/* Serves the cached document immediately so an offline launch is instant, and
-   refreshes the cache in the background so the next launch is up to date. */
-function freshOrCachedDocument(req){
-  return caches.open(CACHE).then(cache => {
-    const network = fetch(req).then(res => {
-      if (res && res.ok) cache.put(req, res.clone());
-      return res;
-    }).catch(() => null);
-    return cache.match(req)
+/* Serves the cached document immediately so an offline launch is instant. */
+function cachedDocument(req){
+  return caches.open(CACHE).then(cache =>
+    cache.match(req)
       .then(hit => hit || cache.match('./index.html'))
-      .then(hit => hit || network.then(res => res || fetch(req)));
-  });
+      .then(hit => hit || fetch(req)));
+}
+
+/* Refreshes the cached document in the background so the next launch is up
+   to date, and — unlike the SKIP_WAITING message above, which the page only
+   ever sends when this file's own bytes changed — tells any open tab when
+   the document itself actually changed. A content-only edit (the common
+   case: nothing here in sw.js changes) never triggers 'updatefound', so
+   without this an update could sit fully cached and ready with no toast
+   ever telling anyone a reload would pick it up. */
+function refreshDocument(req){
+  return caches.open(CACHE).then(cache => cache.match(req).then(old =>
+    fetch(req).then(res => {
+      if (!res || !res.ok) return;
+      const put = cache.put(req, res.clone());
+      if (!old) return put;   /* nothing cached yet to compare against */
+      return Promise.all([old.text(), res.clone().text(), put]).then(([oldText, newText]) => {
+        if (newText !== oldText) return notifyClientsOfUpdate();
+      });
+    }).catch(() => null)
+  ));
+}
+
+function notifyClientsOfUpdate(){
+  return self.clients.matchAll({ type:'window' }).then(clients =>
+    clients.forEach(c => c.postMessage({ type:'CONTENT_UPDATED' })));
 }

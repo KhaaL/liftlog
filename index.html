@@ -2038,6 +2038,16 @@ function beep(){
    behaves exactly as it always has. */
 function registerServiceWorker(){
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
+  /* Two separate signals for one message, because they catch different kinds
+     of deploy. 'updatefound' only fires when sw.js's own bytes change — a
+     content-only edit to index.html (the common case) never touches this
+     file, so it never fires. CONTENT_UPDATED is how the worker reports that
+     case instead: it diffs the document on every background refresh (see
+     refreshDocument() in sw.js) and posts here when it actually changed. */
+  navigator.serviceWorker.addEventListener('message', event => {
+    if (event.data && event.data.type === 'CONTENT_UPDATED')
+      toast('Update ready — reopen Liftlog to apply');
+  });
   navigator.serviceWorker.register('sw.js').then(reg => {
     reg.addEventListener('updatefound', () => {
       const fresh = reg.installing;
