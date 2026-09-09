@@ -214,21 +214,20 @@ clear all) is cheap. Currently every one of them is a confirm-and-hope.
 - **Routine picker semantics.** The rows are a single-select group implemented
   with `aria-pressed` toggle buttons. `role="radiogroup"` + `role="radio"` with
   roving tabindex and arrow-key navigation would match the actual behaviour.
-- **Reordering without buttons — done for the session, open for routines.**
-  The session sheet's upcoming exercises now drag by a grip (pointer events;
-  the grip answers the arrow keys, and the up/down buttons stay beside it).
-  The routine editor still has only its up/down buttons; the same handle
-  belongs there, and `reorderMovable()` is the shape to copy — though a routine
-  draft has no done/current range to protect, so it is the simpler case.
+- **Reordering without buttons — done.** Both lists that sort do it by a grip:
+  the session sheet's upcoming exercises and the routine editor's items. Each
+  handle answers the arrow keys too, and the up/down buttons stay beside it.
 - **A drag does not scroll the list it is in.** Dragging a row to the edge of
-  the session sheet stops there rather than scrolling the sheet under it. It
-  matters from roughly eight upcoming exercises up, which no seed routine
-  reaches; the fix is a rAF loop while the pointer sits within ~40px of an
-  edge.
+  the session sheet or the routine editor stops there rather than scrolling the
+  list under it. It matters from roughly eight rows up, which no seed routine
+  reaches; the fix is a rAF loop in `sortMove()` while the pointer sits within
+  ~40px of an edge, and it would serve both lists at once.
 - **Exercise search scope.** `/` filters by name and category only; searching
   notes would help now that notes carry machine codes and cues.
 - **Focus after deletion.** Deleting a row returns focus to `<body>`; it should
-  land on the next row or the list heading.
+  land on the next row or the list heading. Reordering no longer has this
+  problem in either list — a move puts focus back on the control that made it —
+  so `overviewStep()` / `routineStep()` are the pattern to copy.
 - ~~**Timer presets are fixed** at 60/90/120/180s.~~ **Withdrawn** — the
   presets and the action-bar sheet that held them are gone. Rest length is a
   decision made once, in Settings or on the exercise, and `+0:30` covers the
@@ -284,15 +283,13 @@ clear all) is cheap. Currently every one of them is a confirm-and-hope.
   put. Going further means the routine name and *Finish* giving up their row —
   which needs *Finish* to have a second home first (the session sheet is the
   obvious one, and it already holds *Discard*).
-- **Two gestures, two hand-rolled implementations.** `data-longpress` is
-  delegated beside `data-action` (500ms, cancelled by a 10px move or a scroll,
-  and it swallows the click that ends the press); `data-drag` runs its own
-  pointerdown/move/up cycle in the session sheet. They want opposite things
-  from the same 10px — one cancels there, the other starts — so they do not
-  share code, and both keep global state that has to be cleared on paths that
-  do not fire reliably on every touch stack (a long press that ends without a
-  click; a drag whose sheet closes underneath it). A third gesture is the point
-  at which this needs one owner rather than two.
+- **Gestures have one owner — done.** One pointer pipeline, recognisers in
+  `GESTURES`, list behaviours in `SORTABLES` (see **Gestures** in
+  [README.md](README.md)). The next gesture is a recogniser; the next sortable
+  list is three facts. What is still open is one pointer only: pinch and rotate
+  would need the pipeline to track a map of active pointers and hand
+  recognisers a set rather than a point, which is a rewrite of the pipeline
+  rather than an addition to it, and nothing in the app has asked for it.
 - **`--header-h` is measured, not declared.** `trackHeaderHeight()` writes the
   header's height to a custom property so the session strip can stick beneath
   it. A layout that did not need JS to know a CSS value would be better; it
