@@ -1,3 +1,7 @@
+> **Authors notes**
+> _This software was vibe-coded to help me create a simple, noise-less app to track my workouts. It is intended for mobile devices first and foremost, and aims to keep the architecture simple and lean._
+> _The rest of the readme is AI-generated. Hope this software is of use to you!_
+
 # Liftlog
 
 A gym workout tracker that is one HTML file. Open it and it runs — no
