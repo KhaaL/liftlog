@@ -149,7 +149,31 @@ phone in a gym is the case that matters:
   than a different question. The dialog is static markup outside `#main`, so a
   render refills only `#overview-dlg-body` (`overviewSheetHTML()`): calling
   `showModal()` on an open dialog throws, and rebuilding the element would
-  flash the backdrop on every reorder. `syncOverviewSheet()` runs before
+  flash the backdrop on every reorder.
+
+  **Upcoming exercises reorder by dragging their grip** — the app's second
+  gesture, on pointer events because HTML5 drag and drop is not fired by any
+  mobile browser. The grip and nothing else starts a drag, and it is the only
+  element with `touch-action:none`, which is what leaves the rest of a
+  full-screen sheet scrolling: a whole draggable row could not tell a drag from
+  the scroll it began as. The list reorders under the finger, so what you see
+  when you let go is what you get, and closing the sheet abandons a drag rather
+  than dropping it. The grip answers the arrow keys too; the up/down buttons
+  stay beside it, because a grip does not announce what it can do to anyone who
+  is not already holding it.
+
+  Both ways of reordering — and only these two — commit through
+  `reorderMovable()`, over the positions `movableIndices()` reports. Those are
+  the exercises the sheet draws as reorderable rows: upcoming, not skipped, not
+  already finished, not the current one. It has to agree exactly with the
+  else-branch of `overviewSheetHTML()`, and it is a list of positions rather
+  than a range because they are not always contiguous — jumping back to an
+  earlier exercise leaves anything you had already finished sitting among the
+  ones still to come. Reordering deals the exercises back into the same set of
+  positions, so no done or current index (nor `ui.expandedDone`, which is keyed
+  by index) can move however far a row travels.
+
+  `syncOverviewSheet()` runs before
   `applyFocus()`, because `showModal()` takes the focus and whatever the render
   asked for has to be put back after it — including focus the refill itself
   destroyed.
@@ -594,6 +618,15 @@ The session sheet needs its modal edges checked: Esc, the scrim, the X and
 or an add refills it without it blinking shut; keyboard shortcuts do not fire
 behind it; discarding raises the confirm dialog *over* it and closes both; and
 on a phone the page behind must not scroll.
+
+Dragging a row is worth its own pass, by finger as well as by mouse. A drag
+that starts anywhere but the grip must scroll the sheet instead. A drag that
+ends where it began, one cancelled by the system, and one interrupted by Esc
+must all leave the order untouched and no row stuck mid-air. A flick past
+several rows at once must land where it looks like it landed. And the case the
+index arithmetic exists for: finish an exercise, jump ahead and finish another,
+jump back — the finished one now sits among the exercises still to come, and
+dragging a row past it must step over it without moving it.
 
 Session movement is worth walking end to end from the strip's pager: `‹` is
 disabled on the first exercise, steps back into a skipped one (un-skipping it),

@@ -637,14 +637,40 @@ kbd{
 .overview-toggle[aria-expanded="true"] .chev{ transform:rotate(90deg); }
 .done-ex-row.is-current-row{ cursor:default; }
 .overview-row{
-  display:grid; grid-template-columns:24px 1fr auto; gap:var(--sp-2); align-items:center;
+  display:grid; grid-template-columns:44px 1fr auto; gap:var(--sp-2); align-items:center;
   padding:var(--sp-3) var(--sp-2); border-bottom:1px solid var(--border);
 }
-.overview-row .item-idx{ padding-bottom:0; }
+/* The drag handle, and the only thing in the row that starts a drag.
+   `touch-action:none` is what makes the gesture possible at all on a phone:
+   without it the browser claims the pointer for the sheet's own scroll before
+   a single pointermove is delivered. Scoping it to the handle is what leaves
+   the rest of the row scrolling normally. */
+.overview-grip{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:44px; height:44px; padding:0; cursor:grab;
+  background:none; border:1px solid transparent; border-radius:var(--radius);
+  color:var(--muted); touch-action:none;
+  user-select:none; -webkit-user-select:none; -webkit-touch-callout:none;
+}
+.overview-grip .ic{ width:18px; height:18px; }
+/* .item-name and .item-actions carry bottom padding for the routine editor's
+   baseline-aligned grid; here it is 13px of nothing, once per row. */
+.overview-row .item-name,.overview-row .item-actions{ padding-bottom:0; }
+.overview-row.is-dragging{
+  position:relative; z-index:2; border-radius:var(--radius);
+  background:var(--surface); box-shadow:var(--shadow-md); border-bottom-color:transparent;
+}
+.overview-row.is-dragging .overview-grip{ cursor:grabbing; color:var(--accent); }
+/* A drag that selects the row's text as it goes reads as a broken drag. */
+html.is-reordering{ user-select:none; -webkit-user-select:none; }
 @media (max-width:480px){
-  .overview-row{ grid-template-columns:1fr; gap:6px; }
-  .overview-row .item-idx{ display:none; }
-  .overview-row .item-actions{ justify-content:flex-end; }
+  /* Three controls and a name do not fit a 320px line without truncating the
+     name, which is the one thing the running order exists to show. The buttons
+     take a line of their own; the handle spans both, because it belongs to the
+     row rather than to either line. */
+  .overview-row{ grid-template-columns:44px 1fr; gap:4px var(--sp-2); }
+  .overview-grip{ grid-row:1 / span 2; align-self:center; }
+  .overview-row .item-actions{ grid-column:2; justify-content:flex-end; }
 }
 
 /* ============================================================
@@ -1296,6 +1322,7 @@ const IC = {
   box:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="4.5" width="15" height="15" rx="3"/></svg>',
   boxcheck:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="4.5" width="15" height="15" rx="3"/><path d="M8.5 12.2l2.6 2.6 4.9-5.4"/></svg>',
   help:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.4 9.2a2.7 2.7 0 015.2.9c0 1.8-2.6 2.1-2.6 3.9"/><path d="M12 17.3h.01"/></svg>',
+  grip:'<svg class="ic" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>',
   pen:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L18.5 9.5a2.1 2.1 0 00-3-3L5 17zM13.5 6.5l3 3"/></svg>'
 };
 
@@ -2497,22 +2524,50 @@ function reopenExercise(idx){
    bounds-checked to the upcoming sub-range so a done or current exercise can
    never move: that's what keeps every done/current index, and ui.expandedDone
    which is keyed by index, stable while reordering. */
-function moveOverviewExercise(idx, dir){
+/* The exercises the sheet draws as reorderable rows, by index: upcoming, not
+   skipped, not already finished, not the current one. Exactly the else-branch
+   of overviewSheetHTML(), and the two must agree — this is what keeps every
+   done and current index (and ui.expandedDone, which is keyed by index) fixed
+   while the rest move.
+
+   They are not always contiguous. Jumping back to an earlier exercise from the
+   sheet leaves any exercise you had already finished sitting among the ones
+   still to come, as a done row the reorder must step over rather than through.
+   Hence a list of positions rather than a lo..hi range. */
+function movableIndices(w){
+  const out = [];
+  w.exercises.forEach((ex, i) => {
+    if (i > w.currentExerciseIndex && !ex.skipped && !allSetsDone(ex)) out.push(i);
+  });
+  return out;
+}
+/* Move one movable exercise to another movable position. The set of positions
+   is preserved and the exercises are dealt back into it in the new order, so
+   nothing outside that set can be disturbed however far a row travels. Both
+   ways of reordering commit through here: the arrow buttons (one step) and a
+   drag (any distance). Returns the index the exercise ended up at. */
+function reorderMovable(w, from, to){
+  const slots = movableIndices(w);
+  const picked = slots.map(i => w.exercises[i]);
+  picked.splice(to, 0, picked.splice(from, 1)[0]);
+  slots.forEach((slot, k) => { w.exercises[slot] = picked[k]; });
+  return slots[to];
+}
+function moveOverviewExercise(idx, dir, focusPrefix){
   const w = state.activeWorkout; if (!w) return;
-  const lo = w.currentExerciseIndex + 1, hi = w.exercises.length - 1;
-  const j = idx + dir;
-  if (idx < lo || idx > hi || j < lo || j > hi) return;
-  const tmp = w.exercises[idx]; w.exercises[idx] = w.exercises[j]; w.exercises[j] = tmp;
+  const slots = movableIndices(w);
+  const from = slots.indexOf(idx), to = from + dir;
+  if (from === -1 || to < 0 || to >= slots.length) return;
+  const landed = reorderMovable(w, from, to);
   save();
-  /* Focus follows the moved row at its new position j. If that lands it on a
-     bound (its own button is now disabled), focus the other control instead —
-     the row always has at least one enabled button since lo===hi (a single
-     upcoming exercise) would have failed the bounds check above already. */
-  const sameDirStillEnabled = dir < 0 ? j > lo : j < hi;
-  const primary = dir < 0 ? 'ov-up-' : 'ov-down-';
-  const fallback = dir < 0 ? 'ov-down-' : 'ov-up-';
-  ui.focus = (sameDirStillEnabled ? primary : fallback) + j;
+  /* Focus follows the row, and stays on the control the user is holding down
+     unless the move disabled it — at a bound, the other one takes over. A row
+     always has one enabled control, since a single movable exercise cannot
+     have got past the bounds check above. */
+  const atBound = dir < 0 ? to === 0 : to === slots.length - 1;
+  ui.focus = (focusPrefix || (atBound ? (dir < 0 ? 'ov-down-' : 'ov-up-') : (dir < 0 ? 'ov-up-' : 'ov-down-'))) + landed;
   render();
+  announce(w.exercises[landed].name + ' moved to position ' + (to + 1) + ' of ' + slots.length + '.');
 }
 function finishWorkout(){
   const w = state.activeWorkout; if (!w) return;
@@ -3403,6 +3458,11 @@ function wireOverviewSheet(){
   const dlg = $('#overview-dlg');
   if (!dlg) return;
   dlg.addEventListener('close', () => {
+    /* Closing the sheet abandons a drag rather than dropping it: the rows stay
+       in the DOM behind a closed dialog, so without this the pointerup that
+       follows an Escape would commit the order the row happened to be passing
+       through. State is untouched, so the next open rebuilds from it. */
+    dragEnd();
     document.documentElement.classList.remove('sheet-open');
     if (!ui.overviewOpen) return;
     closeOverview();
@@ -3795,7 +3855,10 @@ function htmlDoneRow(ex, i){
    this is only the part that changes, so a reorder refills the body without
    the sheet itself blinking out and back. */
 function overviewSheetHTML(w){
-  const lo = w.currentExerciseIndex + 1, hi = w.exercises.length - 1;
+  /* Which row is at which end of the reorderable range — see movableIndices()
+     for why that is a list of positions rather than the tail of the array. */
+  const slots = movableIndices(w);
+  const lo = slots[0], hi = slots[slots.length - 1];
   let html = '';
 
   w.exercises.forEach((ex, i) => {
@@ -3808,8 +3871,16 @@ function overviewSheetHTML(w){
         '<span class="muted small">' + completed.length + '/' + ex.sets.length + ' sets</span>' +
       '</div>';
     } else {
+      /* The grip is the drag handle and nothing else — a whole draggable row
+         would have no way to tell a drag from the scroll it started with, on
+         the one surface (a full-screen sheet) that has to scroll. It answers
+         the arrow keys too, so the gesture is never the only way to move a
+         row; the buttons beside it stay because a grip does not announce what
+         it can do to anyone who is not already holding it. */
       html += '<div class="overview-row" data-idx="' + i + '">' +
-        '<span class="item-idx">' + (i+1) + '</span>' +
+        '<button type="button" class="overview-grip" id="ov-grip-' + i + '" data-drag="' + i + '" ' +
+          'aria-label="Reorder ' + esc(ex.name) + '. Drag it, or use the up and down arrow keys." ' +
+          'title="Drag to reorder">' + IC.grip + '</button>' +
         '<span class="item-name">' + esc(ex.name) + ' <span class="muted xs">· ' + plural(ex.sets.length, 'set') + ' planned</span></span>' +
         '<span class="item-actions">' +
           '<button type="button" class="icon-btn" id="ov-up-' + i + '" data-action="overview-up" data-idx="' + i + '" ' +
@@ -4715,6 +4786,109 @@ window.addEventListener('scroll', lpCancel, { passive:true });
    -webkit-touch-callout:none on the button's own text. */
 document.addEventListener('contextmenu', e => {
   if (e.target.closest('[data-longpress]')) e.preventDefault();
+});
+
+/* ============================================================
+   DRAG TO REORDER  (the session sheet's upcoming exercises)
+   The app's second gesture, and it wants the opposite of the first: the long
+   press above cancels the moment the pointer moves 10px, which is where a drag
+   only begins. Pointer events rather than HTML5 drag and drop, which no mobile
+   browser fires at all. Only `[data-drag]` starts one, so every other pixel of
+   a full-screen sheet still scrolls.
+   ============================================================ */
+let dg = null;                          /* { el, startY, from } while dragging */
+function dragRows(){
+  const body = $('#overview-dlg-body');
+  return body ? Array.prototype.slice.call(body.querySelectorAll('.overview-row')) : [];
+}
+function dragStart(e){
+  if (e.button != null && e.button !== 0) return;
+  const handle = e.target.closest && e.target.closest('[data-drag]');
+  if (!handle) return;
+  const el = handle.closest('.overview-row');
+  if (!el || dragRows().length < 2) return;
+  /* keeps the press from starting a selection; focus is put back on the grip
+     when the drop lands, so nothing is lost by it */
+  e.preventDefault();
+  dg = { el, startY:e.clientY, from:Number(handle.dataset.drag) };
+  el.classList.add('is-dragging');
+  document.documentElement.classList.add('is-reordering');
+  document.addEventListener('pointermove', dragMove);
+  document.addEventListener('pointerup', dragDrop);
+  document.addEventListener('pointercancel', dragCancel);
+}
+/* The list reorders under the finger rather than at the drop: the row is
+   re-inserted the moment its midpoint passes a neighbour's, so what you are
+   looking at when you let go is what you get. Each swap moves the row's own
+   resting place, so `startY` moves with it by exactly the height that changed
+   hands and the row stays put on screen while the list rearranges around it.
+   The loop is for a flick that crosses several rows between two events. */
+function dragMove(e){
+  if (!dg) return;
+  const el = dg.el;
+  if (!el.isConnected){ dragEnd(); return; }   /* a render took the sheet out */
+  const follow = () => { el.style.transform = 'translateY(' + (e.clientY - dg.startY) + 'px)'; };
+  const past = (other, down) => {
+    const r = other.getBoundingClientRect(), m = el.getBoundingClientRect();
+    const mid = m.top + m.height / 2, theirs = r.top + r.height / 2;
+    if (down ? mid < theirs : mid > theirs) return false;
+    if (down) other.after(el); else other.before(el);
+    dg.startY += down ? r.height : -r.height;
+    return true;
+  };
+  follow();
+  for (let guard = 0; guard < 50; guard++){
+    const rows = dragRows(), at = rows.indexOf(el);
+    if (at === -1) break;
+    const next = rows[at + 1], prev = rows[at - 1];
+    if (!((next && past(next, true)) || (prev && past(prev, false)))) break;
+    follow();
+  }
+}
+function dragDrop(){
+  if (!dg) return;
+  const el = dg.el, from = dg.from;
+  const to = dragRows().indexOf(el);
+  const w = state.activeWorkout;
+  dragEnd();
+  if (!w) return;
+  const slots = movableIndices(w);
+  const at = slots.indexOf(from);
+  if (at === -1 || to === -1 || at === to) return;   /* back where it started */
+  const landed = reorderMovable(w, at, to);
+  save();
+  ui.focus = 'ov-grip-' + landed;
+  render();
+  announce(w.exercises[landed].name + ' moved to position ' + (to + 1) + ' of ' + slots.length + '.');
+}
+/* The DOM was rearranged on the way, so an abandoned drag has to be redrawn
+   from the state it never got to change. */
+function dragCancel(){
+  if (!dg) return;
+  dragEnd();
+  render();
+}
+function dragEnd(){
+  if (!dg) return;
+  dg.el.style.transform = '';
+  dg.el.classList.remove('is-dragging');
+  document.documentElement.classList.remove('is-reordering');
+  document.removeEventListener('pointermove', dragMove);
+  document.removeEventListener('pointerup', dragDrop);
+  document.removeEventListener('pointercancel', dragCancel);
+  dg = null;
+}
+document.addEventListener('pointerdown', dragStart);
+/* The grip answers the arrow keys as well, so a keyboard reaches the control
+   the gesture uses rather than being sent to a different one — and focus stays
+   on the grip across the move, which is what makes holding a key work. */
+document.addEventListener('keydown', e => {
+  const handle = e.target.closest && e.target.closest('[data-drag]');
+  if (!handle) return;
+  const dir = e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0;
+  if (!dir) return;
+  e.preventDefault();
+  moveOverviewExercise(Number(handle.dataset.drag), dir, 'ov-grip-');
 });
 
 document.addEventListener('click', e => {
