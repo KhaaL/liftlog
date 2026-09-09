@@ -3,8 +3,8 @@
 Ideas found while cleaning up the codebase, ordered by value per unit of effort.
 Nothing here is required for the app to work today — these are the next things
 worth doing. Each notes the constraint it puts pressure on, since the
-single-file / zero-dependency property (see [README.md](README.md)) is the thing
-most of them trade against.
+single-file / zero-dependency property (see [ARCHITECTURE.md](ARCHITECTURE.md))
+is the thing most of them trade against.
 
 ---
 
@@ -285,7 +285,7 @@ clear all) is cheap. Currently every one of them is a confirm-and-hope.
   obvious one, and it already holds *Discard*).
 - **Gestures have one owner — done.** One pointer pipeline, recognisers in
   `GESTURES`, list behaviours in `SORTABLES` (see **Gestures** in
-  [README.md](README.md)). The next gesture is a recogniser; the next sortable
+  [ARCHITECTURE.md](ARCHITECTURE.md)). The next gesture is a recogniser; the next sortable
   list is three facts. What is still open is one pointer only: pinch and rotate
   would need the pipeline to track a map of active pointers and hand
   recognisers a set rather than a point, which is a rewrite of the pipeline
