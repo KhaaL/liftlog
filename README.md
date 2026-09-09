@@ -4,21 +4,18 @@
 
 # Liftlog
 
-A gym workout tracker that is one HTML file. Open it and it runs — no
-account, no install step, no server, no build.
+A gym workout tracker that is one HTML file. Open it and it runs.
 
 ## The pitch
 
-Every other tracker asks you to trust a company with your training log, your
-email, and a subscription. Liftlog is the opposite bet: **your data never
-leaves your device unless you tell it to.** It logs sets and rests entirely
+Liftlog is built on the principle that your data never
+leaves your device unless you tell it to. It logs sets and rests entirely
 in the browser's own storage, works with the network off, and can be
 installed to a home screen so it survives exactly like a native app — while
-still being, underneath, a single document you could read start to finish in
-an evening.
+still being, underneath, a single HTML file.
 
 If you ever want a copy elsewhere, you point it at your own S3-compatible
-bucket. Nobody else's server is ever in the loop.
+bucket. 
 
 ## Design principles
 
@@ -33,15 +30,7 @@ bucket. Nobody else's server is ever in the loop.
   phone, gripped one-handed, mid-set, in a gym. Layout is built around a
   fixed vertical budget and 44px touch targets, not shrunk down from a
   desktop design.
-- **Every fact appears once.** If the screen already says which exercise
-  you're on, nothing else on it says it again. Redundant chrome is a bug, not
-  a feature.
-- **No gesture is the only way in.** Anything reachable by holding a finger
-  down (marking a warm-up, dragging to reorder) is also reachable from the
-  keyboard and a plain tap.
-- **Honest about its limits.** Where a trade-off costs something — plaintext
-  credentials for remote storage, no automated test suite, no conflict
-  resolution on sync — that's stated plainly rather than glossed over.
+
 
 ## Running it
 
@@ -52,25 +41,6 @@ For the installable/offline version, serve it over `https://` or
 `localhost` — any static host works, `python3 -m http.server` is enough to
 try it locally.
 
-## Deploying to GitHub Pages
-
-The app has no build step, so Pages can serve the repo as-is:
-
-1. On GitHub: **Settings → Pages**.
-2. Under **Build and deployment → Source**, choose **Deploy from a branch**.
-3. Pick the branch to publish (e.g. `main`) and folder `/ (root)`.
-4. Save. GitHub builds and gives you a URL at
-   `https://<user>.github.io/<repo>/` within a minute or two.
-
-Every push to that branch redeploys automatically — no CI config needed.
-Two things worth knowing:
-
-- The service worker caches by file list (see `sw.js`), so after changing
-  which static files ship, bump `CACHE` there or previously-installed
-  clients will keep serving the old set.
-- `manifest.webmanifest`'s icon paths are relative, so they resolve
-  correctly whether Pages serves the app from the domain root or a
-  `/<repo>/` subpath — no changes needed for a project-page URL.
 
 ## Further reading
 
