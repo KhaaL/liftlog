@@ -95,9 +95,54 @@ control is a new table entry rather than a new listener:
 | `data-bind="…"` | `binders` | input (per keystroke, no re-render) |
 | `data-change="…"` | `changeHandlers` | change (commit-on-blur controls, file pickers) |
 | `data-form="…"` | `submit` listener | form submit |
+| `data-longpress="…"` | `actions` | a 500ms hold (see **Gestures**) |
+| `data-drag="…"` | `SORTABLES` | a drag of the row the handle is in |
 
 Handlers receive the element's `dataset`, so parameters travel as `data-id`,
 `data-idx`, `data-field`, `data-sid`.
+
+## Gestures
+
+One pointer pipeline, several recognisers, and behaviours on top. There used to
+be two hand-rolled implementations — a long press and a drag — because they
+want opposite things from the same 10px of movement: one abandons the press
+there, the other only begins. Everything else they shared, and it was the
+fiddly half.
+
+| Layer | Job | Where |
+| --- | --- | --- |
+| press pipeline | the four pointer events, once, for every gesture | `pointerdown`/`move`/`up`/`cancel` on `document` |
+| recogniser | when a press becomes a gesture, and what it does then | `GESTURES` |
+| behaviour | what a recognised gesture means to a particular list | `SORTABLES` |
+
+The pipeline owns exactly what both gestures had to get right separately:
+which element a press belongs to, ignoring secondary buttons, the origin and
+delta, tearing down on every path a touch stack does not guarantee (a press
+that ends without a click, an element re-rendered mid-press, a sheet closed
+underneath a drag — `cancelGesture()` is that last one's hook), and swallowing
+the click a recognised gesture leaves behind.
+
+A recogniser declares when it fires and what it does: `hold` recognises on a
+timer, `slop` alone on the first move past it, neither on the pointerdown
+itself. `cancelOnMove` / `cancelOnScroll` say what abandons a press before it
+is recognised; `grab` stops a selection starting; `swallow` eats the trailing
+click. `onStart` and `onRecognise` may return `false` to decline — which is how
+a future swipe would test its axis at the moment it has a delta to test.
+
+So a new gesture is a recogniser (a swipe to reveal a row's actions:
+`{ slop:14, onRecognise, onMove, onEnd }`), and a new sortable list is an entry
+in `SORTABLES` naming its container, its row, and what a move means. Neither
+touches the pipeline. The deliberate limit is one pointer: pinch and rotate
+would be a different pipeline rather than a recogniser, and nothing here wants
+one.
+
+**Two lists sort**, and they share everything but those three facts: the
+session sheet's upcoming exercises and the routine editor's items. Both reorder
+under the finger rather than at the drop, both commit through the same
+`drop(from, to, focus)`, and the arrow buttons beside each handle are a drag of
+exactly one place through that same function — they differ only in where focus
+goes afterwards. Indices are positions among the rows on screen, which is what
+both models want and what a drop has to compute anyway.
 
 ## Layout on a phone
 
@@ -587,9 +632,11 @@ timer uses `<output>`, dialogs are native `<dialog>`, and
 theme is one `:root[data-theme="…"]` block plus an entry in `THEMES`.
 
 **No gesture is the only way in.** The long press that marks a warm-up
-(`data-longpress` on the done cell, delegated like `data-action`) has no
-keyboard equivalent, so the set number stays an ordinary button with the same
-toggle on it. Anything reachable only by holding a finger down is a bug.
+(`data-longpress` on the done cell) has no keyboard equivalent, so the set
+number stays an ordinary button with the same toggle on it. A drag handle has
+no keyboard equivalent either, so it answers the arrow keys itself and keeps
+the up/down buttons beside it. Anything reachable only by holding a finger down
+is a bug.
 
 ## Testing
 
