@@ -152,8 +152,8 @@ phone in a gym is the case that matters:
 
 - **The session strip is the pager** (`.session-strip`, `htmlSessionStrip()`).
   Sticky directly under the header, it answers "where am I" — exercise *n* of
-  *m*, its name, sets done, a finish estimate, one progress segment per
-  exercise weighted by its set count — and it is also how you move: `‹` and `›`
+  *m*, sets done, a finish estimate, one progress segment per exercise
+  weighted by its set count — and it is also how you move: `‹` and `›`
   at the two ends, 44px each. It sticks at `top:var(--header-h)`, which
   `trackHeaderHeight()` keeps in sync with the header's real height, so those
   two controls occupy the same pixels for the whole session.
@@ -171,9 +171,8 @@ phone in a gym is the case that matters:
   that rendered around 500px below the fold, so on a phone the timer was
   off-screen at exactly the moment a logged set started it. A set is *not*
   logged from here: that is the done column's job (`toggleSet()`), which is
-  also what starts auto-rest. Skip stays in the bar because it is a statement
-  about this exercise rather than navigation, and because it is rare. Nothing
-  is stacked below it — the completed exercises used to be listed there as
+  also what starts auto-rest. Nothing is stacked below it — the completed
+  exercises used to be listed there as
   "Earlier in this workout", which put a second, half-overlapping account of the
   session under the one you were logging into. That list lives in the session
   sheet (`#overview-dlg`) and nowhere else.
@@ -235,13 +234,14 @@ phone in a gym is the case that matters:
   declarations, and the narrow breakpoint overrides the same four.
 - Below 640px the per-row field captions are hidden — the head row already
   names the columns — so every set input carries an explicit `aria-label`.
-- **Each fact is on screen once.** Below 640px the exercise heading
-  (`.ex-name`) is screen-reader-only: the strip is pinned above it and already
-  carries the name, so the `<h2>` was a second copy of a label that never
-  scrolls away, 44px into the ~230px the set rows have to live in. For the same
-  reason `.prev-perf` becomes one horizontally-scrolling line there — the last
-  session, the figure you act on, stays in view and the bests are a swipe away
-  rather than a screenful (128px down to 38px).
+- **Each fact is on screen once.** The exercise name lives in exactly one
+  place — the workout-pad heading (`.ex-name`) — not in the per-exercise
+  `.ex-head` it used to duplicate, and not in the session strip's pager,
+  which shows position (`n/m`) only. Below 640px the heading truncates with
+  an ellipsis rather than wrapping, since that row also has to fit the Finish
+  button. For the same reason `.prev-perf` becomes one horizontally-scrolling
+  line there — the last session, the figure you act on, stays in view and the
+  bests are a swipe away rather than a screenful (128px down to 38px).
 - **Short viewports are their own case, not a narrow one.** A phone in
   landscape is wider than 720px and about 360px tall, so every rule keyed on
   width alone gave it the desktop treatment and left no room for a single set
@@ -578,9 +578,9 @@ you can.
   inline styles left are genuinely computed values: the rest timer's drain
   width and the session strip's per-exercise segment weights and fills.
 - **One timer, one set of ids.** `drawTimer()` and `paintTimerTime()` look up
-  `#timer-panel`, `#timer-time`, `#timer-fill`, `#timer-status` and
-  `#timer-toggle` singly, so exactly one copy of the action bar may be in the
-  document. Two would leave the second silently unpainted.
+  `#timer-panel`, `#timer-time`, `#timer-fill` and `#timer-toggle` singly, so
+  exactly one copy of the action bar may be in the document. Two would leave
+  the second silently unpainted.
 - **Closed vocabularies live in `DOMAIN CONSTANTS`.** Units, themes, rest bounds,
   routine-item bounds, set types and the shortcut list each have exactly one
   definition, and the templates, validators and importers all read from it. The
