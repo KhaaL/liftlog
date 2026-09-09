@@ -401,8 +401,6 @@ kbd{
    ACTIVE WORKOUT
    ============================================================ */
 .workout-head{ display:flex; justify-content:space-between; align-items:flex-start; gap:var(--sp-4); flex-wrap:wrap; }
-.workout-title{ font-size:var(--fs-xl); font-weight:700; letter-spacing:-.022em; }
-.workout-meta{ color:var(--muted); font-size:var(--fs-sm); display:flex; gap:var(--sp-3); flex-wrap:wrap; margin-top:2px; }
 .workout-head-actions{ display:flex; gap:var(--sp-2); flex-wrap:wrap; }
 
 /* Where-am-I strip: pinned under the header for the whole session, so
@@ -926,8 +924,11 @@ pre.code code{ background:none; border:0; padding:0; font-size:inherit; white-sp
   .header-inner{ gap:var(--sp-3); }
   .workout-head{ flex-wrap:nowrap; align-items:flex-start; }
   .workout-head > div:first-child{ min-width:0; }
-  .workout-title{ font-size:var(--fs-md); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ex-name{ font-size:var(--fs-md); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .workout-head-actions{ flex:none; flex-wrap:nowrap; }
+  .workout-pad{ padding-top:var(--sp-2); padding-bottom:var(--sp-2); }
+  /* a standing coaching note, not this set's instructions */
+  .ex-notes{ display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
   /* weight and reps are not the same size problem: "142.5" needs room, "12"
      does not, and the fixed columns leave little to share out at 320px */
   .sets{ --sets-cols:34px 1.4fr 1fr 50px 46px 40px; gap:6px; }
@@ -946,32 +947,15 @@ pre.code code{ background:none; border:0; padding:0; font-size:inherit; white-sp
   .set-row input{ min-height:40px; }
   .set-done-btn{ padding-inline:0; }
 }
-/* The exercise name is stated once. Below 640px the strip is pinned to the
-   header for the whole session and already carries it, so the panel heading
-   was a second copy of a label that never scrolls away — 44px of the ~230px
-   the set rows have to live in. It stays in the accessibility tree, because
-   the sets group needs a heading above it. */
-@media (max-width:640px){
-  .ex-name{
-    position:absolute; width:1px; height:1px; padding:0; margin:-1px;
-    overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0;
-  }
-  /* the routine name and totals are session furniture, not the task */
-  .workout-pad{ padding-top:var(--sp-2); padding-bottom:var(--sp-2); }
-  /* a standing coaching note, not this set's instructions */
-  .ex-notes{ display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
-}
 /* A phone in landscape is 360-420px tall. Everything above was sized against
    width, so the panel's own furniture filled the screen and the set rows —
    the only reason the screen exists — rendered below the action bar. What goes
-   here is what can be read somewhere else: the exercise's standing note, the
-   session totals, and the per-exercise progress segments (the strip still
-   says "2/6" in words). */
+   here is what can be read somewhere else: the exercise's standing note and
+   the per-exercise progress segments (the strip still says "2/6" in words). */
 @media (max-height:560px){
-  .ex-notes,.workout-meta,.seg-track{ display:none; }
+  .ex-notes,.seg-track{ display:none; }
   .ex-panel .pad{ padding-top:var(--sp-2); padding-bottom:var(--sp-2); }
   .session-strip{ padding-bottom:var(--sp-2); margin-bottom:var(--sp-3); }
-  .workout-title{ font-size:var(--fs-md); }
   .ex-name{ font-size:var(--fs-md); }
   /* the head row names the columns; a caption per row costs ~19px per set,
      which is a whole extra row's worth every three sets */
@@ -1205,9 +1189,6 @@ function fmtDuration(ms){
 }
 function fmtDate(ts){
   return new Date(ts).toLocaleDateString(undefined,{ weekday:'short', month:'short', day:'numeric' });
-}
-function fmtTime(ts){
-  return new Date(ts).toLocaleTimeString(undefined,{ hour:'numeric', minute:'2-digit' });
 }
 function fmtNum(n){
   if (n == null || isNaN(n)) return '–';
@@ -2006,9 +1987,6 @@ function tickTimer(){
     if ((timer.endsAt - Date.now())/1000 <= 0) completeRest();
     else paintTimerTime();
   }
-  /* keep elapsed workout time fresh */
-  const el = $('#workout-elapsed');
-  if (el && state.activeWorkout) el.textContent = fmtDuration(Date.now() - state.activeWorkout.startedAt);
 }
 let audioCtx = null;
 let scheduledBlips = [];
@@ -3571,12 +3549,7 @@ function htmlActiveWorkout(w){
     '<div class="pad workout-pad">' +
       '<div class="workout-head">' +
         '<div>' +
-          '<h1 class="workout-title" id="workout-title" tabindex="-1">' + esc(w.routineName) + '</h1>' +
-          '<p class="workout-meta">' +
-            '<span class="narrow-hide">Started ' + fmtTime(w.startedAt) + '</span>' +
-            '<span class="mono" id="workout-elapsed">' + fmtDuration(Date.now() - w.startedAt) + '</span>' +
-            '<span>' + fmtNum(workoutVolume(w)) + ' ' + unitLabel() + '</span>' +
-          '</p>' +
+          (ex ? '<h2 class="ex-name" id="workout-title" tabindex="-1">' + esc(ex.name) + '</h2>' : '') +
         '</div>' +
         '<div class="workout-head-actions">' +
           '<button type="button" class="btn btn-primary" data-action="finish-workout">' + IC.flag +
@@ -3782,7 +3755,6 @@ function htmlCurrentExercise(w, ex){
 
   return '<div class="pad divider-top" id="ex-panel-top" tabindex="-1">' +
     '<div class="ex-head">' +
-      '<h2 class="ex-name">' + esc(ex.name) + '</h2>' +
       '<span class="ex-tags">' +
         (ex.category ? '<span class="tag">' + esc(ex.category) + '</span>' : '') +
         '<span class="tag">target ' + ex.sets.length + ' × ' + (ex.targetReps != null ? ex.targetReps : '–') +
