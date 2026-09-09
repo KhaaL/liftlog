@@ -218,11 +218,6 @@ strong{ font-weight:650; }
   position:sticky; top:0; z-index:20;
 }
 .header-inner{ display:flex; align-items:center; gap:var(--sp-4); min-height:52px; padding-top:var(--sp-1); padding-bottom:var(--sp-1); }
-.wordmark{
-  font-size:19px; font-weight:700; letter-spacing:-.015em;
-  display:flex; align-items:center; gap:8px; margin:0; user-select:none;
-}
-.wordmark .mark{ color:var(--accent); }
 /* flex:1 + min-width:0 is what makes the list below actually scroll: without
    it the <ul> sizes to its content and pushes the last tab off-screen. */
 .main-nav{ flex:1; min-width:0; position:relative; }
@@ -1011,7 +1006,6 @@ pre.code code{ background:none; border:0; padding:0; font-size:inherit; white-sp
   .sets:not(.no-rpe) .sets-head span:first-child{ display:none; }
 }
 @media (max-width:480px){
-  .wordmark .label{ display:none; }
   /* detail that a 320px-wide head cannot afford: the start time (elapsed time
      is the useful figure) and the word "workout" on the finish button */
   .narrow-hide{ display:none; }
@@ -1095,12 +1089,6 @@ button,.btn,.icon-btn,.nav-btn,.strip-step,.strip-num,.set-num,.done-ex-row,.his
 
 <header class="app-header">
   <div class="wrap header-inner">
-    <p class="wordmark">
-      <svg class="mark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
-        <path d="M2 12h2M20 12h2M6.5 7v10M17.5 7v10M6.5 12h11"/>
-      </svg>
-      <span class="label">Liftlog</span>
-    </p>
     <nav class="main-nav" aria-label="Main">
       <ul id="nav-list">
         <li><button type="button" class="nav-btn" data-action="nav" data-view="today">Today</button></li>
