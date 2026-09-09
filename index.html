@@ -2818,8 +2818,8 @@ function applyFullBackup(obj){
    server of its own, so there is nothing to relay through. Credentials are
    kept in this browser's localStorage in plain text (there is no other
    place to put them in a server-less, dependency-free app); anyone with
-   access to this browser profile can read them. See README for why the
-   S3 API was chosen over WebDAV, and the bucket CORS policy it needs.
+   access to this browser profile can read them. See ARCHITECTURE.md for why
+   the S3 API was chosen over WebDAV, and the bucket CORS policy it needs.
    ============================================================ */
 const LS_REMOTE_KEY = 'liftlog.v1.remote';
 const REMOTE_OBJECT_KEY_DEFAULT = 'liftlog-backup.json';
