@@ -280,7 +280,7 @@ clear all) is cheap. Currently every one of them is a confirm-and-hope.
 - **Landscape is usable, not designed for.** `@media (max-height:560px)` gets a
   phone on its side down to roughly one visible set row at the top of the page;
   the rest are a scroll away, behind a strip and an action bar that both stay
-  put. Going further means the routine name and *Finish* giving up their row —
+  put. Going further means the exercise name and *Finish* giving up their row —
   which needs *Finish* to have a second home first (the session sheet is the
   obvious one, and it already holds *Discard*).
 - **Gestures have one owner — done.** One pointer pipeline, recognisers in

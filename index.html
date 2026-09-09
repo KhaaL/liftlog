@@ -596,7 +596,6 @@ kbd{
 .ab-row .ab-grow{ flex:1; min-width:0; }
 .ab-row .btn{ white-space:nowrap; }
 .ab-icon{ flex:none; min-width:44px; padding-inline:10px; }
-.actionbar .timer-status{ margin-top:var(--sp-2); }
 @keyframes flash-done{ 0%,100%{ background:var(--surface);} 30%{ background:var(--success-soft);} }
 .actionbar.is-done{ animation:flash-done 1.2s ease 2; }
 /* Width alone is the wrong test: a phone in landscape is wider than 720px and
@@ -607,13 +606,6 @@ kbd{
   .sets{ max-width:600px; }
   .ab-time{ font-size:34px; min-width:92px; }
 }
-@media (max-width:719px),(max-height:599px){
-  .actionbar .timer-status{
-    position:absolute; width:1px; height:1px; padding:0; margin:-1px;
-    overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0;
-  }
-}
-
 .done-ex-row{
   width:100%; display:flex; align-items:center; gap:var(--sp-3); text-align:left;
   background:none; border:0; border-bottom:1px solid var(--border); cursor:pointer;
@@ -648,11 +640,6 @@ kbd{
   .overview-row .grip{ grid-row:1 / span 2; align-self:center; }
   .overview-row .item-actions{ grid-column:2; justify-content:flex-end; }
 }
-
-/* ============================================================
-   REST TIMER  (rendered inside the action bar)
-   ============================================================ */
-.timer-status{ font-size:var(--fs-sm); color:var(--muted); }
 
 /* ============================================================
    LISTS (routines, history, exercises)
@@ -1289,7 +1276,6 @@ const IC = {
   pause:'<svg class="ic" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 5h3.4v14H7zM13.6 5H17v14h-3.4z"/></svg>',
   timer:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9.5V13l2.5 2M9.5 2.5h5"/></svg>',
   flag:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 21V4"/><path d="M5 4h13l-2.5 4L18 12H5"/></svg>',
-  skip:'<svg class="ic" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 5.5v13l8-6.5zM16 5h2.5v14H16z"/></svg>',
   box:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="4.5" width="15" height="15" rx="3"/></svg>',
   boxcheck:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="4.5" width="15" height="15" rx="3"/><path d="M8.5 12.2l2.6 2.6 4.9-5.4"/></svg>',
   help:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.4 9.2a2.7 2.7 0 015.2.9c0 1.8-2.6 2.1-2.6 3.9"/><path d="M12 17.3h.01"/></svg>',
@@ -1689,7 +1675,7 @@ function seedState(){
     id:uid(), routineId:rid, routineName:rname, startedAt:started, finishedAt:started + mins*60000,
     notes:'', currentExerciseIndex:blocks.length, exercises:blocks
   });
-  const upper = routines[0], lower = routines[1];
+  const upper = routines[0], lower = routines[1], full = routines[2];
   const workouts = [
     mkWo(upper.id,'A - Upper Body (Machine Focus)', at(2,17), 48, [
       exBlock('Chest Press Machine',90,[set(40,10,3),set(40,10,2),set(35,9,2)]),
@@ -1700,6 +1686,16 @@ function seedState(){
       exBlock('Leg Press Machine',120,[set(90,10,3),set(90,10,2),set(80,9,2)]),
       exBlock('Leg Extension Machine',60,[set(35,12,3),set(35,12,2)]),
       exBlock('Calf Raise Machine',40,[set(50,15,3),set(50,15,2)])
+    ]),
+    /* Shares four exercises with A and B above, at lower weight — so a fresh
+       install already has a real two-point trend to show in History →
+       Progress, instead of every exercise reading "log this twice" until the
+       user has trained long enough to repeat one for real. */
+    mkWo(full.id,'C - Full Body (Machine Blend)', at(9,18), 42, [
+      exBlock('Leg Press Machine',90,[set(80,10,3),set(80,10,2),set(70,9,2)]),
+      exBlock('Chest Press Machine',90,[set(35,10,3),set(35,9,2),set(30,8,2)]),
+      exBlock('Seated Row Machine',90,[set(40,10,3),set(40,9,2),set(35,8,2)]),
+      exBlock('Shoulder Press Machine',70,[set(25,10,3),set(25,9,2),set(20,8,1)])
     ])
   ].sort((a,b) => b.startedAt - a.startedAt);
 
@@ -1951,16 +1947,10 @@ function drawTimer(){
   paintTimerTime();
   const rem = timerRemaining();
   const bar = $('#timer-panel');
-  const status = $('#timer-status');
   const toggle = $('#timer-toggle');
   if (bar){
     bar.classList.toggle('is-running', timer.running);
     bar.classList.toggle('is-done', timer.done);
-  }
-  if (status){
-    status.textContent = timer.done ? 'Rest complete — start your next set.'
-      : timer.running ? 'Resting… press space to pause.'
-      : (rem < timer.total ? 'Paused.' : 'Ready. Timer starts after each completed set.');
   }
   if (toggle){
     const label = timer.running ? 'Pause' : (rem < timer.total && !timer.done ? 'Resume' : 'Start');
@@ -3579,7 +3569,7 @@ function htmlActiveWorkout(w){
   html += htmlSessionNote(w);
   html += '</section>';
 
-  html += htmlActionBar(ex);
+  html += htmlActionBar();
   /* The screen ends at the action bar. Everything about the session as a whole
      is in the sheet, which is a dialog outside #main — see syncOverviewSheet(). */
   return html;
@@ -3600,7 +3590,7 @@ function htmlSessionStrip(w){
   const cur = w.exercises[idx];
   const mins = sessionEstimate(w);
 
-  const where = cur ? '<span class="ex-of">' + (idx+1) + '/' + total + '</span> · ' + esc(cur.name)
+  const where = cur ? '<span class="ex-of">' + (idx+1) + '/' + total + '</span>'
     : total ? '<strong>Session complete</strong>'
     : '<span class="muted">No exercises yet</span>';
 
@@ -3869,9 +3859,8 @@ function overviewSubtitle(w){
 
    It carries the timer and nothing else that has a fixed home elsewhere. A set
    is logged from its own row's done column (`toggleSet()`); moving through the
-   session is the strip's pager. Skip stays here because it is a statement
-   about this exercise rather than navigation, and because it is rare. */
-function htmlActionBar(ex){
+   session is the strip's pager. */
+function htmlActionBar(){
   return '<div class="actionbar" id="timer-panel" aria-label="Rest timer">' +
     '<div class="ab-drain" aria-hidden="true"><i id="timer-fill"></i></div>' +
     '<div class="ab-rows">' +
@@ -3879,11 +3868,8 @@ function htmlActionBar(ex){
         '<output id="timer-time" class="ab-time" aria-label="Rest time remaining">' + fmtClock(timer.remaining) + '</output>' +
         '<button type="button" class="btn" id="timer-toggle" data-action="timer-toggle">' + IC.play + '<span>Start</span></button>' +
         '<button type="button" class="btn ab-icon" data-action="timer-add30" aria-label="Add 30 seconds to rest">+0:30</button>' +
-        (ex ? '<button type="button" class="btn btn-quiet ab-icon push-right" data-action="skip-exercise" ' +
-          'aria-label="Skip this exercise" title="Skip this exercise">' + IC.skip + '</button>' : '') +
       '</div>' +
     '</div>' +
-    '<p class="timer-status" id="timer-status">Ready.</p>' +
   '</div>';
 }
 
@@ -4571,7 +4557,6 @@ const actions = {
   'toggle-warmup'(d, el){ toggleWarmup(d.id, el && el.id); },
   'add-set'(){ addSet(); },
   'delete-set'(d){ deleteSet(d.id); },
-  'skip-exercise'(){ advanceExercise(true); },
   'next-exercise'(){ advanceExercise(false); },
   'prev-exercise'(){ goToPreviousExercise(); },
   'toggle-done-ex'(d){
