@@ -658,6 +658,16 @@ kbd{
 .hist-cell .k{ color:var(--muted); font-size:var(--fs-xs); }
 .hist-cell b{ font-weight:650; }
 .hist-detail{ border-bottom:1px solid var(--border); background:var(--surface-2); padding:var(--sp-4); }
+.md-note{ border-left:3px solid var(--border-strong); padding-left:var(--sp-3); }
+.md-note p{ margin:0 0 var(--sp-2); }
+.md-note p:last-child{ margin-bottom:0; }
+.md-note ul,.md-note ol{ margin:0 0 var(--sp-2); padding-left:1.2em; }
+.md-note li{ margin-bottom:var(--sp-1); }
+.md-note a{ color:var(--accent); }
+.md-h{ font-weight:650; margin:0 0 var(--sp-1); }
+.md-h1{ font-size:var(--fs-md); }
+.md-h2{ font-size:var(--fs-base); }
+.md-h3{ font-size:var(--fs-sm); }
 .hist-ex{ margin-bottom:var(--sp-3); }
 .hist-ex:last-child{ margin-bottom:0; }
 .hist-ex h4{ margin:0 0 var(--sp-1); font-size:var(--fs-sm); font-weight:650; }
@@ -1159,6 +1169,60 @@ function esc(str){
   return String(str == null ? '' : str)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+/* Minimal markdown → HTML for session notes: headings, bold/italic, inline
+   code, links and single-level lists. No tables, no fenced code blocks, no
+   nested lists — notes are a phone-typed paragraph or two, not a document.
+   Everything runs on the already-`esc()`-escaped string, so the only tags
+   this ever emits are the ones written here; no user input can introduce a
+   new one. */
+function mdInline(s){
+  const codes = [];
+  s = s.replace(/`([^`\n]+)`/g, (m, c) => { codes.push(c); return '\x01MDCODE\x01' + (codes.length - 1) + '\x01MDCODE\x01'; });
+  s = s.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (m, text, url) => {
+    if (!/^(https?:|mailto:)/i.test(url)) return m;
+    return '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + text + '</a>';
+  });
+  s = s.replace(/\*\*([^*\n]+?)\*\*|__([^_\n]+?)__/g, (m, a, b) => '<strong>' + (a || b) + '</strong>');
+  s = s.replace(/\*([^*\n]+?)\*|_([^_\n]+?)_/g, (m, a, b) => '<em>' + (a || b) + '</em>');
+  return s.replace(/\x01MDCODE\x01(\d+)\x01MDCODE\x01/g, (m, i) => '<code>' + codes[i] + '</code>');
+}
+function mdToHtml(raw){
+  const lines = esc(raw).split(/\r?\n/);
+  const isListLine = l => /^\s*([-*]|\d+\.)\s+(.*)$/.exec(l);
+  const isHeadingLine = l => /^(#{1,3})\s+(.*)$/.exec(l);
+  const out = [];
+  let i = 0;
+  while (i < lines.length){
+    if (!lines[i].trim()){ i++; continue; }
+    const h = isHeadingLine(lines[i]);
+    if (h){
+      out.push('<div class="md-h md-h' + h[1].length + '">' + mdInline(h[2]) + '</div>');
+      i++;
+      continue;
+    }
+    const l = isListLine(lines[i]);
+    if (l){
+      const ordered = /^\d+\.$/.test(l[1]);
+      const items = [];
+      while (i < lines.length){
+        const m2 = isListLine(lines[i]);
+        if (!m2) break;
+        items.push('<li>' + mdInline(m2[2]) + '</li>');
+        i++;
+      }
+      const tag = ordered ? 'ol' : 'ul';
+      out.push('<' + tag + '>' + items.join('') + '</' + tag + '>');
+      continue;
+    }
+    const para = [];
+    while (i < lines.length && lines[i].trim() && !isHeadingLine(lines[i]) && !isListLine(lines[i])){
+      para.push(lines[i]);
+      i++;
+    }
+    out.push('<p>' + para.map(mdInline).join('<br>') + '</p>');
+  }
+  return out.join('');
 }
 function uid(){
   if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
@@ -3655,7 +3719,7 @@ function htmlSessionNote(w){
   }
   return '<div class="pad divider-top">' +
     '<label class="field"><span class="cap">Session notes</span>' +
-    '<textarea id="wnotes" data-bind="wnotes" rows="2" placeholder="Optional — how did it feel?">' + esc(w.notes || '') + '</textarea></label></div>';
+    '<textarea id="wnotes" data-bind="wnotes" rows="4" placeholder="Optional — how did it feel? Supports **bold**, _italic_, # headings, - lists, [links](url)">' + esc(w.notes || '') + '</textarea></label></div>';
 }
 
 function htmlCurrentExercise(w, ex){
@@ -4064,7 +4128,7 @@ function htmlWorkoutDetail(w){
   if (ui.editWorkoutId === w.id) return htmlWorkoutEditor(w);
   let html = '<div class="hist-detail">' +
     '<div class="hedit-bar"><button type="button" class="btn" data-action="history-edit" data-id="' + w.id + '">' + IC.pen + '<span>Edit session</span></button></div>';
-  if (w.notes) html += '<p class="small quote mb-3">“' + esc(w.notes) + '”</p>';
+  if (w.notes) html += '<div class="small mb-3 md-note">' + mdToHtml(w.notes) + '</div>';
   let shown = 0;
   w.exercises.forEach(ex => {
     /* every completed set is shown: countForPR only decides what counts as a
@@ -4102,7 +4166,7 @@ function htmlWorkoutEditor(w){
       '<label class="field"><span class="cap">Finished</span>' +
         '<input type="datetime-local" data-change="workout-time" data-field="finishedAt" value="' + toLocalInput(w.finishedAt) + '"></label>' +
       '<label class="field span-all"><span class="cap">Notes</span>' +
-        '<textarea rows="2" data-bind="hwo" data-field="notes">' + esc(w.notes || '') + '</textarea></label>' +
+        '<textarea rows="4" data-bind="hwo" data-field="notes">' + esc(w.notes || '') + '</textarea></label>' +
     '</div>';
   w.exercises.forEach((ex, xi) => {
     html += '<div class="hedit-ex">' +
