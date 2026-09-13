@@ -47,7 +47,7 @@ holding an IIFE. Within each part, sections are marked by banner comments
 | Section | Responsibility |
 | --- | --- |
 | `UTILITIES` | Formatting, escaping, numeric coercion, unit conversion, icons |
-| `DOMAIN CONSTANTS` | The closed vocabularies: units, themes, bounds, shortcuts |
+| `DOMAIN CONSTANTS` | The closed vocabularies: units, themes and their light/dark scheme, bounds, shortcuts |
 | `STORAGE` | `localStorage` read/write, schema migrations, normalization |
 | `REMOTE STORAGE` | Optional S3-compatible backup/restore, config, request signing |
 | `SEED / SAMPLE DATA` | The starting exercise library and program routines |
@@ -59,7 +59,7 @@ holding an IIFE. Within each part, sections are marked by banner comments
 | `RENDERING` | `render()` plus pure `viewX()` / `htmlX()` string builders |
 | `EVENT HANDLING` | Delegated `click` / `input` / `change` / `submit` listeners |
 | `KEYBOARD SHORTCUTS` | Global key handling |
-| `INIT` | Theme, timer restore, first paint |
+| `INIT` | Theme and system-bar colour, timer restore, first paint |
 
 ### The render loop
 
@@ -570,6 +570,64 @@ you can.
   browsers).
 - **Manual, not sync.** There's no conflict resolution because there's no
   automatic sync — each Backup/Restore fully overwrites one side, on request.
+
+## Progress metrics
+
+The History screen reads the same log two ways, switched by the Exercise /
+Muscle group tabs in the Progress panel.
+
+**Per exercise** — `trendPanel()`. One movement over time, judged by
+`exMetric()`: estimated 1RM for loaded work, longest hold for `time`, best set
+in reps for `bw`. Both modes call `exMetric()` and `exSessions()`, so the chart
+and the breakdown list can never disagree about what "better" means.
+
+**Per muscle group** — `musclePanel()`. Every movement carrying the same
+`category` (the field the UI labels "Muscle group"; blank collapses to
+`General`), charted as **working sets per week** — a completed set that is not
+a warm-up, i.e. `countsVolume()`.
+
+Sets, not tonnage, and deliberately so. Load is a property of the machine, not
+of the muscle: a dip on an outdoor bar, a plate-loaded press and a cable fly all
+train the chest at numbers that cannot be summed or compared, and bodyweight
+work carries no weight at all — it contributes exactly zero to `sumVolume()`, so
+an outdoor-gym session would read as a rest day. A completed working set is the
+one unit that means the same thing on all of them. Load progression is not
+thrown away, it just stays where it is honest: per movement, in the breakdown
+list below the chart, each with its own metric and its own first-to-latest
+delta. Reading them side by side is how an outdoor session and a machine
+session get compared without pretending their numbers are interchangeable.
+
+`weekBuckets()` / `weekBarsSVG()` are shared with `weeklyChart()`, so tonnage
+per week and sets per week bucket and draw identically.
+
+## Theming and the system bar
+
+`THEMES` is the closed vocabulary; `THEME_SCHEME` says whether each entry is
+light or dark furniture, with `system` mapped to `null` so it defers to
+`prefers-color-scheme`. `applyTheme()` sets both halves of the platform
+contract, and both are required:
+
+- `document.documentElement.style.colorScheme` — the colour of everything the
+  app does not paint: Android status-bar glyphs, the gesture pill, form
+  controls, scrollbars. Without it the platform assumes any page is light,
+  keeps dark glyphs, and a dark theme loses its system bar.
+- `syncSystemBar()` — the fill behind them, read from the active theme's
+  computed `--bg`.
+
+Set only one and a dark theme gets white glyphs on a white bar, or dark glyphs
+on a dark bar.
+
+`syncSystemBar()` **removes** every existing `meta[name="theme-color"]` before
+appending its own. The pair in `<head>` is media-scoped and can express only
+"system light" and "system dark"; a browser uses the first meta whose media
+query matches, so leaving them in place would keep them winning over the six
+custom themes. They stay in the document purely as the first-paint fallback
+before scripting runs.
+
+The manifest's `theme_color` is a single static value and cannot follow a
+theme — an installed PWA opens with it, then `applyTheme()` corrects the bar on
+the first frame. A `prefers-color-scheme` listener re-runs `syncSystemBar()` on
+an OS switch, but only while the theme is `system`; a pinned theme ignores it.
 
 ## Conventions
 

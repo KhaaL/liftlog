@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="description" content="Liftlog — a quiet, local-first gym workout tracker. Log sets, time rests, review progress.">
+<!-- These two are the first-paint fallback only: they can express "system light"
+     and "system dark" and nothing else. The moment scripting runs, applyTheme()
+     replaces them with one meta carrying the active theme's real --bg, so the
+     Android status/navigation bar matches Nord, Gruvbox, Dracula and friends
+     instead of staying white. See syncSystemBar(). -->
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#fbfbf9" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#16181b" media="(prefers-color-scheme: dark)">
@@ -171,7 +176,7 @@
    BASE
    ============================================================ */
 *,*::before,*::after{ box-sizing:border-box; }
-html{ -webkit-text-size-adjust:100%; }
+html{ -webkit-text-size-adjust:100%; background:var(--bg); }
 body{
   margin:0; background:var(--bg); color:var(--text);
   font-family:var(--font-ui); font-size:var(--fs-base); line-height:1.5;
@@ -283,7 +288,7 @@ html.session-active .app-footer{ display:none; }     /* keyboard help is still ?
    gap (see the note on `main` above), so it supplies the same sp-5 itself. */
 .today-idle{ margin-top:var(--sp-5); }
 .section-title{ display:flex; align-items:center; gap:var(--sp-3); margin:var(--sp-6) 0 var(--sp-3); }
-.section-title h2{ font-weight:700; font-size:var(--fs-md); }
+.section-title h2,.section-title h3{ font-weight:700; font-size:var(--fs-md); }
 .section-title .rule{ flex:1; border-top:1px solid var(--border); }
 .panel{
   background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
@@ -697,6 +702,25 @@ kbd{
 .trend-delta.up{ color:var(--success); }
 .trend-delta.down{ color:var(--danger); }
 .mb-2{ margin-bottom:var(--sp-2); }
+/* Progress panel: Exercise / Muscle group switch and the movement breakdown */
+.progress-modes{ display:inline-flex; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; }
+.progress-modes button{
+  appearance:none; background:var(--surface); color:var(--muted); border:0;
+  border-left:1px solid var(--border); font:inherit; font-size:var(--fs-xs); font-weight:650;
+  padding:7px 12px; cursor:pointer; min-height:36px;
+}
+.progress-modes button:first-child{ border-left:0; }
+.progress-modes button[aria-pressed="true"]{ background:var(--accent-soft); color:var(--text); }
+.mg-list{ list-style:none; margin:var(--sp-3) 0 0; padding:0; }
+.mg-list li{
+  display:flex; gap:var(--sp-2) var(--sp-4); align-items:baseline; flex-wrap:wrap;
+  justify-content:space-between; padding:var(--sp-3) 0; border-top:1px solid var(--border);
+}
+.mg-list li:first-child{ border-top:0; }
+.mg-head{ min-width:0; }
+.mg-name{ font-weight:600; font-size:var(--fs-sm); display:block; }
+.mg-meta{ color:var(--muted); font-size:var(--fs-xs); }
+.mg-best{ font-size:var(--fs-sm); font-variant-numeric:tabular-nums; white-space:nowrap; }
 
 /* routine editor */
 .item-row{ display:grid; grid-template-columns:44px 1fr repeat(4,minmax(64px,86px)) 84px; gap:var(--sp-2); align-items:end; padding:var(--sp-3) 0; border-top:1px solid var(--border); }
@@ -1371,6 +1395,14 @@ const THEMES = [
   { id:'dracula', label:'Dracula' }, { id:'gruvbox', label:'Gruvbox' }, { id:'nord', label:'Nord' },
   { id:'solarized', label:'Solarized' }, { id:'monokai', label:'Monokai' }
 ];
+/* Whether each theme is light or dark furniture. `system` is deliberately null:
+   it defers to prefers-color-scheme. This is what tells the UA to draw light
+   status-bar glyphs over Nord or Gruvbox — without it the platform assumes the
+   page is light, keeps dark glyphs, and a dark theme loses the system bar. */
+const THEME_SCHEME = {
+  system:null, light:'light', dark:'dark',
+  dracula:'dark', gruvbox:'dark', nord:'dark', solarized:'dark', monokai:'dark'
+};
 
 /* How a set carries its measurement across the import/export boundary. The
    one list: historyPayload() stamps one of these on every set it writes, and
@@ -1791,6 +1823,8 @@ function freshUI(){
     exerciseFormError:'',
     exerciseFilter:'',          /* Exercises search box, kept so re-renders don't drop it */
     trendExId:null,
+    trendMode:'exercise',       /* Progress panel: 'exercise' or 'muscle' */
+    trendMuscle:null,           /* selected muscle group in 'muscle' mode */
     editWorkoutId:null,         /* history session currently being edited */
     focus:null,                 /* element id to focus after render */
     remoteFormOpen:false,       /* remote-storage config form expanded in Settings */
@@ -1829,6 +1863,39 @@ function applyTheme(){
   const t = THEMES.some(x => x.id === state.settings.theme) ? state.settings.theme : 'system';
   if (t === 'system') document.documentElement.removeAttribute('data-theme');
   else document.documentElement.setAttribute('data-theme', t);
+
+  /* Two separate jobs, and both are needed. color-scheme decides the colour of
+     things the app does not paint — status-bar glyphs, the gesture pill, form
+     controls, scrollbars. theme-color decides the fill behind them. Set only
+     one and a dark theme gets either white icons on a white bar or dark icons
+     on a dark bar. */
+  const scheme = THEME_SCHEME[t];
+  document.documentElement.style.colorScheme = scheme || 'light dark';
+  syncSystemBar();
+}
+/* Point the status/navigation bar at the theme's real background.
+
+   The manifest's theme_color is a single static value, so an installed PWA
+   opens with whatever it says (light) no matter which theme is active. Chrome
+   on Android does honour later <meta name="theme-color"> changes, and picks the
+   FIRST meta whose media query matches — so the media-scoped pair from <head>
+   is removed here rather than added to, otherwise it would keep winning. */
+function syncSystemBar(){
+  const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+  if (!bg) return;
+  document.querySelectorAll('meta[name="theme-color"]').forEach(m => m.remove());
+  const meta = document.createElement('meta');
+  meta.name = 'theme-color';
+  meta.content = bg;
+  document.head.appendChild(meta);
+}
+/* On the `system` theme the tokens change without applyTheme() being called, so
+   the bar has to follow the OS switch on its own. */
+if (window.matchMedia){
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  const onSchemeChange = () => { if (state.settings.theme === 'system') syncSystemBar(); };
+  if (mq.addEventListener) mq.addEventListener('change', onSchemeChange);
+  else if (mq.addListener) mq.addListener(onSchemeChange);
 }
 
 /* ============================================================
@@ -3519,6 +3586,8 @@ function normalizeSelections(){
   const trendable = trendCandidates();
   if (trendable.length && !trendable.some(e => e.id === ui.trendExId))
     ui.trendExId = trendable[0].id;
+  const groups = muscleCandidates();
+  if (groups.length && groups.indexOf(ui.trendMuscle) === -1) ui.trendMuscle = groups[0];
 }
 function trendCandidates(){
   return state.exercises.filter(e =>
@@ -4100,7 +4169,7 @@ function viewHistory(){
   html += weeklyChart(ws);
 
   /* per-exercise trend */
-  html += trendPanel();
+  html += progressPanel();
 
   /* workout list */
   html += '<div class="section-title"><h2>Workouts</h2><span class="rule"></span></div>';
@@ -4212,50 +4281,92 @@ function htmlWorkoutEditor(w){
   html += '</div>';
   return html;
 }
-function weeklyChart(ws){
-  const weeks = [];
+/* The last eight calendar weeks, oldest first. `value` decides what a bar
+   measures, so tonnage and working-set counts share one bucketing rule. */
+function weekBuckets(ws, value){
+  const out = [];
   const now = new Date();
   for (let i = 7; i >= 0; i--){
     const start = new Date(now); start.setDate(now.getDate() - now.getDay() - i*7); start.setHours(0,0,0,0);
     const end = new Date(start); end.setDate(start.getDate() + 7);
-    const vol = ws.filter(w => w.startedAt >= start.getTime() && w.startedAt < end.getTime())
-                  .reduce((a,w) => a + workoutVolume(w), 0);
-    weeks.push({ label: start.toLocaleDateString(undefined,{ month:'short', day:'numeric' }), vol });
+    out.push({
+      label: start.toLocaleDateString(undefined,{ month:'short', day:'numeric' }),
+      val: value(ws.filter(w => w.startedAt >= start.getTime() && w.startedAt < end.getTime()))
+    });
   }
-  const max = Math.max(1, ...weeks.map(w => w.vol));
+  return out;
+}
+function weekBarsSVG(weeks, ariaLabel, tip){
+  const max = Math.max(1, ...weeks.map(w => w.val));
   const W = 560, H = 90, bw = W/weeks.length;
   let bars = '';
   weeks.forEach((w,i) => {
-    const h = Math.round(w.vol/max * (H-26));
+    const h = Math.round(w.val/max * (H-26));
     const x = Math.round(i*bw + bw*0.18), y = H - 18 - h;
     const last = i === weeks.length - 1;
-    bars += '<rect x="' + x + '" y="' + (w.vol ? y : H-19) + '" width="' + Math.round(bw*0.64) + '" height="' + (w.vol ? h : 1) + '" rx="2" fill="' + (last ? 'var(--accent)' : 'var(--border-strong)') + '"><title>' + esc(w.label) + ' — ' + fmtNum(w.vol) + ' ' + unitLabel() + '</title></rect>';
+    bars += '<rect x="' + x + '" y="' + (w.val ? y : H-19) + '" width="' + Math.round(bw*0.64) + '" height="' + (w.val ? h : 1) + '" rx="2" fill="' + (last ? 'var(--accent)' : 'var(--border-strong)') + '"><title>' + esc(w.label) + ' — ' + tip(w.val) + '</title></rect>';
     if (i % 2 === 0) bars += '<text x="' + Math.round(i*bw + bw/2) + '" y="' + (H-4) + '" text-anchor="middle" font-size="9.5" fill="var(--muted)">' + esc(w.label) + '</text>';
   });
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(ariaLabel) + '">' + bars + '</svg>';
+}
+function weeklyChart(ws){
+  const weeks = weekBuckets(ws, list => list.reduce((a,w) => a + workoutVolume(w), 0));
   return '<section class="panel chart-panel mt-4" aria-label="Weekly volume, last 8 weeks">' +
     '<div class="chart-head"><h2 class="panel-title">Weekly volume</h2>' +
     '<span class="muted xs">total weight × reps per week</span></div>' +
-    '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Bar chart of training volume for the last eight weeks">' + bars + '</svg>' +
+    weekBarsSVG(weeks, 'Bar chart of training volume for the last eight weeks',
+                v => fmtNum(v) + ' ' + unitLabel()) +
   '</section>';
+}
+/* What "better" means for one movement, in one place: loaded work is judged on
+   estimated 1RM, a hold on its length, bodyweight work on reps. Both progress
+   modes read this, so the per-exercise chart and the muscle-group breakdown can
+   never drift apart. */
+function exMetric(ex){
+  const isWeighted = ex.unit !== 'bw' && ex.unit !== 'time';
+  return {
+    isWeighted,
+    of: s => isWeighted ? epley(setWeight(s), s.reps)
+      : (ex.unit === 'time' ? (Number(setDuration(s)) || 0) : (Number(s.reps) || 0)),
+    name: isWeighted ? 'estimated 1RM' : (ex.unit === 'time' ? 'longest hold (s)' : 'best set (reps)'),
+    unit: isWeighted ? unitLabel() : (ex.unit === 'time' ? 's' : 'reps')
+  };
+}
+/* Per-session bests for one exercise, oldest first. */
+function exSessions(ex){
+  const m = exMetric(ex);
+  const out = [];
+  sortedWorkouts().slice().reverse().forEach(w => {
+    const b = w.exercises.find(x => x.exerciseId === ex.id);
+    if (!b) return;
+    const best = b.sets.filter(countsPR).reduce((a,s) => Math.max(a, m.of(s)), 0);
+    if (best > 0) out.push({ date:w.startedAt, best });
+  });
+  return out;
+}
+/* The Progress panel has two readings of the same log: one movement over time,
+   or one muscle group across every movement that trains it. */
+function progressPanel(){
+  return ui.trendMode === 'muscle' ? musclePanel() : trendPanel();
+}
+function progressModes(){
+  const tab = (mode, label) =>
+    '<button type="button" data-action="trend-mode" data-mode="' + mode + '" ' +
+    'aria-pressed="' + (ui.trendMode === mode) + '">' + label + '</button>';
+  return '<div class="progress-modes" role="group" aria-label="Progress view">' +
+    tab('exercise','Exercise') + tab('muscle','Muscle group') + '</div>';
 }
 function trendPanel(){
   const candidates = trendCandidates();
   if (!candidates.length) return '';
   const ex = exerciseById(ui.trendExId);
   if (!ex) return '';
-  const isWeighted = ex.unit !== 'bw' && ex.unit !== 'time';
-  const metric = s => isWeighted ? epley(setWeight(s), s.reps)
-    : (ex.unit === 'time' ? (Number(setDuration(s)) || 0) : (Number(s.reps) || 0));
-  const metricName = isWeighted ? 'estimated 1RM' : (ex.unit === 'time' ? 'longest hold (s)' : 'best set (reps)');
-  const unit = isWeighted ? unitLabel() : (ex.unit === 'time' ? 's' : 'reps');
+  const m = exMetric(ex);
+  const metric = m.of;
+  const metricName = m.name;
+  const unit = m.unit;
 
-  const sessions = [];
-  sortedWorkouts().slice().reverse().forEach(w => {   /* oldest → newest for the line */
-    const b = w.exercises.find(x => x.exerciseId === ex.id);
-    if (!b) return;
-    const best = b.sets.filter(countsPR).reduce((a,s) => Math.max(a, metric(s)), 0);
-    if (best > 0) sessions.push({ date:w.startedAt, best });
-  });
+  const sessions = exSessions(ex);
 
   let body = '';
   if (sessions.length < 2){
@@ -4284,6 +4395,7 @@ function trendPanel(){
   return '<section class="panel chart-panel mt-4" aria-label="Exercise trend">' +
     '<div class="chart-head">' +
       '<h2 class="panel-title">Progress</h2>' +
+      progressModes() +
       '<label class="field trend-picker"><span class="cap">Exercise</span>' +
       '<select data-change="trend">' +
       candidates.map(e => '<option value="' + e.id + '"' + (e.id === ui.trendExId ? ' selected' : '') + '>' + esc(e.name) + '</option>').join('') +
@@ -4291,6 +4403,95 @@ function trendPanel(){
     '</div>' +
     '<p class="muted xs mb-2">' + esc(metricName) + ' per session</p>' +
     body +
+  '</section>';
+}
+
+/* The muscle group a movement belongs to. Blank collapses into the same
+   "General" bucket the Exercises list already displays, so a group never
+   silently splits in two. */
+function exCategory(e){ return ((e && e.category) || '').trim() || 'General'; }
+/* Only groups with at least one completed set behind them are offered. */
+function muscleCandidates(){
+  const names = new Set();
+  trendCandidates().forEach(e => names.add(exCategory(e)));
+  return Array.from(names).sort((a,b) => a.localeCompare(b));
+}
+
+/* One muscle group across every movement that trains it.
+
+   The metric is deliberately WORKING SETS, not tonnage or e1RM. Load is a
+   property of the machine, not of the muscle: a dip on an outdoor bar, a
+   plate-loaded press and a cable fly all train the chest at numbers that cannot
+   be added together or compared. A completed working set is the one unit that
+   means the same thing on all of them, and bodyweight work — which carries no
+   weight at all and so contributes nothing to volume — finally counts.
+   Load progression stays where it belongs: per movement, in the list below. */
+function musclePanel(){
+  const groups = muscleCandidates();
+  if (!groups.length) return '';
+  const group = ui.trendMuscle;
+  const ids = new Set(state.exercises.filter(e => exCategory(e) === group).map(e => e.id));
+  const setsIn = w => w.exercises.reduce(
+    (a,x) => a + (ids.has(x.exerciseId) ? x.sets.filter(countsVolume).length : 0), 0);
+
+  const weeks = weekBuckets(state.workouts, list => list.reduce((a,w) => a + setsIn(w), 0));
+  const half = weeks.length / 2;
+  const prev = weeks.slice(0, half).reduce((a,w) => a + w.val, 0);
+  const recent = weeks.slice(half).reduce((a,w) => a + w.val, 0);
+  const delta = recent - prev;
+
+  const rows = state.exercises.filter(e => ids.has(e.id)).map(ex => {
+    const sess = exSessions(ex);
+    if (!sess.length) return null;
+    let sets = 0;
+    state.workouts.forEach(w => w.exercises.forEach(x => {
+      if (x.exerciseId === ex.id) sets += x.sets.filter(countsVolume).length;
+    }));
+    const m = exMetric(ex);
+    const first = sess[0].best, last = sess[sess.length - 1].best;
+    return { ex, m, sess, sets, first, last, d:last - first, when:sess[sess.length - 1].date };
+  }).filter(Boolean).sort((a,b) => b.when - a.when);
+
+  const list = rows.length
+    ? '<ul class="mg-list">' + rows.map(r =>
+        '<li><span class="mg-head">' +
+          '<span class="mg-name">' + esc(r.ex.name) + '</span>' +
+          '<span class="mg-meta">' + plural(r.sets, 'working set') + ' · ' +
+            plural(r.sess.length, 'session') + ' · ' + sinceLabel(r.when) + '</span>' +
+        '</span>' +
+        '<span class="mg-best">' + fmtNum(roundHalf(r.last)) + ' ' + esc(r.m.unit) +
+          (r.sess.length > 1
+            ? ' <span class="trend-delta ' + (r.d >= 0 ? 'up' : 'down') + '">' +
+              (r.d >= 0 ? '▲ +' : '▼ ') + fmtNum(roundHalf(r.d)) + '</span>'
+            : '') +
+          '<br><span class="mg-meta">' + esc(r.m.name) + '</span>' +
+        '</span></li>').join('') + '</ul>'
+    : '<p class="muted small">Nothing logged for this group yet.</p>';
+
+  return '<section class="panel chart-panel mt-4" aria-label="Muscle group progress">' +
+    '<div class="chart-head">' +
+      '<h2 class="panel-title">Progress</h2>' +
+      progressModes() +
+      '<label class="field trend-picker"><span class="cap">Muscle group</span>' +
+      '<select data-change="trend-muscle">' +
+      groups.map(g => '<option value="' + esc(g) + '"' + (g === group ? ' selected' : '') + '>' +
+        esc(g) + '</option>').join('') +
+      '</select></label>' +
+    '</div>' +
+    '<p class="muted xs mb-2">Working sets per week — one unit that counts the same ' +
+      'on a machine, a barbell and an outdoor bar</p>' +
+    weekBarsSVG(weeks, 'Bar chart of weekly working sets for ' + group + ' over the last eight weeks',
+                v => plural(v, 'set')) +
+    '<div class="trend-foot">' +
+      '<span class="muted xs">' + plural(recent, 'set') + ' in the last 4 weeks ' +
+        'vs ' + plural(prev, 'set') + ' in the 4 before</span>' +
+      (delta === 0
+        ? '<span class="muted xs">no change</span>'
+        : '<span class="xs trend-delta ' + (delta > 0 ? 'up' : 'down') + '">' +
+          (delta > 0 ? '▲ +' : '▼ ') + Math.abs(delta) + ' sets</span>') +
+    '</div>' +
+    '<div class="section-title mt-4"><h3>Movements training ' + esc(group) + '</h3><span class="rule"></span></div>' +
+    list +
   '</section>';
 }
 
@@ -4647,6 +4848,7 @@ const actions = {
   'close-overview'(){ closeOverview(); },
   'open-overview'(){ ui.overviewOpen = true; ui.focus = 'add-ex-select'; render(); },
   'open-session-note'(){ ui.notesOpen = true; ui.focus = 'wnotes'; render(); },
+  'trend-mode'(d){ ui.trendMode = d.mode === 'muscle' ? 'muscle' : 'exercise'; render(); },
   'overview-up'(d){ overviewStep(Number(d.idx), -1); },
   'overview-down'(d){ overviewStep(Number(d.idx), 1); },
   /* same underlying jump as "Reopen exercise" — the drawer just also closes,
@@ -5056,6 +5258,7 @@ const changeHandlers = {
     toast('Effort tracking: ' + (t.value === 'none' ? 'off' : t.value.toUpperCase()));
   },
   trend(t){ ui.trendExId = t.value; render(); },
+  'trend-muscle'(t){ ui.trendMuscle = t.value; render(); },
   setting(t){
     const key = t.dataset.field;
     state.settings[key] = t.checked;
