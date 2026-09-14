@@ -683,6 +683,27 @@ worst is 11.1:1.
 The rule is inert where it should be: the pseudo-element's height is the inset
 itself, which is `0` wherever there is no status bar to cover.
 
+### Diagnosing it on a real device
+
+None of the above is observable from here: a headless browser can be told to
+report a top inset, but it cannot tell you what Chrome does with a WebAPK on
+someone's phone. So Settings → Appearance carries a collapsed **System bar
+diagnostics** block (`systemBarReport()`), listing every value the page can
+see — resolved `env(safe-area-inset-top)`, display mode, the phone's dark-mode
+setting, the active theme and its scheme, the invert flag, the live
+`theme-color`, the manifest's `theme_color`, and the two tokens involved.
+
+The top inset is the one to read first: **it is what scales everything the app
+does about the system bar.** At `0` the app is not being drawn under the status
+bar at all, the bar belongs entirely to Chrome, and neither the padding nor the
+scrim is in play — whatever is wrong is then not something this page can reach.
+
+`paintDiagnostics()` refreshes the list in place from `syncSystemBar()` rather
+than re-rendering the view, because `setTheme()` repaints the tokens without
+re-rendering Settings. Reading the values theme by theme is the point of the
+block, and a stale readout would be worse than none — it would look like
+changing the theme had changed nothing.
+
 Because the flag depends on the *system* scheme under every theme — not just
 `system` — the `prefers-color-scheme` listener re-runs `syncSystemBar()`
 unconditionally. Under a pinned theme an OS switch changes nothing on the page

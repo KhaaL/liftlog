@@ -391,6 +391,16 @@ select{ appearance:none; padding-right:30px; background-image:linear-gradient(45
    banner is showing, and the strip tucks under the banner. */
 #save-banner:not([hidden]) ~ main .session-strip{ margin-top:0; }
 .hint{ color:var(--muted); font-size:var(--fs-xs); }
+/* System-bar diagnostics: a readout of the handful of values the page can see,
+   collapsed so it stays out of the way of the actual setting above it. */
+.diag{ margin-top:var(--sp-3); }
+.diag summary{ cursor:pointer; font-size:var(--fs-sm); font-weight:650; color:var(--muted); padding:var(--sp-2) 0; }
+.diag summary:hover{ color:var(--text); }
+.diag-list{ margin:var(--sp-2) 0 var(--sp-3); }
+.diag-list > div{ display:flex; justify-content:space-between; gap:var(--sp-3); padding:5px 0; border-top:1px solid var(--border); }
+.diag-list > div:first-child{ border-top:0; }
+.diag-list dt{ color:var(--muted); font-size:var(--fs-xs); }
+.diag-list dd{ margin:0; font-size:var(--fs-xs); text-align:right; word-break:break-all; }
 
 kbd{
   font-family:var(--font-mono); font-size:12px;
@@ -1960,7 +1970,80 @@ function syncSystemBar(){
     document.head.appendChild(meta);
   }
   if (meta.content !== fill) meta.content = fill;
+  paintDiagnostics();
 }
+/* The manifest's theme_color, read back from the file rather than repeated
+   here, so the diagnostics report what actually shipped. Fetched once; the row
+   reads "—" if this is offline before the service worker has the file, or on
+   file:// where the request is not allowed. */
+let manifestThemeColor = null;
+function loadManifestThemeColor(){
+  try{
+    fetch('./manifest.webmanifest')
+      .then(r => r.ok ? r.json() : null)
+      .then(m => { if (m && m.theme_color) manifestThemeColor = m.theme_color; })
+      .catch(() => {});
+  }catch(e){ /* nothing to do: the row stays "—" */ }
+}
+/* The resolved top inset, which is the number that says whether this app is
+   being drawn under the status bar at all. Everything the app does about the
+   system bar is scaled by it, so a 0 here means none of it is in play. */
+function safeAreaInsetTop(){
+  const probe = document.createElement('div');
+  probe.style.cssText = 'position:fixed;top:0;left:0;width:0;visibility:hidden;height:env(safe-area-inset-top,0px)';
+  document.body.appendChild(probe);
+  const h = getComputedStyle(probe).height;
+  probe.remove();
+  return h;
+}
+function displayMode(){
+  return ['fullscreen','standalone','minimal-ui','browser']
+    .find(m => window.matchMedia && window.matchMedia('(display-mode: ' + m + ')').matches) || 'unknown';
+}
+/* Every value the page has any visibility into, in one list. Android picks the
+   colour of the clock and the status icons itself and tells the page nothing,
+   so what is missing from this list is as much the point as what is in it. */
+function systemBarReport(){
+  const root = document.documentElement;
+  const cs = getComputedStyle(root);
+  const meta = document.querySelector('meta[name="theme-color"]');
+  const t = currentTheme();
+  return [
+    ['Top safe-area inset', safeAreaInsetTop()],
+    ['Display mode', displayMode()],
+    ['Phone dark mode', systemPrefersDark() ? 'on' : 'off'],
+    ['Theme', t + (THEME_SCHEME[t] ? ' (' + THEME_SCHEME[t] + ')' : ' (follows phone)')],
+    ['Strip inverted', root.getAttribute('data-statusbar') === 'invert' ? 'yes' : 'no'],
+    ['theme-color (page)', meta ? meta.content : 'none'],
+    ['theme_color (manifest)', manifestThemeColor || '—'],
+    ['--surface', cs.getPropertyValue('--surface').trim()],
+    ['--text', cs.getPropertyValue('--text').trim()]
+  ];
+}
+function diagRows(){
+  return systemBarReport().map(([k,v]) =>
+    '<div><dt>' + esc(k) + '</dt><dd class="mono">' + esc(v) + '</dd></div>').join('');
+}
+/* Changing the theme does not re-render Settings — setTheme() repaints the
+   tokens and leaves the view alone — so the readout is refreshed in place
+   instead. Reading these values theme by theme is the entire point of the
+   block, and a stale one would be worse than none: it would look like the
+   theme had changed nothing. Called from syncSystemBar(), which is the one
+   thing every path that can move these values already goes through. */
+function paintDiagnostics(){
+  const list = document.querySelector('.diag-list');
+  if (list) list.innerHTML = diagRows();
+}
+function systemBarDiagnostics(){
+  return '<details class="diag"><summary>System bar diagnostics</summary>' +
+    '<p class="desc">What this page can actually see. Android chooses the colour of the clock ' +
+    'and the status icons itself and does not tell the page which it picked, so if the bar ' +
+    'disagrees with the values below, the bar is not reading them.</p>' +
+    '<dl class="diag-list">' + diagRows() +
+    '<button type="button" class="btn btn-sm" data-action="copy-diag">' + IC.copy + '<span>Copy</span></button>' +
+  '</details>';
+}
+
 /* An OS light/dark switch matters under every theme, not just `system`. On
    `system` it changes the tokens without applyTheme() being called; under a
    pinned theme it changes nothing on the page but flips the glyph colour the
@@ -4812,6 +4895,7 @@ function viewSettings(){
         THEMES.map(t =>
           '<label class="radio-pill"><input type="radio" name="theme" value="' + t.id + '" data-change="theme"' + (s.theme === t.id ? ' checked' : '') + '><span>' + t.label + '</span></label>').join('') +
       '</div>' +
+      systemBarDiagnostics() +
     '</div>' +
     '<div class="setting-block">' +
       '<h3>Weight unit</h3><p class="desc">Planned weights and the active workout are converted; logged history keeps the unit it was logged in.</p>' +
@@ -4927,6 +5011,13 @@ const actions = {
   'close-overview'(){ closeOverview(); },
   'open-overview'(){ ui.overviewOpen = true; ui.focus = 'add-ex-select'; render(); },
   'open-session-note'(){ ui.notesOpen = true; ui.focus = 'wnotes'; render(); },
+  'copy-diag'(){
+    const text = systemBarReport().map(([k,v]) => k + ': ' + v).join('\n');
+    if (navigator.clipboard && navigator.clipboard.writeText)
+      navigator.clipboard.writeText(text).then(() => toast('Diagnostics copied'),
+                                               () => toast('Could not copy'));
+    else toast('Clipboard unavailable here');
+  },
   'trend-mode'(d){ ui.trendMode = d.mode === 'muscle' ? 'muscle' : 'exercise'; render(); },
   'overview-up'(d){ overviewStep(Number(d.idx), -1); },
   'overview-down'(d){ overviewStep(Number(d.idx), 1); },
@@ -5456,6 +5547,7 @@ function init(){
   if (state.activeWorkout) restoreTimer();
   else loadTimer(state.settings.defaultRest);
 
+  loadManifestThemeColor();
   trackHeaderHeight();
   wireOverviewSheet();
   $('#help-shortcuts').innerHTML = shortcutTable();
