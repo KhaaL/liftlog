@@ -16,11 +16,11 @@
    never revalidated, so a changed manifest or icon is invisible until the
    version here moves and activate() drops the old cache.
 
-   v2: manifest.webmanifest's theme_color changed. Chrome reads that file to
-   decide the status bar colour of the installed app, so a stale cached copy
+   v2, v3: manifest.webmanifest's theme_color changed. Chrome reads that file
+   to decide the status bar colour of the installed app, so a stale cached copy
    would have kept handing it the old value indefinitely. */
 
-const CACHE = 'liftlog-shell-v2';
+const CACHE = 'liftlog-shell-v3';
 const SHELL = [
   './',
   './index.html',

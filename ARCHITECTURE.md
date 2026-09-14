@@ -710,19 +710,39 @@ And a third, by elimination: **Chrome does not set the glyph polarity from
 dark glyphs and stayed legible. It did not — the glyphs follow the *phone's*
 dark-mode setting. That is the constraint the value has to be chosen against.
 
-`theme_color` is therefore `#1d2024`: one static value, no per-theme variation
-possible, chosen for white glyphs because the phone is in dark mode.
+### Why the value is a mid-tone
 
-| `theme_color` | vs white glyphs | vs dark glyphs |
-| --- | --- | --- |
-| `#fbfbf9` (was) | **1.0:1** | 20.3:1 |
-| `#1d2024` (now) | **16.4:1** | 1.3:1 |
-| `#6d777f` (balanced alternative) | 4.6:1 | 4.6:1 |
+Both obvious choices were tried and both failed, and the reason is one
+observation from the device: with a near-white bar, **the battery percentage
+was legible while the clock and the status icons were not**.
 
-The trade is explicit: this is right for a phone in dark mode and inverts to
-illegible on one in light mode. `#6d777f` is the hedge that clears 4.5:1 either
-way and matches no theme at all. One value cannot do better — the manifest has
-no per-scheme variant, and nothing on the page reaches the bar.
+A single bar colour with a single glyph colour cannot do that. Every glyph is
+either readable or it is not. One element behaving differently from the rest
+means the elements are **not all drawn in the same colour** — on One UI some of
+what sits in that bar is light and some is dark, whatever the reason.
+
+Which rules out both ends of the range, permanently:
+
+| `theme_color` | vs white glyphs | vs black glyphs | vs One UI grey |
+| --- | --- | --- | --- |
+| `#fbfbf9` | **1.04:1** | 20.3:1 | 15.9:1 |
+| `#1d2024` | 16.4:1 | **1.28:1** | **1.01:1** |
+| `#6d777f` | 4.57:1 | 4.60:1 | 3.61:1 |
+
+Each extreme is perfect against one glyph colour and invisible against the
+other. With a mixed set there is no extreme that works, so `theme_color` is
+`#6d777f` — the lightness at which contrast against white and against black are
+equal, and both clear 4.5:1.
+
+It matches no theme, and that is the cost of a single static value: the manifest
+has no per-scheme variant, no per-theme variant, and nothing on the page reaches
+the bar. The value is chosen to be robust to not knowing which colour One UI
+gave each glyph, rather than to be right about a guess.
+
+One caveat on the diagnostics block below: its manifest row reports the value
+in the *file*. An installed app keeps the colour it was installed with until it
+is reinstalled, and nothing the page can reach reports that one — so the row
+agreeing with the source is not evidence the installed app agrees.
 
 Changing `theme_color` requires bumping `CACHE` in `sw.js`: shell files other
 than the document are served cache-first and never revalidated, so Chrome would
