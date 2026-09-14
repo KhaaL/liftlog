@@ -1976,14 +1976,30 @@ function syncSystemBar(){
    here, so the diagnostics report what actually shipped. Fetched once; the row
    reads "—" if this is offline before the service worker has the file, or on
    file:// where the request is not allowed. */
-let manifestThemeColor = null;
+let manifestThemeColor = null;      /* what the service worker hands out */
+let manifestThemeColorLive = null;  /* what is actually on the server */
+/* Both, because they answer different questions and only together locate the
+   problem. A colour that has stopped travelling is stuck in one of three
+   places, and each pair of values names which:
+
+     served ≠ live          the shell cache is stale
+     served = live,
+       bar still wrong     the INSTALLED app is stale — it keeps the colour it
+                           was installed with, and no fetch here can see that
+
+   The live read goes through a cache-busting query rather than cache:'reload',
+   because the worker matches on the full URL: a query it has never cached
+   falls through to the network, which is the only way past it from in here. */
 function loadManifestThemeColor(){
-  try{
-    fetch('./manifest.webmanifest')
-      .then(r => r.ok ? r.json() : null)
-      .then(m => { if (m && m.theme_color) manifestThemeColor = m.theme_color; })
-      .catch(() => {});
-  }catch(e){ /* nothing to do: the row stays "—" */ }
+  const read = (url, set) => {
+    try{
+      fetch(url).then(r => r.ok ? r.json() : null)
+        .then(m => { if (m && m.theme_color) set(m.theme_color); })
+        .catch(() => {});
+    }catch(e){ /* nothing to do: the row stays "—" */ }
+  };
+  read('./manifest.webmanifest', v => { manifestThemeColor = v; });
+  read('./manifest.webmanifest?fresh=' + Date.now(), v => { manifestThemeColorLive = v; });
 }
 /* The resolved top inset, which is the number that says whether this app is
    being drawn under the status bar at all. Everything the app does about the
@@ -2015,7 +2031,8 @@ function systemBarReport(){
     ['Theme', t + (THEME_SCHEME[t] ? ' (' + THEME_SCHEME[t] + ')' : ' (follows phone)')],
     ['Strip inverted', root.getAttribute('data-statusbar') === 'invert' ? 'yes' : 'no'],
     ['theme-color (page)', meta ? meta.content : 'none'],
-    ['theme_color (manifest file)', manifestThemeColor || '—'],
+    ['theme_color (served)', manifestThemeColor || '—'],
+    ['theme_color (network)', manifestThemeColorLive || '—'],
     ['--surface', cs.getPropertyValue('--surface').trim()],
     ['--text', cs.getPropertyValue('--text').trim()]
   ];
