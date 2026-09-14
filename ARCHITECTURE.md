@@ -683,6 +683,51 @@ worst is 11.1:1.
 The rule is inert where it should be: the pseudo-element's height is the inset
 itself, which is `0` wherever there is no status bar to cover.
 
+### What Chrome actually uses, on this phone
+
+Measured on a real installed app (Android, `display-mode: standalone`, phone in
+dark mode, Dark theme active) via the diagnostics block below:
+
+```
+Top safe-area inset: 0px
+Display mode: standalone
+theme-color (page): #1d2024      <- dark, correct, and ignored
+theme_color (manifest): #fbfbf9  <- near-white, and what the bar used
+```
+
+Two conclusions, both load-bearing:
+
+1. **The inset is `0`, so the app is not drawn under the status bar.** Chrome
+   paints an opaque bar itself. The padding and the scrim above are correct but
+   inert in this configuration — they engage only once a WebAPK goes
+   edge-to-edge, which is where Chrome is heading, not where it is here.
+2. **Chrome takes the bar's colour from the manifest, not from the page.** The
+   page was sending `#1d2024` under every theme and the bar stayed white.
+   `theme_color` is baked into the WebAPK at install time.
+
+And a third, by elimination: **Chrome does not set the glyph polarity from
+`theme_color` either.** Had it done so, a near-white bar would have been given
+dark glyphs and stayed legible. It did not — the glyphs follow the *phone's*
+dark-mode setting. That is the constraint the value has to be chosen against.
+
+`theme_color` is therefore `#1d2024`: one static value, no per-theme variation
+possible, chosen for white glyphs because the phone is in dark mode.
+
+| `theme_color` | vs white glyphs | vs dark glyphs |
+| --- | --- | --- |
+| `#fbfbf9` (was) | **1.0:1** | 20.3:1 |
+| `#1d2024` (now) | **16.4:1** | 1.3:1 |
+| `#6d777f` (balanced alternative) | 4.6:1 | 4.6:1 |
+
+The trade is explicit: this is right for a phone in dark mode and inverts to
+illegible on one in light mode. `#6d777f` is the hedge that clears 4.5:1 either
+way and matches no theme at all. One value cannot do better — the manifest has
+no per-scheme variant, and nothing on the page reaches the bar.
+
+Changing `theme_color` requires bumping `CACHE` in `sw.js`: shell files other
+than the document are served cache-first and never revalidated, so Chrome would
+otherwise keep reading the old manifest out of the cache indefinitely.
+
 ### Diagnosing it on a real device
 
 None of the above is observable from here: a headless browser can be told to
