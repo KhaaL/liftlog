@@ -9,11 +9,18 @@
    remote backups go to another origin, which this worker deliberately never
    touches. This caches the document and its icons, nothing else.
 
-   CACHE only needs a new version when SHELL changes: the document itself is
+   CACHE needs a new version whenever any shell file OTHER than the document
+   changes — its name or its contents. The document is the one exception: it is
    served stale-while-revalidate, so an edited index.html is picked up on the
-   next launch without any version bump. */
+   next launch without a bump. Everything else below is served cache-first and
+   never revalidated, so a changed manifest or icon is invisible until the
+   version here moves and activate() drops the old cache.
 
-const CACHE = 'liftlog-shell-v1';
+   v2: manifest.webmanifest's theme_color changed. Chrome reads that file to
+   decide the status bar colour of the installed app, so a stale cached copy
+   would have kept handing it the old value indefinitely. */
+
+const CACHE = 'liftlog-shell-v2';
 const SHELL = [
   './',
   './index.html',
