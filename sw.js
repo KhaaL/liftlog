@@ -16,11 +16,14 @@
    never revalidated, so a changed manifest or icon is invisible until the
    version here moves and activate() drops the old cache.
 
-   v2, v3: manifest.webmanifest's theme_color changed. Chrome reads that file
-   to decide the status bar colour of the installed app, so a stale cached copy
-   would have kept handing it the old value indefinitely. */
+   v2, v3, v4: manifest.webmanifest's theme_color changed. Chrome reads that
+   file to decide the status bar colour of the installed app, so a stale cached
+   copy would have kept handing it the old value indefinitely. Twice now the
+   bump was the part that made the change real, which is a bad thing to have to
+   remember — so the manifest is network-first from here (see below) and a
+   future colour change needs no version bump at all. */
 
-const CACHE = 'liftlog-shell-v3';
+const CACHE = 'liftlog-shell-v4';
 const SHELL = [
   './',
   './index.html',
@@ -63,6 +66,21 @@ self.addEventListener('fetch', event => {
        work, so it needs its own waitUntil or the worker can be recycled
        mid-fetch and the refresh silently never happens. */
     event.waitUntil(refreshDocument(req));
+    return;
+  }
+  /* The manifest is network-first, unlike every other sub-resource here.
+     Chrome re-reads it to decide whether the installed app needs updating —
+     its icon, its name, the status bar colour — so serving a stale copy does
+     not cost a stale pixel, it silently pins the installed app to whatever it
+     was built with. It is a few hundred bytes and it falls back to the cache
+     offline, so there is nothing to win by caching it first. */
+  if (new URL(req.url).pathname.endsWith('/manifest.webmanifest')){
+    event.respondWith(
+      fetch(req).then(res => {
+        if (res && res.ok) caches.open(CACHE).then(c => c.put(req, res.clone()));
+        return res;
+      }).catch(() => caches.match(req).then(hit => hit || Response.error()))
+    );
     return;
   }
   event.respondWith(caches.match(req).then(hit => hit || fetch(req)));

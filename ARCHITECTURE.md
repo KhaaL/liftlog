@@ -710,34 +710,55 @@ And a third, by elimination: **Chrome does not set the glyph polarity from
 dark glyphs and stayed legible. It did not — the glyphs follow the *phone's*
 dark-mode setting. That is the constraint the value has to be chosen against.
 
-### Why the value is a mid-tone
+### Why the value is dark
 
-Both obvious choices were tried and both failed, and the reason is one
-observation from the device: with a near-white bar, **the battery percentage
-was legible while the clock and the status icons were not**.
+Three colours have been tried. What settled it was not a measurement here but
+one sentence from the device: **every other app shows a black status bar with
+legible icons; only this app turns it white.**
 
-A single bar colour with a single glyph colour cannot do that. Every glyph is
-either readable or it is not. One element behaving differently from the rest
-means the elements are **not all drawn in the same colour** — on One UI some of
-what sits in that bar is light and some is dark, whatever the reason.
+That says the glyphs are light, uniformly, and it says so without needing to
+guess: a black bar with readable icons is only possible if the icons are light.
+So a dark bar is correct and `theme_color` is `#1d2024`, which is also the dark
+theme's `--surface`, so the bar reads as continuous with the header.
 
-Which rules out both ends of the range, permanently:
+| `theme_color` | vs the light glyphs One UI draws |
+| --- | --- |
+| `#fbfbf9` | **1.04:1** |
+| `#6d777f` | 4.57:1 |
+| `#1d2024` | **16.35:1** |
 
-| `theme_color` | vs white glyphs | vs black glyphs | vs One UI grey |
-| --- | --- | --- | --- |
-| `#fbfbf9` | **1.04:1** | 20.3:1 | 15.9:1 |
-| `#1d2024` | 16.4:1 | **1.28:1** | **1.01:1** |
-| `#6d777f` | 4.57:1 | 4.60:1 | 3.61:1 |
+`#6d777f` came from reading "only the battery percentage is visible" as proof
+that the glyphs were of mixed colours, since no single colour could hide some
+and not others. The simpler explanation is the right one: One UI draws that
+number with an outline and the icons as flat fills, so on a white bar the
+outlined text survives and the fills do not. One inference too many, on one
+detail, against the plainer reading.
 
-Each extreme is perfect against one glyph colour and invisible against the
-other. With a mixed set there is no extreme that works, so `theme_color` is
-`#6d777f` — the lightness at which contrast against white and against black are
-equal, and both clear 4.5:1.
+### The value has to reach the installed app
 
-It matches no theme, and that is the cost of a single static value: the manifest
-has no per-scheme variant, no per-theme variant, and nothing on the page reaches
-the bar. The value is chosen to be robust to not knowing which colour One UI
-gave each glyph, rather than to be right about a guess.
+This is the part that made the last two rounds inconclusive, and it is worth
+stating plainly: **`theme_color` is baked into the WebAPK at install time.**
+Changing the file changes nothing on a phone that already has the app. Chrome
+re-reads the manifest on its own schedule and updates the installed app in the
+background, which can take a day or more; `chrome://webapks` forces it, and
+uninstalling and re-adding is certain.
+
+Two caches sit in front of that, and the diagnostics block reports both:
+
+| served | network | means |
+| --- | --- | --- |
+| differs from network | — | the shell cache is stale |
+| matches network | matches source | the installed app is stale, or fixed |
+
+The page cannot read the colour the installed app was built with — nothing in
+the platform exposes it — so "served matches network" plus a wrong bar is the
+signature of a stale install, and that is as close as this can get.
+
+`manifest.webmanifest` is therefore **network-first** in `sw.js`, unlike every
+other sub-resource. Serving it from cache does not cost a stale pixel; it pins
+the installed app to whatever it was built with. It is a few hundred bytes and
+falls back to the cache offline. Twice the `CACHE` bump was the thing that made
+a colour change real, which is a bad thing to have to remember.
 
 One caveat on the diagnostics block below: its manifest row reports the value
 in the *file*. An installed app keeps the colour it was installed with until it
