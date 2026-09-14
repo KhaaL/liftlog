@@ -249,6 +249,38 @@ phone in a gym is the case that matters:
   and `@media (max-height:560px)` drops what can be read elsewhere: the
   exercise's standing note, the session totals, the progress segments.
 
+### Safe areas
+
+The viewport is `viewport-fit=cover`. That is what lets the action bar paint
+into the bottom gesture area instead of floating above a letterboxed strip —
+but it opts the **whole document** in, top edge included, and every edge that
+is opted in has to pay its inset back.
+
+| Edge | Who pays it |
+| --- | --- |
+| Top | `.app-header` — `padding-top:env(safe-area-inset-top)` |
+| Bottom | `body`, `.actionbar`, `.toast` |
+| Top, in a sheet | `.sheet-head` |
+
+The top one was missing, and the symptom was the whole point of the inset: on
+any device with a non-zero top inset — a notch, and every installed PWA since
+Chrome began drawing Android's system bars edge-to-edge — the tab row was laid
+out at `y=0`, underneath the clock and the status icons. The app's pixels and
+the system's in the same place, with the system's on top.
+
+The padding sits on `.app-header` rather than on `.header-inner` deliberately:
+that way the header's background **fills** the strip as well as clearing it, so
+what shows through a transparent system bar is this app's surface colour rather
+than whatever it would otherwise composite against. The header is
+`position:sticky; top:0`, so the strip stays painted while the page scrolls.
+
+One consequence worth knowing about: the header's height is now partly padding,
+and `trackHeaderHeight()`'s `ResizeObserver` must therefore observe
+`{ box:'border-box' }`. The default is the *content* box, which a padding change
+does not touch — so a changing inset would move the header without ever firing
+the observer, leaving `--header-h` stale and parking the session strip
+underneath the header.
+
 ## Touch
 
 The primary device is a phone held in one hand in a gym, which is a set of
@@ -612,17 +644,22 @@ contract, and both are required:
   controls, scrollbars. Without it the platform assumes any page is light,
   keeps dark glyphs, and a dark theme loses its system bar.
 - `syncSystemBar()` — the fill behind them, read from the active theme's
-  computed `--bg`.
+  computed `--surface`. `--surface`, not `--bg`, because `.app-header` is what
+  paints the strip the status bar sits in (see **Safe areas** above).
 
 Set only one and a dark theme gets white glyphs on a white bar, or dark glyphs
 on a dark bar.
 
-`syncSystemBar()` **removes** every existing `meta[name="theme-color"]` before
-appending its own. The pair in `<head>` is media-scoped and can express only
-"system light" and "system dark"; a browser uses the first meta whose media
-query matches, so leaving them in place would keep them winning over the six
-custom themes. They stay in the document purely as the first-paint fallback
-before scripting runs.
+`syncSystemBar()` drops the media-scoped pair from `<head>` on its first call
+and only then. That pair can express only "system light" and "system dark", and
+a browser uses the first meta whose media query matches, so leaving them in
+place would keep them winning over the six custom themes. They stay in the
+document as the first-paint fallback before scripting runs, and are removed
+once there is something better to say.
+
+From then on the same element is **mutated**, not removed and re-added. A
+browser holds a reference to the theme-color element it picked; swapping the
+node out on every theme change is the fragile way to tell it the colour moved.
 
 The manifest's `theme_color` is a single static value and cannot follow a
 theme — an installed PWA opens with it, then `applyTheme()` corrects the bar on

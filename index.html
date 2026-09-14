@@ -221,6 +221,23 @@ strong{ font-weight:650; }
 .app-header{
   border-bottom:1px solid var(--border); background:var(--surface);
   position:sticky; top:0; z-index:20;
+  /* The viewport is `viewport-fit=cover`, which is what lets the action bar
+     paint into the bottom gesture area — but it opts the whole document in,
+     top edge included. Every other edge pays that inset back (body, .actionbar,
+     the toast, .sheet-head); this one never did, so on any device with a
+     non-zero top inset — a notch, and every installed PWA since Chrome started
+     drawing Android system bars edge-to-edge — the tab row was laid out at
+     y=0, underneath the clock and the status icons. Both sets of pixels, the
+     app's and the system's, in the same place.
+
+     The padding goes on .app-header rather than on .header-inner so the header
+     background fills the strip as well as clearing it: the tabs move below the
+     status bar, and what shows through a transparent system bar is this app's
+     surface colour rather than whatever it would otherwise composite against.
+     The header is `position:sticky; top:0`, so the strip stays painted while
+     the page scrolls, and trackHeaderHeight() measures the padded box — so the
+     session strip beneath it follows without anything else changing. */
+  padding-top:env(safe-area-inset-top);
 }
 .header-inner{ display:flex; align-items:center; gap:var(--sp-4); min-height:52px; padding-top:var(--sp-1); padding-bottom:var(--sp-1); }
 /* flex:1 + min-width:0 is what makes the list below actually scroll: without
@@ -1881,13 +1898,25 @@ function applyTheme(){
    FIRST meta whose media query matches — so the media-scoped pair from <head>
    is removed here rather than added to, otherwise it would keep winning. */
 function syncSystemBar(){
-  const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
-  if (!bg) return;
-  document.querySelectorAll('meta[name="theme-color"]').forEach(m => m.remove());
-  const meta = document.createElement('meta');
-  meta.name = 'theme-color';
-  meta.content = bg;
-  document.head.appendChild(meta);
+  /* --surface, not --bg: .app-header is what paints the strip the status bar
+     sits in, so that is the colour the bar should be told about. */
+  const cs = getComputedStyle(document.documentElement);
+  const fill = cs.getPropertyValue('--surface').trim() || cs.getPropertyValue('--bg').trim();
+  if (!fill) return;
+  /* The media-scoped pair from <head> goes on the first call and only then: a
+     browser uses the FIRST meta whose media query matches, so leaving them in
+     place would keep them outranking this one. After that the same element is
+     mutated rather than removed and re-added — a browser holds a reference to
+     the theme-color element it picked, and swapping the node out on every
+     theme change is the fragile way to tell it the colour moved. */
+  document.querySelectorAll('meta[name="theme-color"][media]').forEach(m => m.remove());
+  let meta = document.querySelector('meta[name="theme-color"]');
+  if (!meta){
+    meta = document.createElement('meta');
+    meta.name = 'theme-color';
+    document.head.appendChild(meta);
+  }
+  if (meta.content !== fill) meta.content = fill;
 }
 /* On the `system` theme the tokens change without applyTheme() being called, so
    the bar has to follow the OS switch on its own. */
@@ -3575,7 +3604,13 @@ function trackHeaderHeight(){
   const apply = () => document.documentElement.style.setProperty(
     '--header-h', header.getBoundingClientRect().height + 'px');
   apply();
-  if (window.ResizeObserver) new ResizeObserver(apply).observe(header);
+  /* box:'border-box' is load-bearing. The header's height is now partly
+     padding — it pays env(safe-area-inset-top) — and a ResizeObserver watches
+     the CONTENT box unless told otherwise, so a changing inset would move the
+     header without ever firing this. The measured value feeds --header-h, which
+     is where the session strip sticks; a stale one parks the strip underneath
+     the header. */
+  if (window.ResizeObserver) new ResizeObserver(apply).observe(header, { box:'border-box' });
   else window.addEventListener('resize', apply);
 }
 /* Templates must not mutate ui while they build strings, so the two selections
