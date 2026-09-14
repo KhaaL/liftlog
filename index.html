@@ -239,6 +239,25 @@ strong{ font-weight:650; }
      session strip beneath it follows without anything else changing. */
   padding-top:env(safe-area-inset-top);
 }
+/* Android paints its own clock and status icons over the strip above, and
+   chooses their colour from the SYSTEM's light/dark setting — not from the
+   theme picked in here, and not from anything this page can say. When the two
+   disagree the glyphs vanish into the header: a light theme on a phone in dark
+   mode leaves white glyphs on a white header, a dark theme on a light phone
+   leaves dark glyphs on a dark one.
+
+   Nothing on the page can repaint the glyphs, so the strip behind them is
+   repainted instead. --text is by definition the colour that reads against
+   this theme's background, and in exactly this mismatched case the system's
+   glyphs share that background's brightness — so --text is what they need.
+   Height is the inset itself, which is 0 wherever there is no status bar to
+   cover, leaving this rule inert on desktop. syncSystemBar() owns the flag. */
+.app-header::before{
+  content:""; position:absolute; top:0; left:0; right:0;
+  height:env(safe-area-inset-top);
+  background:transparent; pointer-events:none;
+}
+:root[data-statusbar="invert"] .app-header::before{ background:var(--text); }
 .header-inner{ display:flex; align-items:center; gap:var(--sp-4); min-height:52px; padding-top:var(--sp-1); padding-bottom:var(--sp-1); }
 /* flex:1 + min-width:0 is what makes the list below actually scroll: without
    it the <ul> sizes to its content and pushes the last tab off-screen. */
@@ -1876,8 +1895,16 @@ function navigate(view){
 const exerciseById = id => state.exercises.find(e => e.id === id);
 const routineById  = id => state.routines.find(r => r.id === id);
 
+function currentTheme(){
+  return THEMES.some(x => x.id === state.settings.theme) ? state.settings.theme : 'system';
+}
+/* What the OS will draw its status-bar glyphs for, which is the one half of
+   this the page does not get a say in. */
+function systemPrefersDark(){
+  return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+}
 function applyTheme(){
-  const t = THEMES.some(x => x.id === state.settings.theme) ? state.settings.theme : 'system';
+  const t = currentTheme();
   if (t === 'system') document.documentElement.removeAttribute('data-theme');
   else document.documentElement.setAttribute('data-theme', t);
 
@@ -1890,18 +1917,34 @@ function applyTheme(){
   document.documentElement.style.colorScheme = scheme || 'light dark';
   syncSystemBar();
 }
-/* Point the status/navigation bar at the theme's real background.
+/* Point the status bar, and the strip behind it, at a colour its glyphs can be
+   read against.
 
-   The manifest's theme_color is a single static value, so an installed PWA
-   opens with whatever it says (light) no matter which theme is active. Chrome
-   on Android does honour later <meta name="theme-color"> changes, and picks the
-   FIRST meta whose media query matches — so the media-scoped pair from <head>
-   is removed here rather than added to, otherwise it would keep winning. */
+   Two things sit in that strip and only one of them is ours. The app paints it
+   (.app-header pays env(safe-area-inset-top), so the header background fills
+   it); the OS paints the clock and status icons on top. On Android 15 an
+   installed PWA is drawn edge-to-edge — the status bar is transparent, so those
+   glyphs land directly on the app's pixels — and their colour follows the
+   phone's own light/dark setting. theme-color and color-scheme are the only
+   levers a page has over that, and neither one moves it here.
+
+   So the glyph colour is treated as a given and the strip is matched to it.
+   Whenever the active theme's scheme disagrees with the system's, the strip
+   flips to --text: the colour that contrasts with this theme's background, and
+   therefore with glyphs drawn for a background of the opposite brightness. The
+   meta is told the same colour, so anywhere the bar IS tinted from it the two
+   agree rather than fight. */
 function syncSystemBar(){
-  /* --surface, not --bg: .app-header is what paints the strip the status bar
-     sits in, so that is the colour the bar should be told about. */
-  const cs = getComputedStyle(document.documentElement);
-  const fill = cs.getPropertyValue('--surface').trim() || cs.getPropertyValue('--bg').trim();
+  const root = document.documentElement;
+  const cs = getComputedStyle(root);
+  const scheme = THEME_SCHEME[currentTheme()];
+  const invert = !!scheme && scheme !== (systemPrefersDark() ? 'dark' : 'light');
+  if (invert) root.setAttribute('data-statusbar','invert');
+  else root.removeAttribute('data-statusbar');
+  /* --surface, not --bg, in the ordinary case: .app-header is what paints the
+     strip the status bar sits in, so that is the colour the bar should hear. */
+  const fill = (invert ? cs.getPropertyValue('--text').trim() : '')
+    || cs.getPropertyValue('--surface').trim() || cs.getPropertyValue('--bg').trim();
   if (!fill) return;
   /* The media-scoped pair from <head> goes on the first call and only then: a
      browser uses the FIRST meta whose media query matches, so leaving them in
@@ -1918,13 +1961,14 @@ function syncSystemBar(){
   }
   if (meta.content !== fill) meta.content = fill;
 }
-/* On the `system` theme the tokens change without applyTheme() being called, so
-   the bar has to follow the OS switch on its own. */
+/* An OS light/dark switch matters under every theme, not just `system`. On
+   `system` it changes the tokens without applyTheme() being called; under a
+   pinned theme it changes nothing on the page but flips the glyph colour the
+   strip has to contrast with. Both are syncSystemBar()'s to settle. */
 if (window.matchMedia){
   const mq = window.matchMedia('(prefers-color-scheme: dark)');
-  const onSchemeChange = () => { if (state.settings.theme === 'system') syncSystemBar(); };
-  if (mq.addEventListener) mq.addEventListener('change', onSchemeChange);
-  else if (mq.addListener) mq.addListener(onSchemeChange);
+  if (mq.addEventListener) mq.addEventListener('change', syncSystemBar);
+  else if (mq.addListener) mq.addListener(syncSystemBar);
 }
 
 /* ============================================================

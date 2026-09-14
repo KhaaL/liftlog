@@ -274,6 +274,9 @@ what shows through a transparent system bar is this app's surface colour rather
 than whatever it would otherwise composite against. The header is
 `position:sticky; top:0`, so the strip stays painted while the page scrolls.
 
+Clearing the strip is only half of it, though — see **The glyphs are not ours**
+below for what happens *in* it.
+
 One consequence worth knowing about: the header's height is now partly padding,
 and `trackHeaderHeight()`'s `ResizeObserver` must therefore observe
 `{ box:'border-box' }`. The default is the *content* box, which a padding change
@@ -646,6 +649,44 @@ contract, and both are required:
 - `syncSystemBar()` — the fill behind them, read from the active theme's
   computed `--surface`. `--surface`, not `--bg`, because `.app-header` is what
   paints the strip the status bar sits in (see **Safe areas** above).
+
+### The glyphs are not ours
+
+Neither lever above actually moves Android's status-bar glyphs in an installed
+PWA. On Android 15 a WebAPK is drawn edge-to-edge: the status bar is
+transparent, the clock and status icons land directly on the app's own pixels,
+and their colour follows the **phone's** light/dark setting. Not `theme-color`,
+not `color-scheme`, not the manifest. The page does not get a vote.
+
+Which is fine while the two agree, and invisible when they do not:
+
+| Phone | Theme | Glyphs | Strip, before | |
+| --- | --- | --- | --- | --- |
+| dark | Light pinned | white | white | gone |
+| light | Dark pinned | dark | dark | gone |
+| dark | Dark / System | white | dark | fine |
+| light | Light / System | dark | white | fine |
+
+So the glyph colour is taken as a given and the strip is matched to it instead.
+When the active theme's scheme disagrees with the system's, `syncSystemBar()`
+sets `data-statusbar="invert"` on the root and `.app-header::before` fills the
+inset with `var(--text)`.
+
+`--text` is the right token by construction rather than by luck: it is the
+colour that reads against this theme's background, and in the mismatched case
+the system's glyphs are drawn for a background of exactly the opposite
+brightness to that one. The `theme-color` meta is set to the same value, so
+anywhere the bar *is* tinted from it the two agree instead of fighting. All
+sixteen theme × system-mode combinations clear 4.5:1 against the glyphs; the
+worst is 11.1:1.
+
+The rule is inert where it should be: the pseudo-element's height is the inset
+itself, which is `0` wherever there is no status bar to cover.
+
+Because the flag depends on the *system* scheme under every theme — not just
+`system` — the `prefers-color-scheme` listener re-runs `syncSystemBar()`
+unconditionally. Under a pinned theme an OS switch changes nothing on the page
+and still flips which colour the strip has to be.
 
 Set only one and a dark theme gets white glyphs on a white bar, or dark glyphs
 on a dark bar.
