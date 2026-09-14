@@ -2015,7 +2015,7 @@ function systemBarReport(){
     ['Theme', t + (THEME_SCHEME[t] ? ' (' + THEME_SCHEME[t] + ')' : ' (follows phone)')],
     ['Strip inverted', root.getAttribute('data-statusbar') === 'invert' ? 'yes' : 'no'],
     ['theme-color (page)', meta ? meta.content : 'none'],
-    ['theme_color (manifest)', manifestThemeColor || '—'],
+    ['theme_color (manifest file)', manifestThemeColor || '—'],
     ['--surface', cs.getPropertyValue('--surface').trim()],
     ['--text', cs.getPropertyValue('--text').trim()]
   ];
@@ -2038,7 +2038,9 @@ function systemBarDiagnostics(){
   return '<details class="diag"><summary>System bar diagnostics</summary>' +
     '<p class="desc">What this page can actually see. Android chooses the colour of the clock ' +
     'and the status icons itself and does not tell the page which it picked, so if the bar ' +
-    'disagrees with the values below, the bar is not reading them.</p>' +
+    'disagrees with the values below, the bar is not reading them. The manifest row is the ' +
+    'value in the <em>file</em>: an installed app keeps the colour it was installed with ' +
+    'until it is reinstalled, and nothing here can see that one.</p>' +
     '<dl class="diag-list">' + diagRows() +
     '<button type="button" class="btn btn-sm" data-action="copy-diag">' + IC.copy + '<span>Copy</span></button>' +
   '</details>';
