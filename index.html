@@ -512,6 +512,17 @@ kbd{
 .ex-head{ display:flex; justify-content:space-between; gap:var(--sp-3); align-items:baseline; flex-wrap:wrap; }
 .ex-name{ font-size:var(--fs-lg); font-weight:700; letter-spacing:-.02em; }
 .ex-tags{ display:flex; gap:var(--sp-2); flex-wrap:wrap; }
+/* Deliberately quiet: the link is worth having on the exercise you have not
+   done before, and worth ignoring on the hundred you have. It keeps a 44px
+   tall tap target on a phone without taking a button's worth of weight. */
+.how-to{
+  display:inline-flex; align-items:center; gap:6px; align-self:center;
+  color:var(--accent); font-size:var(--fs-xs); font-weight:650;
+  text-decoration:none; padding:var(--sp-2) 0; min-height:24px;
+}
+.how-to:hover{ text-decoration:underline; }
+.how-to .ic{ width:14px; height:14px; }
+.list-main .how-to{ margin-top:2px; }
 .tag{
   font-size:var(--fs-xs); font-weight:650; padding:2px 8px; border-radius:99px;
   border:1px solid var(--border-strong); color:var(--muted); background:var(--surface-2);
@@ -1252,6 +1263,29 @@ function esc(str){
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
+/* The one guard every stored URL passes through before it can reach an href.
+   esc() is not enough on its own here: `javascript:alert(1)` contains nothing
+   escapable, so it would survive escaping intact and run on click. Only http
+   and https get through; anything else — a bad parse, a data:, a javascript:,
+   a mailto: — becomes the empty string, which every caller reads as "no link".
+
+   A bare `example.com/how-to` is what a person actually types, so it is given
+   https:// rather than refused; the scheme is then ours, not theirs. */
+const URL_MAX = 500;
+function safeUrl(raw){
+  const s = String(raw == null ? '' : raw).trim();
+  if (!s || s.length > URL_MAX) return '';
+  const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(s) ? s : 'https://' + s;
+  let u;
+  try{ u = new URL(withScheme); }catch(e){ return ''; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
+  /* new URL() will percent-encode almost anything into a hostname — a typed
+     sentence becomes https://not%20a%20url/ and looks accepted. A real host
+     has dot-separated labels (or is an IP), so require that rather than trust
+     the parse. */
+  if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/i.test(u.hostname)) return '';
+  return u.href.length > URL_MAX ? '' : u.href;
+}
 /* Minimal markdown → HTML for session notes: headings, bold/italic, inline
    code, links and single-level lists. No tables, no fenced code blocks, no
    nested lists — notes are a phone-typed paragraph or two, not a document.
@@ -1504,10 +1538,11 @@ const SHORTCUTS = [
    ============================================================ */
 const LS_KEY = 'liftlog.v1';
 const LS_RESCUE_KEY = 'liftlog.v1.unreadable';  /* holds data we could not load, so nothing is lost silently */
-const SCHEMA_VERSION = 4;   /* v3: sets carry durationSeconds (time no longer overloads reps)
+const SCHEMA_VERSION = 5;   /* v3: sets carry durationSeconds (time no longer overloads reps)
                                + countForVolume / countForPR split execution from analytics
-                               v4: settings carry effortMetric ('none'|'rpe'|'rir'), sets carry rir */
-const EXPORT_SCHEMA = '1.1.0'; /* version of the documented import/export contract — 1.1: sets[].rir */
+                               v4: settings carry effortMetric ('none'|'rpe'|'rir'), sets carry rir
+                               v5: library exercises carry url (how to perform the movement) */
+const EXPORT_SCHEMA = '1.2.0'; /* version of the documented import/export contract — 1.1: sets[].rir; 1.2: exercises[].url */
 
 /* Set by load() when stored data could not be used, surfaced once after init. */
 let loadWarning = '';
@@ -1680,6 +1715,7 @@ function load(){
   if (parsed.version === 1) migrateToV2(parsed);   /* old installs: refresh the seed library, keep history */
   if (parsed.version === 2) migrateToV3(parsed);   /* v2 stored seconds in `reps` for timed sets */
   if (parsed.version === 3) migrateToV4(parsed);   /* v3 had no effort-metric preference */
+  if (parsed.version === 4) migrateToV5(parsed);   /* v4 exercises had nowhere to put a how-to link */
   return normalizeState(parsed);
 }
 /* v1 shipped an earlier seed library/routines. v2 refreshes both to the
@@ -1719,6 +1755,13 @@ function migrateToV4(s){
   s.settings.effortMetric = hadRpe ? 'rpe' : 'none';
   s.version = 4;
 }
+/* v5 adds a per-exercise instructions link. Nothing to convert — the field is
+   new and empty — but the version has to move so a v5 file is never handed to
+   a v4 build, which would drop the links on its next save. */
+function migrateToV5(s){
+  (s.exercises || []).forEach(e => { if (e) e.url = ''; });
+  s.version = 5;
+}
 /* Anything reachable from disk or an import file gets clamped to a known value
    here, so the render layer never has to defend against stray strings. */
 function normalizeState(s){
@@ -1737,7 +1780,8 @@ function normalizeState(s){
   s.exercises = (s.exercises || []).map(e => Object.assign({}, e, {
     category: typeof e.category === 'string' ? e.category : '',
     unit: isUnit(e.unit) ? e.unit : 'kg',
-    notes: typeof e.notes === 'string' ? e.notes : ''
+    notes: typeof e.notes === 'string' ? e.notes : '',
+    url: safeUrl(e.url)
   }));
   s.routines  = s.routines || [];
   s.workouts  = s.workouts || [];
@@ -1767,7 +1811,10 @@ function sortWorkouts(list){
    mostly pin-loaded machines, plus a couple of bodyweight exceptions where
    they are genuinely useful (glute activation, a core stability hold). */
 function sampleExercises(){
-  const mk = (name, category, unit, notes) => ({ id:uid(), name, category, unit, notes: notes || '' });
+  /* No how-to links in the seed: they would be links to sites this project
+     does not control, shipped to every first run and rotting there. The field
+     is yours to fill in on the movements you actually want a reminder for. */
+  const mk = (name, category, unit, notes) => ({ id:uid(), name, category, unit, notes: notes || '', url:'' });
   return [
     mk('Chest Press Machine','Chest','kg','Gym machine. Use controlled reps, focus on form.'),
     mk('Pec Fly Machine','Chest','kg','Light load works well. Focus on a smooth contraction.'),
@@ -3017,23 +3064,36 @@ function saveNewExercise(form){
   if (state.exercises.some(e => e.name.toLowerCase() === name.toLowerCase())){
     ui.exerciseFormError = 'An exercise with this name already exists.'; render(); return;
   }
+  /* A link that cannot be made into an http(s) one is dropped rather than
+     failing the save: the exercise is the thing being created, and a typo in
+     an optional field should not cost the name and the unit too. The toast
+     says so, so it is not silent. */
+  const url = safeUrl(form.url);
+  const badUrl = !url && String(form.url || '').trim() !== '';
   state.exercises.push({
     id:uid(), name,
     category: form.category.trim() || 'General',
     unit: form.unit || 'kg',
-    notes: form.notes.trim()
+    notes: form.notes.trim(),
+    url
   });
   ui.showExerciseForm = false; ui.exerciseFormError = '';
-  save(); render(); toast('Exercise added — ' + name);
+  save(); render();
+  toast(badUrl ? 'Exercise added — ' + name + ' (the link was not a valid web address)'
+               : 'Exercise added — ' + name);
 }
 function saveExerciseDraft(){
   const d = ui.exerciseDraft; if (!d) return;
   if (!d.name.trim()){ toast('Name is required'); return; }
   const i = state.exercises.findIndex(e => e.id === d.id);
   if (i === -1) return;
-  state.exercises[i] = { id:d.id, name:d.name.trim(), category:d.category.trim() || 'General', unit:d.unit, notes:d.notes.trim() };
+  const url = safeUrl(d.url);
+  const badUrl = !url && String(d.url || '').trim() !== '';
+  state.exercises[i] = { id:d.id, name:d.name.trim(), category:d.category.trim() || 'General',
+                         unit:d.unit, notes:d.notes.trim(), url };
   ui.exerciseDraft = null;
-  save(); render(); toast('Exercise updated');
+  save(); render();
+  toast(badUrl ? 'Exercise updated — the link was not a valid web address' : 'Exercise updated');
 }
 function deleteExercise(id){
   const ex = exerciseById(id); if (!ex) return;
@@ -3474,7 +3534,7 @@ function importRoutines(file){
         if (!local && src) local = byName(src.name);
         if (!local && src){
           state.exercises.push({ id:uid(), name:String(src.name), category:String(src.category || 'General'),
-            unit:isUnit(src.unit) ? src.unit : 'kg', notes:String(src.notes || '') });
+            unit:isUnit(src.unit) ? src.unit : 'kg', notes:String(src.notes || ''), url:safeUrl(src.url) });
           local = state.exercises[state.exercises.length - 1]; addedEx++;
         }
         if (!local) return null;
@@ -3572,8 +3632,9 @@ function schemaHelpHTML(){
       ['items[].reps', 'integer', 'Clamped to ' + L.reps[0] + '\u2013' + L.reps[1] + '. Default 8. For a timed movement this is <em>seconds</em>.'],
       ['items[].weight', 'number | null', 'Planned load. <code>null</code> leaves the bar to last time\u2019s figure.'],
       ['items[].rest', 'integer', 'Seconds, clamped to ' + L.rest[0] + '\u2013' + L.rest[1] + '. Defaults to your setting.'],
-      ['exercises[]', 'optional', 'Definitions for the ids above: <code>id</code>, <code>name</code>, <code>category</code>, <code>unit</code>, <code>notes</code>.'],
-      ['exercises[].unit', 'enum', 'One of ' + units + '. Anything else becomes <code>kg</code>.']
+      ['exercises[]', 'optional', 'Definitions for the ids above: <code>id</code>, <code>name</code>, <code>category</code>, <code>unit</code>, <code>notes</code>, <code>url</code>.'],
+      ['exercises[].unit', 'enum', 'One of ' + units + '. Anything else becomes <code>kg</code>.'],
+      ['exercises[].url', 'string', 'A link showing how to perform the movement. Only <code>http</code> and <code>https</code> survive; anything else is dropped.']
     ]) +
     code(sampleRoutinesFile()) +
 
@@ -4143,6 +4204,10 @@ function htmlCurrentExercise(w, ex){
           (ex.targetWeight != null ? ' @ ' + fmtNum(ex.targetWeight) + ' ' + unitLabel() : '') + '</span>' +
         '<span class="tag">' + icon('timer','ic-inline') + ' rest ' + fmtClock(ex.restSeconds || state.settings.defaultRest) + '</span>' +
       '</span>' +
+      /* Read from the library rather than from the session's own copy of the
+         exercise: a link corrected today should work in a session started
+         yesterday, and the workout block already duplicates enough. */
+      htmlHowTo((exerciseById(ex.exerciseId) || {}).url, ex.name) +
     '</div>' +
     prevHTML +
     (ex.notes ? '<p class="ex-notes">“' + esc(ex.notes) + '”</p>' : '') +
@@ -4794,6 +4859,7 @@ function viewExercises(){
           (last ? ' · last ' + relDays(last.date) : '') +
         '</p>' +
         (e.notes ? '<p class="list-meta quote">“' + esc(e.notes) + '”</p>' : '') +
+        htmlHowTo(e.url, e.name) +
       '</div>' +
       '<span class="list-actions">' +
         '<button type="button" class="btn btn-sm" data-action="ex-edit" data-id="' + e.id + '" aria-label="Edit ' + esc(e.name) + '">Edit</button>' +
@@ -4822,12 +4888,31 @@ function htmlExerciseForm(){
       '</div>' +
       '<label class="field mt-3"><span class="cap">Notes (optional)</span>' +
         '<input type="text" name="exnotes" placeholder="Cues, tempo, grip…"></label>' +
+      /* type="text" with inputmode="url", not type="url": the native validator
+         refuses a bare "example.com" and blocks the whole submit over an
+         optional field, where safeUrl() simply gives it https://. The keyboard
+         is the same either way. */
+      '<label class="field mt-3"><span class="cap">How-to link (optional)</span>' +
+        '<input type="text" name="exurl" inputmode="url" autocomplete="url" spellcheck="false" ' +
+        'placeholder="https://… a video or page showing the movement"></label>' +
       (ui.exerciseFormError ? '<p class="error-text mt-2" role="alert">' + esc(ui.exerciseFormError) + '</p>' : '') +
       '<div class="form-actions mt-3">' +
         '<button type="submit" class="btn btn-primary">Add exercise</button>' +
         '<button type="button" class="btn" data-action="ex-form-close">Cancel</button>' +
       '</div>' +
     '</form></div></section>';
+}
+/* The how-to link, wherever it is shown. Rendered only for a URL that survives
+   safeUrl() — stored values already have, but an exercise object can also come
+   from a file or an older save, so the check is here rather than assumed. The
+   link leaves the app, which is the one place Liftlog sends you anywhere: it
+   opens in its own tab so a session is never navigated away from, and carries
+   noopener so the page it opens cannot reach back. */
+function htmlHowTo(rawUrl, name){
+  const url = safeUrl(rawUrl);
+  if (!url) return '';
+  return '<a class="how-to" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer" ' +
+    'aria-label="How to perform ' + esc(name) + ' (opens in a new tab)">' + IC.link + '<span>How to</span></a>';
 }
 function htmlExerciseEditRow(e){
   const d = ui.exerciseDraft;
@@ -4842,6 +4927,10 @@ function htmlExerciseEditRow(e){
       '</div>' +
       '<label class="field mt-3"><span class="cap">Notes</span>' +
         '<input type="text" data-bind="edraft" data-field="notes" value="' + esc(d.notes) + '"></label>' +
+      '<label class="field mt-3"><span class="cap">How-to link</span>' +
+        '<input type="text" inputmode="url" autocomplete="url" spellcheck="false" ' +
+        'data-bind="edraft" data-field="url" value="' + esc(d.url || '') + '" ' +
+        'placeholder="https://… a video or page showing the movement"></label>' +
       '<div class="form-actions mt-3">' +
         '<button type="submit" class="btn btn-primary btn-sm">Save</button>' +
         '<button type="button" class="btn btn-sm" data-action="ex-edit-cancel">Cancel</button>' +
@@ -5148,7 +5237,7 @@ const actions = {
   'ex-form-toggle'(){ ui.showExerciseForm = !ui.showExerciseForm; ui.exerciseFormError=''; render();
     if (ui.showExerciseForm){ const f = $('[data-form="ex-new"] input[name="exname"]'); if (f) f.focus(); } },
   'ex-form-close'(){ ui.showExerciseForm = false; ui.exerciseFormError=''; render(); },
-  'ex-edit'(d){ const e = exerciseById(d.id); if (e){ ui.exerciseDraft = deepCopy(e); render(); } },
+  'ex-edit'(d){ const e = exerciseById(d.id); if (e){ ui.exerciseDraft = Object.assign({ url:'' }, deepCopy(e)); render(); } },
   'ex-edit-cancel'(){ ui.exerciseDraft = null; render(); },
   'ex-del'(d){ deleteExercise(d.id); },
 
@@ -5591,7 +5680,7 @@ document.addEventListener('submit', e => {
   }
   else if (kind === 'ex-new'){
     const g = n => { const el = form.elements.namedItem(n); return el ? el.value : ''; };
-    saveNewExercise({ name:g('exname'), category:g('excat'), unit:g('exunit'), notes:g('exnotes') });
+    saveNewExercise({ name:g('exname'), category:g('excat'), unit:g('exunit'), notes:g('exnotes'), url:g('exurl') });
   }
   else if (kind === 'ex-save'){ saveExerciseDraft(); }
   else if (kind === 'remote-config'){ saveRemoteConfigForm(form); }

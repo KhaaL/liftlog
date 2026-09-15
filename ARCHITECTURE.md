@@ -316,7 +316,7 @@ state
 ├─ version         schema version (SCHEMA_VERSION)
 ├─ settings        { theme, unit, defaultRest, autoRest, sound, vibrate, effortMetric,
 │                    lastFileBackupAt, seededAt }
-├─ exercises[]     { id, name, category, unit, notes }        — the library
+├─ exercises[]     { id, name, category, unit, notes, url }   — the library
 ├─ routines[]      { id, name, items[] }                      — the plan
 │   └─ items[]     { id, exerciseId, sets, reps, weight, rest }
 ├─ workouts[]      logged sessions, newest first              — the log
@@ -420,6 +420,11 @@ neither guaranteed nor permanent:
   current sample data, keeps logged workouts and preferences.
 - **v2 → v3** — moves seconds out of `reps` into `durationSeconds`; adds the
   `countForVolume` / `countForPR` split.
+- **v3 → v4** — adds `settings.effortMetric`, preselecting RPE where a logged
+  RPE already exists.
+- **v4 → v5** — adds `exercises[].url`, the how-to link. Nothing to convert; the
+  version moves so a v5 file is never handed back to a v4 build, which would
+  drop the links on its next save.
 
 Data that cannot be read — corrupt JSON, an unrecognized shape, or a *newer*
 schema version — is never overwritten in place. It is copied to
@@ -605,6 +610,25 @@ you can.
   browsers).
 - **Manual, not sync.** There's no conflict resolution because there's no
   automatic sync — each Backup/Restore fully overwrites one side, on request.
+
+### Links out
+
+`exercises[].url` is the only value in the app that becomes an `href`, and the
+only thing that sends you anywhere off the page. Two rules hold it:
+
+- **`safeUrl()` is the single gate.** `esc()` cannot help here — `javascript:`
+  contains nothing escapable and would survive escaping intact — so every path
+  that can set a URL (both forms, `normalizeState()`, the routines importer)
+  runs it through `safeUrl()`, which keeps `http:` and `https:` and returns `''`
+  for everything else. `''` reads as "no link" everywhere, so a rejected URL
+  costs the link, never the exercise. A hostname is also required to look like
+  one: `new URL()` will percent-encode a typed sentence into a host, and that
+  should not pass as a link.
+- **It opens in its own tab, with `rel="noopener noreferrer"`.** A session is
+  never navigated away from, and the page that opens cannot reach back.
+
+This does not break "no network calls at all" — the app still fetches nothing —
+but clicking the link is a visit to a third party, which is worth knowing.
 
 ## Progress metrics
 
