@@ -318,9 +318,9 @@ state
 │                    lastFileBackupAt, seededAt }
 ├─ exercises[]     { id, name, category, unit, notes, url }   — the library
 ├─ routines[]      { id, name, items[] }                      — the plan
-│   └─ items[]     { id, exerciseId, sets, reps, weight, rest }
+│   └─ items[]     { id, exerciseId, sets, reps, weight }
 ├─ workouts[]      logged sessions, newest first              — the log
-│   └─ exercises[] { exerciseId, name, unit, targetReps, restSeconds, skipped, sets[] }
+│   └─ exercises[] { exerciseId, name, unit, targetReps, skipped, sets[] }
 │       └─ sets[]  { id, weight, reps, durationSeconds, rpe, rir, unit, completed, completedAt,
 │                    countForVolume?, countForPR? }   — absent means "counts"
 └─ activeWorkout   a workout in progress, or null
@@ -393,6 +393,16 @@ neither guaranteed nor permanent:
   performed; `countForVolume` / `countForPR` (default true) say whether it counts
   toward totals and records. A warm-up is `completed: true` with both flags
   false — it is still shown in history, marked as a warm-up.
+- **There is exactly one rest length, and it is `settings.defaultRest`.** Rest
+  used to live on each routine item, seeded from that setting and then
+  hand-tuned, so the same movement could rest 45s in one routine and 90s in
+  another with nothing on screen saying why — and the seeded program shipped
+  five different values. It is one number now, read through
+  `currentRestSeconds()`, which every consumer goes through: the manual start,
+  the auto-rest after a set, the reset button, and the tag in the exercise
+  head. A rest length changed in Settings reaches an idle session timer
+  immediately and a running or paused one on its next rest, because cutting a
+  rest already under way is not what editing a preference should mean.
 - **`rpe` and `rir` are independent fields on a set, but only one shows as an
   input at a time.** `settings.effortMetric` (`'none' | 'rpe' | 'rir'`) is a
   single global choice, not per-exercise — logging one style of set at a time
@@ -425,6 +435,8 @@ neither guaranteed nor permanent:
 - **v4 → v5** — adds `exercises[].url`, the how-to link. Nothing to convert; the
   version moves so a v5 file is never handed back to a v4 build, which would
   drop the links on its next save.
+- **v5 → v6** — removes `items[].rest` and `exercises[].restSeconds`. One-way:
+  hand-tuned rest lengths survive only in a backup taken before the upgrade.
 
 Data that cannot be read — corrupt JSON, an unrecognized shape, or a *newer*
 schema version — is never overwritten in place. It is copied to

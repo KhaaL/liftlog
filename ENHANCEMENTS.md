@@ -236,9 +236,13 @@ clear all) is cheap. Currently every one of them is a confirm-and-hope.
   so `overviewStep()` / `routineStep()` are the pattern to copy.
 - ~~**Timer presets are fixed** at 60/90/120/180s.~~ **Withdrawn** — the
   presets and the action-bar sheet that held them are gone. Rest length is a
-  decision made once, in Settings or on the exercise, and `+0:30` covers the
-  one-off; a sheet of alternatives was a second place to configure the same
-  number, on the screen with the least room for one.
+  decision made once, in Settings, and `+0:30` covers the one-off; a sheet of
+  alternatives was a second place to configure the same number, on the screen
+  with the least room for one. The per-routine-item rest went the same way in
+  v6, for the same reason: it was a third place, it was hand-tuned into five
+  different values by the seed program alone, and nothing on screen explained
+  why one machine rested longer than the next. Reset joins `+0:30` as the other
+  half of the one-off — it puts back a rest you have spent or extended.
 - **Empty-state guidance.** ~~A first-run walkthrough would beat the "load sample
   data" shortcut, which drops an opinionated program on the user.~~ The shortcut
   is gone, and Settings now documents the import format and hands out working

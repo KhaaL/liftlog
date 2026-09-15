@@ -792,7 +792,7 @@ kbd{
 .mg-best{ font-size:var(--fs-sm); font-variant-numeric:tabular-nums; white-space:nowrap; }
 
 /* routine editor */
-.item-row{ display:grid; grid-template-columns:44px 1fr repeat(4,minmax(64px,86px)) 84px; gap:var(--sp-2); align-items:end; padding:var(--sp-3) 0; border-top:1px solid var(--border); }
+.item-row{ display:grid; grid-template-columns:44px 1fr repeat(3,minmax(64px,96px)) 84px; gap:var(--sp-2); align-items:end; padding:var(--sp-3) 0; border-top:1px solid var(--border); }
 .item-row:first-child{ border-top:0; }
 .item-name{ font-weight:600; font-size:var(--fs-sm); padding-bottom:9px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .item-actions{ display:flex; gap:2px; padding-bottom:4px; }
@@ -828,6 +828,8 @@ html.is-reordering{ user-select:none; -webkit-user-select:none; }
   .item-row{ grid-template-columns:44px 1fr 1fr; }
   .item-row .item-name{ grid-column:2 / -1; padding-bottom:2px; }
   .item-row .grip{ grid-row:1 / span 3; align-self:center; }
+  /* three fields across two columns leaves a gap; weight takes the spare one */
+  .item-row .field:last-of-type{ grid-column:2 / -1; }
   .item-row .item-actions{ grid-column:2 / -1; justify-content:flex-end; }
 }
 
@@ -1509,7 +1511,7 @@ const SET_TYPES = ['reps','time','hold','distance'];
 const REST_MIN = 15, REST_MAX = 600;
 
 /* Routine item bounds, applied on save and on import alike. */
-const ITEM_LIMITS = { sets:[1,12], reps:[0,999], rest:[0,900] };
+const ITEM_LIMITS = { sets:[1,12], reps:[0,999] };
 
 /* Single-key view switches, shared by the shortcut handler. */
 const NAV_KEYS = { t:'today', r:'routines', h:'history', e:'exercises' };
@@ -1538,11 +1540,14 @@ const SHORTCUTS = [
    ============================================================ */
 const LS_KEY = 'liftlog.v1';
 const LS_RESCUE_KEY = 'liftlog.v1.unreadable';  /* holds data we could not load, so nothing is lost silently */
-const SCHEMA_VERSION = 5;   /* v3: sets carry durationSeconds (time no longer overloads reps)
+const SCHEMA_VERSION = 6;   /* v3: sets carry durationSeconds (time no longer overloads reps)
                                + countForVolume / countForPR split execution from analytics
                                v4: settings carry effortMetric ('none'|'rpe'|'rir'), sets carry rir
-                               v5: library exercises carry url (how to perform the movement) */
-const EXPORT_SCHEMA = '1.2.0'; /* version of the documented import/export contract — 1.1: sets[].rir; 1.2: exercises[].url */
+                               v5: library exercises carry url (how to perform the movement)
+                               v6: rest is settings.defaultRest alone — items[].rest and
+                                   exercises[].restSeconds are gone */
+const EXPORT_SCHEMA = '1.3.0'; /* version of the documented import/export contract — 1.1: sets[].rir;
+                                  1.2: exercises[].url; 1.3: per-item rest dropped */
 
 /* Set by load() when stored data could not be used, surfaced once after init. */
 let loadWarning = '';
@@ -1716,6 +1721,7 @@ function load(){
   if (parsed.version === 2) migrateToV3(parsed);   /* v2 stored seconds in `reps` for timed sets */
   if (parsed.version === 3) migrateToV4(parsed);   /* v3 had no effort-metric preference */
   if (parsed.version === 4) migrateToV5(parsed);   /* v4 exercises had nowhere to put a how-to link */
+  if (parsed.version === 5) migrateToV6(parsed);   /* v5 kept a rest length per routine item */
   return normalizeState(parsed);
 }
 /* v1 shipped an earlier seed library/routines. v2 refreshes both to the
@@ -1761,6 +1767,22 @@ function migrateToV4(s){
 function migrateToV5(s){
   (s.exercises || []).forEach(e => { if (e) e.url = ''; });
   s.version = 5;
+}
+/* v6 makes settings.defaultRest the only rest length there is. The per-item
+   and per-exercise copies are removed rather than left unread: a number still
+   sitting in the file that nothing honours is the same confusion in a new
+   place. Logged sessions lose nothing that was ever shown — restSeconds was
+   the plan for a rest, never a record of one.
+
+   This is one-way. Hand-tuned rest lengths are not recoverable from a migrated
+   file, only from a backup taken before the upgrade. */
+function migrateToV6(s){
+  (s.routines || []).forEach(r => (r && r.items || []).forEach(it => { if (it) delete it.rest; }));
+  const strip = w => (w && Array.isArray(w.exercises)) &&
+    w.exercises.forEach(ex => { if (ex) delete ex.restSeconds; });
+  (s.workouts || []).forEach(strip);
+  strip(s.activeWorkout);
+  s.version = 6;
 }
 /* Anything reachable from disk or an import file gets clamped to a known value
    here, so the render layer never has to defend against stray strings. */
@@ -1834,31 +1856,31 @@ function sampleExercises(){
    2-3 sets of 10-15 reps, 45-120s rest, weight challenging but not maxing out. */
 function sampleRoutines(exs){
   const find = n => exs.find(e => e.name === n).id;
-  const item = (name, sets, reps, weight, rest) =>
-    ({ id:uid(), exerciseId:find(name), sets, reps, weight, rest });
+  const item = (name, sets, reps, weight) =>
+    ({ id:uid(), exerciseId:find(name), sets, reps, weight });
   return [
     { id:uid(), name:'A - Upper Body (Machine Focus)', items:[
-      item('Chest Press Machine',3,10,null,90),
-      item('Pec Fly Machine',2,12,null,60),
-      item('Shoulder Press Machine',3,10,null,90),
-      item('Seated Row Machine',3,10,null,90),
-      item('Bicep Curl Machine',2,12,null,45),
-      item('Triceps Extension Machine',2,12,null,45)
+      item('Chest Press Machine',3,10,null),
+      item('Pec Fly Machine',2,12,null),
+      item('Shoulder Press Machine',3,10,null),
+      item('Seated Row Machine',3,10,null),
+      item('Bicep Curl Machine',2,12,null),
+      item('Triceps Extension Machine',2,12,null)
     ]},
     { id:uid(), name:'B - Lower Body (Machine Focus)', items:[
-      item('Glute Bridge (Bodyweight)',2,10,null,40),
-      item('Leg Press Machine',3,10,null,120),
-      item('Leg Extension Machine',2,12,null,60),
-      item('Leg Curl Machine',2,12,null,60),
-      item('Calf Raise Machine',2,15,null,40)
+      item('Glute Bridge (Bodyweight)',2,10,null),
+      item('Leg Press Machine',3,10,null),
+      item('Leg Extension Machine',2,12,null),
+      item('Leg Curl Machine',2,12,null),
+      item('Calf Raise Machine',2,15,null)
     ]},
     { id:uid(), name:'C - Full Body (Machine Blend)', items:[
-      item('Leg Press Machine',3,10,null,90),
-      item('Chest Press Machine',3,10,null,90),
-      item('Seated Row Machine',3,10,null,90),
-      item('Shoulder Press Machine',2,10,null,70),
-      item('Leg Curl Machine',2,12,null,60),
-      item('Plank',2,25,null,40)
+      item('Leg Press Machine',3,10,null),
+      item('Chest Press Machine',3,10,null),
+      item('Seated Row Machine',3,10,null),
+      item('Shoulder Press Machine',2,10,null),
+      item('Leg Curl Machine',2,12,null),
+      item('Plank',2,25,null)
     ]}
   ];
 }
@@ -1873,11 +1895,11 @@ function seedState(){
      carries. */
   const set = (weight, reps, rir, opts) => Object.assign(
     { id:uid(), weight, reps, rir, completed:true, completedAt:0, unit:'kg' }, opts || {});
-  const exBlock = (name, restSeconds, sets) => ({
+  const exBlock = (name, sets) => ({
     exerciseId:exId(name), name, category:(exs.find(e=>e.name===name)||{}).category || '',
     unit:(exs.find(e=>e.name===name)||{}).unit || 'kg', plannedSets:sets.length,
     targetReps:sets[0].reps != null ? sets[0].reps : sets[0].durationSeconds,
-    targetWeight:sets[0].weight, restSeconds, notes:'', skipped:false, sets
+    targetWeight:sets[0].weight, notes:'', skipped:false, sets
   });
   const mkWo = (rid, rname, started, mins, blocks) => ({
     id:uid(), routineId:rid, routineName:rname, startedAt:started, finishedAt:started + mins*60000,
@@ -1886,24 +1908,24 @@ function seedState(){
   const upper = routines[0], lower = routines[1], full = routines[2];
   const workouts = [
     mkWo(upper.id,'A - Upper Body (Machine Focus)', at(2,17), 48, [
-      exBlock('Chest Press Machine',90,[set(40,10,3),set(40,10,2),set(35,9,2)]),
-      exBlock('Shoulder Press Machine',90,[set(30,10,3),set(30,9,2),set(25,8,1)]),
-      exBlock('Seated Row Machine',90,[set(45,10,3),set(45,10,2),set(40,9,2)])
+      exBlock('Chest Press Machine',[set(40,10,3),set(40,10,2),set(35,9,2)]),
+      exBlock('Shoulder Press Machine',[set(30,10,3),set(30,9,2),set(25,8,1)]),
+      exBlock('Seated Row Machine',[set(45,10,3),set(45,10,2),set(40,9,2)])
     ]),
     mkWo(lower.id,'B - Lower Body (Machine Focus)', at(4,8), 40, [
-      exBlock('Leg Press Machine',120,[set(90,10,3),set(90,10,2),set(80,9,2)]),
-      exBlock('Leg Extension Machine',60,[set(35,12,3),set(35,12,2)]),
-      exBlock('Calf Raise Machine',40,[set(50,15,3),set(50,15,2)])
+      exBlock('Leg Press Machine',[set(90,10,3),set(90,10,2),set(80,9,2)]),
+      exBlock('Leg Extension Machine',[set(35,12,3),set(35,12,2)]),
+      exBlock('Calf Raise Machine',[set(50,15,3),set(50,15,2)])
     ]),
     /* Shares four exercises with A and B above, at lower weight — so a fresh
        install already has a real two-point trend to show in History →
        Progress, instead of every exercise reading "log this twice" until the
        user has trained long enough to repeat one for real. */
     mkWo(full.id,'C - Full Body (Machine Blend)', at(9,18), 42, [
-      exBlock('Leg Press Machine',90,[set(80,10,3),set(80,10,2),set(70,9,2)]),
-      exBlock('Chest Press Machine',90,[set(35,10,3),set(35,9,2),set(30,8,2)]),
-      exBlock('Seated Row Machine',90,[set(40,10,3),set(40,9,2),set(35,8,2)]),
-      exBlock('Shoulder Press Machine',70,[set(25,10,3),set(25,9,2),set(20,8,1)])
+      exBlock('Leg Press Machine',[set(80,10,3),set(80,10,2),set(70,9,2)]),
+      exBlock('Chest Press Machine',[set(35,10,3),set(35,9,2),set(30,8,2)]),
+      exBlock('Seated Row Machine',[set(40,10,3),set(40,9,2),set(35,8,2)]),
+      exBlock('Shoulder Press Machine',[set(25,10,3),set(25,9,2),set(20,8,1)])
     ])
   ].sort((a,b) => b.startedAt - a.startedAt);
 
@@ -2301,12 +2323,12 @@ function resetTimer(){
 function canResetTimer(){
   return !timer.running && (timer.done || timer.remaining < timer.total);
 }
+/* One rest length, and it lives in Settings. Rest used to be per routine item,
+   seeded from this setting and then hand-tuned, which meant the same movement
+   could rest for 45s in one routine and 90s in another and nothing on screen
+   said why. A single number is a worse model of training and a much better one
+   of what anybody actually adjusts. */
 function currentRestSeconds(){
-  const w = state.activeWorkout;
-  if (w){
-    const ex = w.exercises[w.currentExerciseIndex];
-    if (ex && ex.restSeconds) return ex.restSeconds;
-  }
   return state.settings.defaultRest;
 }
 function timerRemaining(){
@@ -2612,8 +2634,8 @@ function newSetFrom(ex, copyFrom){
     unit: ex.unit === 'bw' ? 'bw' : (timed ? 'time' : state.settings.unit)
   };
 }
-/* item is a routine item ({exerciseId, sets, reps, weight, rest}); the returned
-   block is the workout-local copy that logging writes into. */
+/* item is a routine item ({exerciseId, sets, reps, weight}); the returned block
+   is the workout-local copy that logging writes into. */
 function buildWorkoutExercise(item){
   const exDef = exerciseById(item.exerciseId) || { name:'Unknown exercise', category:'', unit:state.settings.unit, notes:'' };
   const prev = lastPerformance(item.exerciseId);
@@ -2622,7 +2644,6 @@ function buildWorkoutExercise(item){
     unit:exDef.unit || 'kg', plannedSets:item.sets || 3,
     targetReps:item.reps != null ? item.reps : 8,
     targetWeight:item.weight != null ? item.weight : null,
-    restSeconds:item.rest || state.settings.defaultRest,
     notes:exDef.notes || '', skipped:false, sets:[]
   };
   const n = Math.max(1, item.sets || 3);
@@ -2686,7 +2707,7 @@ function startEmpty(){
 function newRoutineItem(exId){
   const def = exerciseById(exId);
   return { id:uid(), exerciseId:exId, sets:3,
-    reps:(def && def.unit === 'time') ? 30 : 8, weight:null, rest:state.settings.defaultRest };
+    reps:(def && def.unit === 'time') ? 30 : 8, weight:null };
 }
 function addExerciseToWorkout(exId){
   const w = state.activeWorkout;
@@ -2745,7 +2766,7 @@ function toggleSet(setId){
   if (s.completed){
     announce('Set ' + (i+1) + ' of ' + ex.sets.length + ' complete.');
     if (state.settings.autoRest){
-      loadTimer(ex.restSeconds || state.settings.defaultRest);
+      loadTimer(currentRestSeconds());
       startTimer();
     }
   }
@@ -3007,7 +3028,7 @@ function saveRoutineDraft(){
     it.sets   = clamp(parseInt(it.sets,10) || ITEM_LIMITS.sets[0], ITEM_LIMITS.sets[0], ITEM_LIMITS.sets[1]);
     it.reps   = clamp(parseInt(it.reps,10) || 0, ITEM_LIMITS.reps[0], ITEM_LIMITS.reps[1]);
     it.weight = toNum(it.weight);
-    it.rest   = clamp(parseInt(it.rest,10) || state.settings.defaultRest, ITEM_LIMITS.rest[0], ITEM_LIMITS.rest[1]);
+    delete it.rest;   /* v6 dropped it; a draft built from an older routine can still carry one */
   });
   if (d.id){
     const i = state.routines.findIndex(r => r.id === d.id);
@@ -3541,8 +3562,9 @@ function importRoutines(file){
         return { id:uid(), exerciseId:local.id,
           sets:clamp(Number(it.sets) || 3, ITEM_LIMITS.sets[0], ITEM_LIMITS.sets[1]),
           reps:clamp(Number(it.reps) || 8, ITEM_LIMITS.reps[0], ITEM_LIMITS.reps[1]),
-          weight:toNum(it.weight),
-          rest:clamp(Number(it.rest) || state.settings.defaultRest, ITEM_LIMITS.rest[0], ITEM_LIMITS.rest[1]) };
+          /* `rest` on an imported item is read and dropped: files written
+             before v6 still carry one, and ignoring a key is not an error. */
+          weight:toNum(it.weight) };
       }).filter(Boolean);
       if (!items.length){ skippedR++; return; }
       state.routines.push({ id:uid(), name:String(r.name).trim(), items });
@@ -3564,14 +3586,15 @@ function importRoutines(file){
    see how items reference exercises. */
 function importFixture(){
   const exercises = [
-    { id:'ex-squat', name:'Back Squat', category:'Legs', unit:'kg', notes:'Belt above 100kg' },
-    { id:'ex-plank', name:'Plank', category:'Core', unit:'time', notes:'' }
+    { id:'ex-squat', name:'Back Squat', category:'Legs', unit:'kg', notes:'Belt above 100kg',
+      url:'https://en.wikipedia.org/wiki/Squat_(exercise)' },
+    { id:'ex-plank', name:'Plank', category:'Core', unit:'time', notes:'', url:'' }
   ];
   const routines = [{
     id:'rt-lower', name:'Lower body',
     items:[
-      { id:'it-1', exerciseId:'ex-squat', sets:3, reps:5, weight:100, rest:180 },
-      { id:'it-2', exerciseId:'ex-plank', sets:2, reps:45,  weight:null, rest:60 }
+      { id:'it-1', exerciseId:'ex-squat', sets:3, reps:5, weight:100 },
+      { id:'it-2', exerciseId:'ex-plank', sets:2, reps:45,  weight:null }
     ]
   }];
   /* two days back, so relative-date displays have something sensible to show */
@@ -3583,7 +3606,7 @@ function importFixture(){
     currentExerciseIndex:2,
     exercises:[
       { exerciseId:'ex-squat', name:'Back Squat', category:'Legs', unit:'kg',
-        plannedSets:3, targetReps:5, targetWeight:100, restSeconds:180, notes:'', skipped:false,
+        plannedSets:3, targetReps:5, targetWeight:100, notes:'', skipped:false,
         sets:[
           /* a warm-up: performed, but excluded from volume and from records */
           { id:'st-1', weight:60,  reps:5, rir:null, completed:true, completedAt:started + 120000,
@@ -3592,7 +3615,7 @@ function importFixture(){
           { id:'st-3', weight:100, reps:4, rir:0,    completed:true, completedAt:started + 1200000, unit:'kg' }
         ] },
       { exerciseId:'ex-plank', name:'Plank', category:'Core', unit:'time',
-        plannedSets:2, targetReps:45, targetWeight:null, restSeconds:60, notes:'', skipped:false,
+        plannedSets:2, targetReps:45, targetWeight:null, notes:'', skipped:false,
         sets:[
           /* timed work: seconds live in durationSeconds, never in reps */
           { id:'st-4', weight:null, durationSeconds:45, rir:null, completed:true,
@@ -3631,7 +3654,6 @@ function schemaHelpHTML(){
       ['items[].sets', 'integer', 'Clamped to ' + L.sets[0] + '\u2013' + L.sets[1] + '. Default 3.'],
       ['items[].reps', 'integer', 'Clamped to ' + L.reps[0] + '\u2013' + L.reps[1] + '. Default 8. For a timed movement this is <em>seconds</em>.'],
       ['items[].weight', 'number | null', 'Planned load. <code>null</code> leaves the bar to last time\u2019s figure.'],
-      ['items[].rest', 'integer', 'Seconds, clamped to ' + L.rest[0] + '\u2013' + L.rest[1] + '. Defaults to your setting.'],
       ['exercises[]', 'optional', 'Definitions for the ids above: <code>id</code>, <code>name</code>, <code>category</code>, <code>unit</code>, <code>notes</code>, <code>url</code>.'],
       ['exercises[].unit', 'enum', 'One of ' + units + '. Anything else becomes <code>kg</code>.'],
       ['exercises[].url', 'string', 'A link showing how to perform the movement. Only <code>http</code> and <code>https</code> survive; anything else is dropped.']
@@ -3756,7 +3778,6 @@ function normalizeImportedWorkout(w){
       unit:isUnit(ex.unit) ? ex.unit : 'kg',
       plannedSets:Number(ex.plannedSets) > 0 ? Math.round(ex.plannedSets) : null,
       targetReps:toNum(ex.targetReps), targetWeight:toNum(ex.targetWeight),
-      restSeconds:Number(ex.restSeconds) >= 0 ? Math.round(ex.restSeconds) : 0,
       notes:typeof ex.notes === 'string' ? ex.notes : '', skipped:!!ex.skipped,
       sets:(Array.isArray(ex.sets) ? ex.sets : []).map(s => s ? normalizeImportedSet(s, ex.unit) : null).filter(Boolean)
     };
@@ -4202,7 +4223,7 @@ function htmlCurrentExercise(w, ex){
         (ex.category ? '<span class="tag">' + esc(ex.category) + '</span>' : '') +
         '<span class="tag">target ' + ex.sets.length + ' × ' + (ex.targetReps != null ? ex.targetReps : '–') +
           (ex.targetWeight != null ? ' @ ' + fmtNum(ex.targetWeight) + ' ' + unitLabel() : '') + '</span>' +
-        '<span class="tag">' + icon('timer','ic-inline') + ' rest ' + fmtClock(ex.restSeconds || state.settings.defaultRest) + '</span>' +
+        '<span class="tag">' + icon('timer','ic-inline') + ' rest ' + fmtClock(currentRestSeconds()) + '</span>' +
       '</span>' +
       /* Read from the library rather than from the session's own copy of the
          exercise: a link corrected today should work in a session started
@@ -4406,7 +4427,7 @@ function htmlRoutineEditor(){
       '</div>' +
       (ui.routineError ? '<p class="error-text mt-2" role="alert">' + esc(ui.routineError) + '</p>' : '') +
       '<div class="section-title mt-5"><h2>Exercises</h2><span class="rule"></span>' +
-        '<span class="muted xs">sets × reps · target weight · rest</span></div>';
+        '<span class="muted xs">sets × reps · target weight</span></div>';
 
   if (!d.items.length){
     html += '<p class="muted small empty-line">No exercises yet — add the first one below.</p>';
@@ -4423,7 +4444,6 @@ function htmlRoutineEditor(){
       '<label class="field"><span class="cap">Sets</span><input type="number" min="1" max="12" inputmode="numeric" data-bind="ritem" data-idx="' + i + '" data-field="sets" value="' + esc(it.sets) + '"></label>' +
       '<label class="field"><span class="cap">Reps</span><input type="number" min="0" max="999" inputmode="numeric" data-bind="ritem" data-idx="' + i + '" data-field="reps" value="' + esc(it.reps) + '"></label>' +
       '<label class="field"><span class="cap">' + esc(wl) + '</span><input type="number" min="0" step="0.5" inputmode="decimal" data-bind="ritem" data-idx="' + i + '" data-field="weight" value="' + (it.weight != null ? it.weight : '') + '" placeholder="–"></label>' +
-      '<label class="field"><span class="cap">Rest s</span><input type="number" min="0" max="900" step="15" inputmode="numeric" data-bind="ritem" data-idx="' + i + '" data-field="rest" value="' + esc(it.rest) + '"></label>' +
       '<span class="item-actions">' +
         '<button type="button" class="icon-btn" id="ri-up-' + i + '" data-action="ritem-up" data-idx="' + i + '" aria-label="Move ' + esc(name) + ' up" ' + (i === 0 ? 'disabled' : '') + '>' + IC.up + '</button>' +
         '<button type="button" class="icon-btn" id="ri-down-' + i + '" data-action="ritem-down" data-idx="' + i + '" aria-label="Move ' + esc(name) + ' down" ' + (i === d.items.length-1 ? 'disabled' : '') + '>' + IC.down + '</button>' +
@@ -5098,12 +5118,12 @@ function viewSettings(){
     '<div class="setting-block">' +
       '<h3>Rest timer</h3>' +
       '<div class="form-row">' +
-        '<label class="field rest-field"><span class="cap">Default rest (seconds)</span>' +
+        '<label class="field rest-field"><span class="cap">Rest between sets (seconds)</span>' +
         '<input type="number" min="' + REST_MIN + '" max="' + REST_MAX + '" step="15" inputmode="numeric" ' +
         'data-change="default-rest" value="' + s.defaultRest + '"></label>' +
       '</div>' +
       '<div class="switch-row">' +
-        '<label for="sw-autorest"><strong>Auto-start after each set</strong><br><span class="hint">Uses the exercise’s rest time</span></label>' +
+        '<label for="sw-autorest"><strong>Auto-start after each set</strong><br><span class="hint">Starts the rest above the moment a set is logged</span></label>' +
         '<span class="switch"><input type="checkbox" id="sw-autorest" data-change="setting" data-field="autoRest"' + (s.autoRest ? ' checked' : '') + '><span class="track" aria-hidden="true"></span></span>' +
       '</div>' +
       '<div class="switch-row">' +
@@ -5635,8 +5655,13 @@ const changeHandlers = {
   'default-rest'(t){
     const v = clamp(Math.round(toNum(t.value) || defaultSettings().defaultRest), REST_MIN, REST_MAX);
     state.settings.defaultRest = v; t.value = v; save();
-    if (!state.activeWorkout) loadTimer(v);
-    toast('Default rest: ' + fmtClock(v));
+    /* Now that this is the only rest length there is, changing it mid-session
+       should be visible in the session — but not by cutting a rest already
+       under way. An idle timer takes the new value at once; one that is
+       running or paused part-way keeps its own countdown and picks the new
+       length up on the next rest. */
+    if (!timer.running && !timer.done && timer.remaining >= timer.total) loadTimer(v);
+    toast('Rest between sets: ' + fmtClock(v));
   },
   'workout-time'(t){
     const w = editingWorkout(); if (!w) return;
