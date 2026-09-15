@@ -53,7 +53,7 @@ holding an IIFE. Within each part, sections are marked by banner comments
 | `SEED / SAMPLE DATA` | The starting exercise library and program routines |
 | `STATE` | `state` (persisted) and `ui` (transient), navigation |
 | `FEEDBACK` | Toasts, screen-reader announcements, the confirm dialog |
-| `REST TIMER` | Timer model, persistence across reloads, scheduled beep, wake lock, painting |
+| `REST TIMER` | Timer model, persistence across reloads, the scheduled alarm, wake lock, painting |
 | `PERFORMANCE LOOKUPS` | Per-exercise history aggregates |
 | `ACTIONS — *` | State mutations, grouped by the screen that triggers them |
 | `RENDERING` | `render()` plus pure `viewX()` / `htmlX()` string builders |
@@ -209,14 +209,27 @@ phone in a gym is the case that matters:
 
   Both ways of reordering — and only these two — commit through
   `reorderMovable()`, over the positions `movableIndices()` reports. Those are
-  the exercises the sheet draws as reorderable rows: upcoming, not skipped, not
-  already finished, not the current one. It has to agree exactly with the
-  else-branch of `overviewSheetHTML()`, and it is a list of positions rather
-  than a range because they are not always contiguous — jumping back to an
-  earlier exercise leaves anything you had already finished sitting among the
-  ones still to come. Reordering deals the exercises back into the same set of
-  positions, so no done or current index (nor `ui.expandedDone`, which is keyed
-  by index) can move however far a row travels.
+  the exercises the sheet draws with a grip: the current one, plus everything
+  still to come that has not been skipped or already finished. It is the
+  negation of `isSettledRow()`, which `overviewSheetHTML()` also branches on,
+  so the list that can be dragged and the list drawn with a grip cannot drift
+  apart. It is a list of positions rather than a range because they are not
+  always contiguous — jumping back to an earlier exercise leaves anything you
+  had already finished sitting among the ones still to come. Reordering deals
+  the exercises back into the same set of positions, so no settled row (nor
+  `ui.expandedDone`, which is keyed by index) can move however far a row
+  travels.
+
+  **The current exercise is in that set, and moving it hands "Now" over.**
+  `currentExerciseIndex` names a position, not an exercise, and a reorder
+  preserves the set of positions — so dragging the current exercise later
+  leaves its position occupied by whatever was dealt into it, and that becomes
+  the exercise being worked on. This is the point rather than a side effect:
+  "I'll come back to this one" is a decision made standing in front of an
+  occupied machine. It is also why the current exercise is always the lowest
+  movable position and so can only move later, and why the drop announces the
+  new `Now:` — the screen behind the sheet changes exercise, and that must not
+  be silent.
 
   `syncOverviewSheet()` runs before
   `applyFocus()`, because `showModal()` takes the focus and whatever the render
@@ -314,13 +327,13 @@ the end of the stylesheet:
 ```
 state
 ├─ version         schema version (SCHEMA_VERSION)
-├─ settings        { theme, unit, defaultRest, autoRest, sound, effortMetric,
+├─ settings        { theme, unit, defaultRest, autoRest, sound, vibrate, effortMetric,
 │                    lastFileBackupAt, seededAt }
-├─ exercises[]     { id, name, category, unit, notes }        — the library
+├─ exercises[]     { id, name, category, unit, notes, url }   — the library
 ├─ routines[]      { id, name, items[] }                      — the plan
-│   └─ items[]     { id, exerciseId, sets, reps, weight, rest }
+│   └─ items[]     { id, exerciseId, sets, reps, weight }
 ├─ workouts[]      logged sessions, newest first              — the log
-│   └─ exercises[] { exerciseId, name, unit, targetReps, restSeconds, skipped, sets[] }
+│   └─ exercises[] { exerciseId, name, unit, targetReps, skipped, sets[] }
 │       └─ sets[]  { id, weight, reps, durationSeconds, rpe, rir, unit, completed, completedAt,
 │                    countForVolume?, countForPR? }   — absent means "counts"
 └─ activeWorkout   a workout in progress, or null
@@ -387,12 +400,23 @@ neither guaranteed nor permanent:
   about whether the user typed anything).
 - **`ui.expandedDone` is keyed by position in `activeWorkout.exercises`.**
   Anything that inserts or removes an exercise invalidates every key after it,
-  so it is cleared — see `confirmExerciseRemoval()`. Reordering is deliberately
-  scoped to the upcoming sub-range for the same reason.
+  so it is cleared — see `confirmExerciseRemoval()`. Reordering never does:
+  `isSettledRow()` keeps every done and skipped position out of the movable
+  set, so the rows that key is about cannot move.
 - **Execution and analytics are separate.** `completed` says the set was
   performed; `countForVolume` / `countForPR` (default true) say whether it counts
   toward totals and records. A warm-up is `completed: true` with both flags
   false — it is still shown in history, marked as a warm-up.
+- **There is exactly one rest length, and it is `settings.defaultRest`.** Rest
+  used to live on each routine item, seeded from that setting and then
+  hand-tuned, so the same movement could rest 45s in one routine and 90s in
+  another with nothing on screen saying why — and the seeded program shipped
+  five different values. It is one number now, read through
+  `currentRestSeconds()`, which every consumer goes through: the manual start,
+  the auto-rest after a set, the reset button, and the tag in the exercise
+  head. A rest length changed in Settings reaches an idle session timer
+  immediately and a running or paused one on its next rest, because cutting a
+  rest already under way is not what editing a preference should mean.
 - **`rpe` and `rir` are independent fields on a set, but only one shows as an
   input at a time.** `settings.effortMetric` (`'none' | 'rpe' | 'rir'`) is a
   single global choice, not per-exercise — logging one style of set at a time
@@ -420,6 +444,13 @@ neither guaranteed nor permanent:
   current sample data, keeps logged workouts and preferences.
 - **v2 → v3** — moves seconds out of `reps` into `durationSeconds`; adds the
   `countForVolume` / `countForPR` split.
+- **v3 → v4** — adds `settings.effortMetric`, preselecting RPE where a logged
+  RPE already exists.
+- **v4 → v5** — adds `exercises[].url`, the how-to link. Nothing to convert; the
+  version moves so a v5 file is never handed back to a v4 build, which would
+  drop the links on its next save.
+- **v5 → v6** — removes `items[].rest` and `exercises[].restSeconds`. One-way:
+  hand-tuned rest lengths survive only in a backup taken before the upgrade.
 
 Data that cannot be read — corrupt JSON, an unrecognized shape, or a *newer*
 schema version — is never overwritten in place. It is copied to
@@ -435,7 +466,7 @@ with `app: 'liftlog'` and a `kind`:
   `backupPayload()`, which is also what the remote PUT uploads, so the file in
   your downloads folder and the object in your bucket are the same thing. It is
   a deep copy of the whole of `state`, so **every** setting travels with it
-  (theme, unit, default rest, auto-rest, sound, effort metric, and the backup
+  (theme, unit, default rest, auto-rest, sound, vibration, effort metric, and the backup
   stamps) and a restore puts them all back. The one deliberate exception is the
   remote-storage config: it lives under its own `localStorage` key and stays on
   the device, so a backup file — including the copy sitting in the bucket —
@@ -605,6 +636,25 @@ you can.
   browsers).
 - **Manual, not sync.** There's no conflict resolution because there's no
   automatic sync — each Backup/Restore fully overwrites one side, on request.
+
+### Links out
+
+`exercises[].url` is the only value in the app that becomes an `href`, and the
+only thing that sends you anywhere off the page. Two rules hold it:
+
+- **`safeUrl()` is the single gate.** `esc()` cannot help here — `javascript:`
+  contains nothing escapable and would survive escaping intact — so every path
+  that can set a URL (both forms, `normalizeState()`, the routines importer)
+  runs it through `safeUrl()`, which keeps `http:` and `https:` and returns `''`
+  for everything else. `''` reads as "no link" everywhere, so a rejected URL
+  costs the link, never the exercise. A hostname is also required to look like
+  one: `new URL()` will percent-encode a typed sentence into a host, and that
+  should not pass as a link.
+- **It opens in its own tab, with `rel="noopener noreferrer"`.** A session is
+  never navigated away from, and the page that opens cannot reach back.
+
+This does not break "no network calls at all" — the app still fetches nothing —
+but clicking the link is a visit to a third party, which is worth knowing.
 
 ## Progress metrics
 
@@ -875,6 +925,13 @@ timer uses `<output>`, dialogs are native `<dialog>`, and
 `prefers-reduced-motion` disables animation. Themes are token-driven, so a new
 theme is one `:root[data-theme="…"]` block plus an entry in `THEMES`.
 
+**The end of a rest is signalled three ways, and no one of them is required.**
+`announce()` puts it in the live region, the drain bar and clock turn green,
+and `ALARM` sounds. Vibration is a fourth where the browser has it. Sound and
+vibration each have their own switch in Settings and each can be off; the
+announcement and the colour cannot, which is what keeps a deaf user, a muted
+phone and a screen reader all served by the same transition.
+
 **No gesture is the only way in.** The long press that marks a warm-up
 (`data-longpress` on the done cell) has no keyboard equivalent, so the set
 number stays an ordinary button with the same toggle on it. A drag handle has
@@ -918,6 +975,14 @@ several rows at once must land where it looks like it landed. And the case the
 index arithmetic exists for: finish an exercise, jump ahead and finish another,
 jump back — the finished one now sits among the exercises still to come, and
 dragging a row past it must step over it without moving it.
+
+The current exercise drags like any other, and that needs its own pass. Its up
+arrow is always disabled (it is the lowest movable position) and it has no
+*Start now*. Moving it later must hand *Now* to whatever lands in its place,
+change the exercise on the screen behind the sheet, and announce it. Do it with
+sets already logged against the moved exercise and check they travel with it.
+The single-movable-exercise case is worth one look too: both arrows disabled, a
+drag that does nothing, and no error from pressing either.
 
 Session movement is worth walking end to end from the strip's pager: `‹` is
 disabled on the first exercise, steps back into a skipped one (un-skipping it),

@@ -134,12 +134,18 @@ is set, and re-requests it on `visibilitychange` since the browser drops the
 lock whenever the page is hidden.
 
 ### 3.3 Timer that survives a backgrounded tab — **done**
-The end-of-rest beep is queued in the audio clock when rest starts
+The end-of-rest alarm is queued in the audio clock when rest starts
 (`scheduleRestBeep()`), which is sample-accurate and unaffected by the
 throttling that delays the 250 ms tick. `completeRest()` only sounds an
-immediate beep when scheduling was not possible, and settles a rest that
+immediate alarm when scheduling was not possible, and settles a rest that
 finished while the tab was hidden on the way back. A `Notification` would still
 be the way to reach a user who has switched apps entirely.
+
+Vibration (`buzz()`) is the one part that cannot be queued ahead — there is no
+vibration clock — so it fires from `completeRest()` on the throttled tick and a
+backgrounded tab is late with it. Browsers ignore `vibrate()` on a hidden page
+in any case, and iOS Safari has no `navigator.vibrate` at all, so the Settings
+switch is disabled and says so rather than offering something that cannot work.
 
 ### 3.4 Embed the UI font instead of hoping for it
 **Why:** `--font-ui` and `--font-mono` name only open-source families, but
@@ -230,9 +236,13 @@ clear all) is cheap. Currently every one of them is a confirm-and-hope.
   so `overviewStep()` / `routineStep()` are the pattern to copy.
 - ~~**Timer presets are fixed** at 60/90/120/180s.~~ **Withdrawn** — the
   presets and the action-bar sheet that held them are gone. Rest length is a
-  decision made once, in Settings or on the exercise, and `+0:30` covers the
-  one-off; a sheet of alternatives was a second place to configure the same
-  number, on the screen with the least room for one.
+  decision made once, in Settings, and `+0:30` covers the one-off; a sheet of
+  alternatives was a second place to configure the same number, on the screen
+  with the least room for one. The per-routine-item rest went the same way in
+  v6, for the same reason: it was a third place, it was hand-tuned into five
+  different values by the seed program alone, and nothing on screen explained
+  why one machine rested longer than the next. Reset joins `+0:30` as the other
+  half of the one-off — it puts back a rest you have spent or extended.
 - **Empty-state guidance.** ~~A first-run walkthrough would beat the "load sample
   data" shortcut, which drops an opinionated program on the user.~~ The shortcut
   is gone, and Settings now documents the import format and hands out working

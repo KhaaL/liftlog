@@ -512,6 +512,17 @@ kbd{
 .ex-head{ display:flex; justify-content:space-between; gap:var(--sp-3); align-items:baseline; flex-wrap:wrap; }
 .ex-name{ font-size:var(--fs-lg); font-weight:700; letter-spacing:-.02em; }
 .ex-tags{ display:flex; gap:var(--sp-2); flex-wrap:wrap; }
+/* Deliberately quiet: the link is worth having on the exercise you have not
+   done before, and worth ignoring on the hundred you have. It keeps a 44px
+   tall tap target on a phone without taking a button's worth of weight. */
+.how-to{
+  display:inline-flex; align-items:center; gap:6px; align-self:center;
+  color:var(--accent); font-size:var(--fs-xs); font-weight:650;
+  text-decoration:none; padding:var(--sp-2) 0; min-height:24px;
+}
+.how-to:hover{ text-decoration:underline; }
+.how-to .ic{ width:14px; height:14px; }
+.list-main .how-to{ margin-top:2px; }
 .tag{
   font-size:var(--fs-xs); font-weight:650; padding:2px 8px; border-radius:99px;
   border:1px solid var(--border-strong); color:var(--muted); background:var(--surface-2);
@@ -647,6 +658,13 @@ kbd{
 .ab-row .ab-grow{ flex:1; min-width:0; }
 .ab-row .btn{ white-space:nowrap; }
 .ab-icon{ flex:none; min-width:44px; padding-inline:10px; }
+/* Reset only exists while the rest is stopped part-way, so the room it needs is
+   only wanted then: below 420px the toggle gives up its label for it and keeps
+   its icon, exactly as it does unconditionally below 360px. */
+@media (max-width:420px){
+  .actionbar.is-resettable #timer-toggle span{ display:none; }
+  .actionbar.is-resettable #timer-toggle{ min-width:44px; padding-inline:10px; }
+}
 @keyframes flash-done{ 0%,100%{ background:var(--surface);} 30%{ background:var(--success-soft);} }
 .actionbar.is-done{ animation:flash-done 1.2s ease 2; }
 /* Width alone is the wrong test: a phone in landscape is wider than 720px and
@@ -679,6 +697,11 @@ kbd{
   display:grid; grid-template-columns:44px 1fr auto; gap:var(--sp-2); align-items:center;
   padding:var(--sp-3) var(--sp-2); border-bottom:1px solid var(--border);
 }
+/* The exercise being worked on is reorderable like the rest, so it is the same
+   row — marked, not separated, since a row that looked different would also
+   look like it could not be dragged. */
+.overview-row.is-current-row{ background:var(--accent-soft); }
+.overview-row.is-current-row .item-name{ font-weight:650; }
 /* .item-name and .item-actions carry bottom padding for the routine editor's
    baseline-aligned grid; here it is 13px of nothing, once per row. */
 .overview-row .item-name,.overview-row .item-actions{ padding-bottom:0; }
@@ -703,11 +726,17 @@ kbd{
 .list-meta{ color:var(--muted); font-size:var(--fs-xs); margin-top:1px; }
 .list-actions{ display:flex; gap:6px; flex-wrap:wrap; }
 
-.hist-row{ width:100%; text-align:left; background:none; border:0; border-bottom:1px solid var(--border); cursor:pointer; padding:var(--sp-3) var(--sp-4); display:grid; grid-template-columns:minmax(150px,1.2fr) 2fr repeat(3,minmax(70px,1fr)) 24px; gap:var(--sp-3); align-items:baseline; }
+.hist-row{ width:100%; text-align:left; background:none; border:0; border-bottom:1px solid var(--border); cursor:pointer; padding:var(--sp-3) var(--sp-4); display:grid; grid-template-columns:minmax(170px,2.2fr) repeat(3,minmax(70px,1fr)) 24px; gap:var(--sp-3); align-items:center; }
 .hist-row:last-child{ border-bottom:0; }
 .hist-cell{ font-variant-numeric:tabular-nums; font-size:var(--fs-sm); }
 .hist-cell .k{ color:var(--muted); font-size:var(--fs-xs); }
 .hist-cell b{ font-weight:650; }
+/* The heading cell is two lines, so it sets the row's height and the numeric
+   cells centre against it — which is why the row aligns centre rather than on
+   a baseline the other cells no longer share. */
+.hist-title{ min-width:0; line-height:1.35; }
+.hist-title b{ display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.hist-title .k{ display:block; margin-top:2px; }
 .hist-detail{ border-bottom:1px solid var(--border); background:var(--surface-2); padding:var(--sp-4); }
 .md-note{ border-left:3px solid var(--border-strong); padding-left:var(--sp-3); }
 .md-note p{ margin:0 0 var(--sp-2); }
@@ -731,7 +760,6 @@ kbd{
 @media (max-width:680px){
   .hist-row{ grid-template-columns:1fr 24px; }
   .hist-row .hist-cell.hide-m{ display:none; }
-  .hist-row .hist-cell{ grid-column:1; }
 }
 
 /* stats */
@@ -769,7 +797,7 @@ kbd{
 .mg-best{ font-size:var(--fs-sm); font-variant-numeric:tabular-nums; white-space:nowrap; }
 
 /* routine editor */
-.item-row{ display:grid; grid-template-columns:44px 1fr repeat(4,minmax(64px,86px)) 84px; gap:var(--sp-2); align-items:end; padding:var(--sp-3) 0; border-top:1px solid var(--border); }
+.item-row{ display:grid; grid-template-columns:44px 1fr repeat(3,minmax(64px,96px)) 84px; gap:var(--sp-2); align-items:end; padding:var(--sp-3) 0; border-top:1px solid var(--border); }
 .item-row:first-child{ border-top:0; }
 .item-name{ font-weight:600; font-size:var(--fs-sm); padding-bottom:9px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .item-actions{ display:flex; gap:2px; padding-bottom:4px; }
@@ -805,6 +833,8 @@ html.is-reordering{ user-select:none; -webkit-user-select:none; }
   .item-row{ grid-template-columns:44px 1fr 1fr; }
   .item-row .item-name{ grid-column:2 / -1; padding-bottom:2px; }
   .item-row .grip{ grid-row:1 / span 3; align-self:center; }
+  /* three fields across two columns leaves a gap; weight takes the spare one */
+  .item-row .field:last-of-type{ grid-column:2 / -1; }
   .item-row .item-actions{ grid-column:2 / -1; justify-content:flex-end; }
 }
 
@@ -1240,6 +1270,29 @@ function esc(str){
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
+/* The one guard every stored URL passes through before it can reach an href.
+   esc() is not enough on its own here: `javascript:alert(1)` contains nothing
+   escapable, so it would survive escaping intact and run on click. Only http
+   and https get through; anything else — a bad parse, a data:, a javascript:,
+   a mailto: — becomes the empty string, which every caller reads as "no link".
+
+   A bare `example.com/how-to` is what a person actually types, so it is given
+   https:// rather than refused; the scheme is then ours, not theirs. */
+const URL_MAX = 500;
+function safeUrl(raw){
+  const s = String(raw == null ? '' : raw).trim();
+  if (!s || s.length > URL_MAX) return '';
+  const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(s) ? s : 'https://' + s;
+  let u;
+  try{ u = new URL(withScheme); }catch(e){ return ''; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
+  /* new URL() will percent-encode almost anything into a hostname — a typed
+     sentence becomes https://not%20a%20url/ and looks accepted. A real host
+     has dot-separated labels (or is an IP), so require that rather than trust
+     the parse. */
+  if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/i.test(u.hostname)) return '';
+  return u.href.length > URL_MAX ? '' : u.href;
+}
 /* Minimal markdown → HTML for session notes: headings, bold/italic, inline
    code, links and single-level lists. No tables, no fenced code blocks, no
    nested lists — notes are a phone-typed paragraph or two, not a document.
@@ -1414,7 +1467,9 @@ const IC = {
   boxcheck:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="4.5" width="15" height="15" rx="3"/><path d="M8.5 12.2l2.6 2.6 4.9-5.4"/></svg>',
   help:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.4 9.2a2.7 2.7 0 015.2.9c0 1.8-2.6 2.1-2.6 3.9"/><path d="M12 17.3h.01"/></svg>',
   grip:'<svg class="ic" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>',
-  pen:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L18.5 9.5a2.1 2.1 0 00-3-3L5 17zM13.5 6.5l3 3"/></svg>'
+  pen:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L18.5 9.5a2.1 2.1 0 00-3-3L5 17zM13.5 6.5l3 3"/></svg>',
+  reset:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 107.5-7.5c-2.4 0-4.5 1.1-5.9 2.9"/><path d="M4 4.2v3.9h3.9"/></svg>',
+  link:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.5 13.5a4 4 0 005.7 0l2.8-2.8a4 4 0 00-5.7-5.7l-1.4 1.4"/><path d="M13.5 10.5a4 4 0 00-5.7 0l-2.8 2.8a4 4 0 005.7 5.7l1.4-1.4"/></svg>'
 };
 
 /* ============================================================
@@ -1461,12 +1516,16 @@ const SET_TYPES = ['reps','time','hold','distance'];
 const REST_MIN = 15, REST_MAX = 600;
 
 /* Routine item bounds, applied on save and on import alike. */
-const ITEM_LIMITS = { sets:[1,12], reps:[0,999], rest:[0,900] };
+const ITEM_LIMITS = { sets:[1,12], reps:[0,999] };
 
 /* Single-key view switches, shared by the shortcut handler. */
 const NAV_KEYS = { t:'today', r:'routines', h:'history', e:'exercises' };
 
 /* One list drives both the help dialog and the Settings table. */
+/* What a toggled switch is called in its confirmation toast. Every boolean
+   setting with a switch needs an entry, or the toast names the wrong one. */
+const SETTING_LABEL = { autoRest:'Auto-rest', sound:'Timer sound', vibrate:'Timer vibration' };
+
 const SHORTCUTS = [
   { keys:['?'], text:'Open shortcut help' },
   { keys:['/'], text:'Focus search (Exercises)' },
@@ -1486,10 +1545,14 @@ const SHORTCUTS = [
    ============================================================ */
 const LS_KEY = 'liftlog.v1';
 const LS_RESCUE_KEY = 'liftlog.v1.unreadable';  /* holds data we could not load, so nothing is lost silently */
-const SCHEMA_VERSION = 4;   /* v3: sets carry durationSeconds (time no longer overloads reps)
+const SCHEMA_VERSION = 6;   /* v3: sets carry durationSeconds (time no longer overloads reps)
                                + countForVolume / countForPR split execution from analytics
-                               v4: settings carry effortMetric ('none'|'rpe'|'rir'), sets carry rir */
-const EXPORT_SCHEMA = '1.1.0'; /* version of the documented import/export contract — 1.1: sets[].rir */
+                               v4: settings carry effortMetric ('none'|'rpe'|'rir'), sets carry rir
+                               v5: library exercises carry url (how to perform the movement)
+                               v6: rest is settings.defaultRest alone — items[].rest and
+                                   exercises[].restSeconds are gone */
+const EXPORT_SCHEMA = '1.3.0'; /* version of the documented import/export contract — 1.1: sets[].rir;
+                                  1.2: exercises[].url; 1.3: per-item rest dropped */
 
 /* Set by load() when stored data could not be used, surfaced once after init. */
 let loadWarning = '';
@@ -1662,6 +1725,8 @@ function load(){
   if (parsed.version === 1) migrateToV2(parsed);   /* old installs: refresh the seed library, keep history */
   if (parsed.version === 2) migrateToV3(parsed);   /* v2 stored seconds in `reps` for timed sets */
   if (parsed.version === 3) migrateToV4(parsed);   /* v3 had no effort-metric preference */
+  if (parsed.version === 4) migrateToV5(parsed);   /* v4 exercises had nowhere to put a how-to link */
+  if (parsed.version === 5) migrateToV6(parsed);   /* v5 kept a rest length per routine item */
   return normalizeState(parsed);
 }
 /* v1 shipped an earlier seed library/routines. v2 refreshes both to the
@@ -1701,6 +1766,29 @@ function migrateToV4(s){
   s.settings.effortMetric = hadRpe ? 'rpe' : 'none';
   s.version = 4;
 }
+/* v5 adds a per-exercise instructions link. Nothing to convert — the field is
+   new and empty — but the version has to move so a v5 file is never handed to
+   a v4 build, which would drop the links on its next save. */
+function migrateToV5(s){
+  (s.exercises || []).forEach(e => { if (e) e.url = ''; });
+  s.version = 5;
+}
+/* v6 makes settings.defaultRest the only rest length there is. The per-item
+   and per-exercise copies are removed rather than left unread: a number still
+   sitting in the file that nothing honours is the same confusion in a new
+   place. Logged sessions lose nothing that was ever shown — restSeconds was
+   the plan for a rest, never a record of one.
+
+   This is one-way. Hand-tuned rest lengths are not recoverable from a migrated
+   file, only from a backup taken before the upgrade. */
+function migrateToV6(s){
+  (s.routines || []).forEach(r => (r && r.items || []).forEach(it => { if (it) delete it.rest; }));
+  const strip = w => (w && Array.isArray(w.exercises)) &&
+    w.exercises.forEach(ex => { if (ex) delete ex.restSeconds; });
+  (s.workouts || []).forEach(strip);
+  strip(s.activeWorkout);
+  s.version = 6;
+}
 /* Anything reachable from disk or an import file gets clamped to a known value
    here, so the render layer never has to defend against stray strings. */
 function normalizeState(s){
@@ -1711,6 +1799,7 @@ function normalizeState(s){
   set.defaultRest = clamp(Math.round(toNum(set.defaultRest) || d.defaultRest), REST_MIN, REST_MAX);
   set.autoRest = !!set.autoRest;
   set.sound = !!set.sound;
+  set.vibrate = !!set.vibrate;
   set.effortMetric = EFFORT_METRICS.includes(set.effortMetric) ? set.effortMetric : d.effortMetric;
   set.lastFileBackupAt = toNum(set.lastFileBackupAt);
   set.seededAt = toNum(set.seededAt);
@@ -1718,7 +1807,8 @@ function normalizeState(s){
   s.exercises = (s.exercises || []).map(e => Object.assign({}, e, {
     category: typeof e.category === 'string' ? e.category : '',
     unit: isUnit(e.unit) ? e.unit : 'kg',
-    notes: typeof e.notes === 'string' ? e.notes : ''
+    notes: typeof e.notes === 'string' ? e.notes : '',
+    url: safeUrl(e.url)
   }));
   s.routines  = s.routines || [];
   s.workouts  = s.workouts || [];
@@ -1732,7 +1822,7 @@ function normalizeState(s){
    scale, so only one is shown at a time rather than both. */
 const EFFORT_METRICS = ['none', 'rpe', 'rir'];
 function defaultSettings(){
-  return { theme:'system', unit:'kg', defaultRest:90, autoRest:true, sound:true, effortMetric:'none',
+  return { theme:'system', unit:'kg', defaultRest:90, autoRest:true, sound:true, vibrate:true, effortMetric:'none',
            lastFileBackupAt:null, seededAt:null };
 }
 /* History is kept newest-first everywhere; every mutation that can change a
@@ -1748,7 +1838,10 @@ function sortWorkouts(list){
    mostly pin-loaded machines, plus a couple of bodyweight exceptions where
    they are genuinely useful (glute activation, a core stability hold). */
 function sampleExercises(){
-  const mk = (name, category, unit, notes) => ({ id:uid(), name, category, unit, notes: notes || '' });
+  /* No how-to links in the seed: they would be links to sites this project
+     does not control, shipped to every first run and rotting there. The field
+     is yours to fill in on the movements you actually want a reminder for. */
+  const mk = (name, category, unit, notes) => ({ id:uid(), name, category, unit, notes: notes || '', url:'' });
   return [
     mk('Chest Press Machine','Chest','kg','Gym machine. Use controlled reps, focus on form.'),
     mk('Pec Fly Machine','Chest','kg','Light load works well. Focus on a smooth contraction.'),
@@ -1768,31 +1861,31 @@ function sampleExercises(){
    2-3 sets of 10-15 reps, 45-120s rest, weight challenging but not maxing out. */
 function sampleRoutines(exs){
   const find = n => exs.find(e => e.name === n).id;
-  const item = (name, sets, reps, weight, rest) =>
-    ({ id:uid(), exerciseId:find(name), sets, reps, weight, rest });
+  const item = (name, sets, reps, weight) =>
+    ({ id:uid(), exerciseId:find(name), sets, reps, weight });
   return [
     { id:uid(), name:'A - Upper Body (Machine Focus)', items:[
-      item('Chest Press Machine',3,10,null,90),
-      item('Pec Fly Machine',2,12,null,60),
-      item('Shoulder Press Machine',3,10,null,90),
-      item('Seated Row Machine',3,10,null,90),
-      item('Bicep Curl Machine',2,12,null,45),
-      item('Triceps Extension Machine',2,12,null,45)
+      item('Chest Press Machine',3,10,null),
+      item('Pec Fly Machine',2,12,null),
+      item('Shoulder Press Machine',3,10,null),
+      item('Seated Row Machine',3,10,null),
+      item('Bicep Curl Machine',2,12,null),
+      item('Triceps Extension Machine',2,12,null)
     ]},
     { id:uid(), name:'B - Lower Body (Machine Focus)', items:[
-      item('Glute Bridge (Bodyweight)',2,10,null,40),
-      item('Leg Press Machine',3,10,null,120),
-      item('Leg Extension Machine',2,12,null,60),
-      item('Leg Curl Machine',2,12,null,60),
-      item('Calf Raise Machine',2,15,null,40)
+      item('Glute Bridge (Bodyweight)',2,10,null),
+      item('Leg Press Machine',3,10,null),
+      item('Leg Extension Machine',2,12,null),
+      item('Leg Curl Machine',2,12,null),
+      item('Calf Raise Machine',2,15,null)
     ]},
     { id:uid(), name:'C - Full Body (Machine Blend)', items:[
-      item('Leg Press Machine',3,10,null,90),
-      item('Chest Press Machine',3,10,null,90),
-      item('Seated Row Machine',3,10,null,90),
-      item('Shoulder Press Machine',2,10,null,70),
-      item('Leg Curl Machine',2,12,null,60),
-      item('Plank',2,25,null,40)
+      item('Leg Press Machine',3,10,null),
+      item('Chest Press Machine',3,10,null),
+      item('Seated Row Machine',3,10,null),
+      item('Shoulder Press Machine',2,10,null),
+      item('Leg Curl Machine',2,12,null),
+      item('Plank',2,25,null)
     ]}
   ];
 }
@@ -1807,11 +1900,11 @@ function seedState(){
      carries. */
   const set = (weight, reps, rir, opts) => Object.assign(
     { id:uid(), weight, reps, rir, completed:true, completedAt:0, unit:'kg' }, opts || {});
-  const exBlock = (name, restSeconds, sets) => ({
+  const exBlock = (name, sets) => ({
     exerciseId:exId(name), name, category:(exs.find(e=>e.name===name)||{}).category || '',
     unit:(exs.find(e=>e.name===name)||{}).unit || 'kg', plannedSets:sets.length,
     targetReps:sets[0].reps != null ? sets[0].reps : sets[0].durationSeconds,
-    targetWeight:sets[0].weight, restSeconds, notes:'', skipped:false, sets
+    targetWeight:sets[0].weight, notes:'', skipped:false, sets
   });
   const mkWo = (rid, rname, started, mins, blocks) => ({
     id:uid(), routineId:rid, routineName:rname, startedAt:started, finishedAt:started + mins*60000,
@@ -1820,24 +1913,24 @@ function seedState(){
   const upper = routines[0], lower = routines[1], full = routines[2];
   const workouts = [
     mkWo(upper.id,'A - Upper Body (Machine Focus)', at(2,17), 48, [
-      exBlock('Chest Press Machine',90,[set(40,10,3),set(40,10,2),set(35,9,2)]),
-      exBlock('Shoulder Press Machine',90,[set(30,10,3),set(30,9,2),set(25,8,1)]),
-      exBlock('Seated Row Machine',90,[set(45,10,3),set(45,10,2),set(40,9,2)])
+      exBlock('Chest Press Machine',[set(40,10,3),set(40,10,2),set(35,9,2)]),
+      exBlock('Shoulder Press Machine',[set(30,10,3),set(30,9,2),set(25,8,1)]),
+      exBlock('Seated Row Machine',[set(45,10,3),set(45,10,2),set(40,9,2)])
     ]),
     mkWo(lower.id,'B - Lower Body (Machine Focus)', at(4,8), 40, [
-      exBlock('Leg Press Machine',120,[set(90,10,3),set(90,10,2),set(80,9,2)]),
-      exBlock('Leg Extension Machine',60,[set(35,12,3),set(35,12,2)]),
-      exBlock('Calf Raise Machine',40,[set(50,15,3),set(50,15,2)])
+      exBlock('Leg Press Machine',[set(90,10,3),set(90,10,2),set(80,9,2)]),
+      exBlock('Leg Extension Machine',[set(35,12,3),set(35,12,2)]),
+      exBlock('Calf Raise Machine',[set(50,15,3),set(50,15,2)])
     ]),
     /* Shares four exercises with A and B above, at lower weight — so a fresh
        install already has a real two-point trend to show in History →
        Progress, instead of every exercise reading "log this twice" until the
        user has trained long enough to repeat one for real. */
     mkWo(full.id,'C - Full Body (Machine Blend)', at(9,18), 42, [
-      exBlock('Leg Press Machine',90,[set(80,10,3),set(80,10,2),set(70,9,2)]),
-      exBlock('Chest Press Machine',90,[set(35,10,3),set(35,9,2),set(30,8,2)]),
-      exBlock('Seated Row Machine',90,[set(40,10,3),set(40,9,2),set(35,8,2)]),
-      exBlock('Shoulder Press Machine',70,[set(25,10,3),set(25,9,2),set(20,8,1)])
+      exBlock('Leg Press Machine',[set(80,10,3),set(80,10,2),set(70,9,2)]),
+      exBlock('Chest Press Machine',[set(35,10,3),set(35,9,2),set(30,8,2)]),
+      exBlock('Seated Row Machine',[set(40,10,3),set(40,9,2),set(35,8,2)]),
+      exBlock('Shoulder Press Machine',[set(25,10,3),set(25,9,2),set(20,8,1)])
     ])
   ].sort((a,b) => b.startedAt - a.startedAt);
 
@@ -2220,12 +2313,27 @@ function toggleTimer(){
   timer.running ? pauseTimer() : startTimer();
   announce(timer.running ? 'Rest timer started' : 'Rest timer paused');
 }
+/* Back to a full, stopped rest — including whatever +0:30 added, which is the
+   point: the extension is a one-off, so undoing it should not mean waiting it
+   out. loadTimer() already cancels the scheduled beep, clears `done`, persists
+   and repaints, so there is nothing to repeat here. */
+function resetTimer(){
+  if (!state.activeWorkout) return;
+  loadTimer(currentRestSeconds());
+  announce('Rest timer reset');
+}
+/* There is nothing to reset on a full, untouched timer, and nothing to reset
+   *to* while it is running — pause first. Everything else (paused part-way,
+   extended, or finished) has somewhere to go back to. */
+function canResetTimer(){
+  return !timer.running && (timer.done || timer.remaining < timer.total);
+}
+/* One rest length, and it lives in Settings. Rest used to be per routine item,
+   seeded from this setting and then hand-tuned, which meant the same movement
+   could rest for 45s in one routine and 90s in another and nothing on screen
+   said why. A single number is a worse model of training and a much better one
+   of what anybody actually adjusts. */
 function currentRestSeconds(){
-  const w = state.activeWorkout;
-  if (w){
-    const ex = w.exercises[w.currentExerciseIndex];
-    if (ex && ex.restSeconds) return ex.restSeconds;
-  }
   return state.settings.defaultRest;
 }
 function timerRemaining(){
@@ -2263,6 +2371,15 @@ function drawTimer(){
     toggle.innerHTML = (timer.running ? IC.pause : IC.play) + '<span>' + label + '</span>';
     toggle.setAttribute('aria-label', timer.running ? 'Pause rest timer' : label + ' rest timer');
   }
+  /* Reset is shown and hidden from here rather than from the template because
+     pause and resume repaint through drawTimer() without a render() — a button
+     that only existed in htmlActionBar() would never appear on a pause. The
+     class goes on the bar as well so the stylesheet can make room for the
+     fourth control on a narrow phone without knowing when it appears. */
+  const canReset = canResetTimer();
+  const reset = $('#timer-reset');
+  if (reset) reset.hidden = !canReset;
+  if (bar) bar.classList.toggle('is-resettable', canReset);
 }
 /* One place the rest-finished transition happens, so the wall-clock tick and a
    late wake-up cannot both run it. */
@@ -2275,6 +2392,7 @@ function completeRest(){
      immediate one if that could not be arranged */
   if (!timer.beepScheduled) beep();
   timer.beepScheduled = false;
+  buzz();
   drawTimer();
 }
 function tickTimer(){
@@ -2293,15 +2411,28 @@ function ensureAudio(){
   try{ audioCtx = new Ctx(); }catch(e){ return null; }
   return audioCtx;
 }
-function blipAt(ctx, t0, f){
+/* A triangle rather than a sine: the extra harmonics are what make this
+   audible over a gym's own noise at the same peak gain, and gain alone cannot
+   go much further — Web Audio is capped by the device volume, so loudness has
+   to come from timbre and repetition instead. */
+function blipAt(ctx, t0, f, peak){
   const o = ctx.createOscillator(), g = ctx.createGain();
-  o.type = 'sine'; o.frequency.value = f;
+  o.type = 'triangle'; o.frequency.value = f;
   o.connect(g); g.connect(ctx.destination);
   g.gain.setValueAtTime(0.0001, t0);
-  g.gain.exponentialRampToValueAtTime(0.18, t0 + 0.02);
+  g.gain.exponentialRampToValueAtTime(peak || 0.45, t0 + 0.02);
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.35);
   o.start(t0); o.stop(t0 + 0.4);
   return o;
+}
+/* The alarm, as offsets from the moment rest ends: four pulses over ~1.4s,
+   rising, with the last one held longest. It is a pattern rather than a single
+   tone because a repeated figure is what gets noticed across a room — and
+   because it has to be schedulable as a fixed list of oscillators (see
+   scheduleRestBeep), which rules out anything that reacts as it plays. */
+const ALARM = [ [0, 880], [0.22, 1175], [0.44, 880], [0.72, 1568] ];
+function alarmAt(ctx, t0){
+  return ALARM.map(([dt, f]) => blipAt(ctx, t0 + dt, f));
 }
 /* The 250 ms tick is throttled in a backgrounded tab, so the end-of-rest beep
    is queued in the audio clock the moment rest starts instead. Web Audio
@@ -2316,7 +2447,7 @@ function scheduleRestBeep(delaySec){
   try{
     if (ctx.state === 'suspended') ctx.resume();
     const t = ctx.currentTime + Math.max(0, delaySec);
-    scheduledBlips = [blipAt(ctx, t, 880), blipAt(ctx, t + 0.28, 1175)];
+    scheduledBlips = alarmAt(ctx, t);
     return true;
   }catch(e){ return false; }
 }
@@ -2324,16 +2455,27 @@ function cancelRestBeep(){
   scheduledBlips.forEach(o => { try{ o.stop(); }catch(e){ /* already stopped */ } });
   scheduledBlips = [];
 }
-/* Immediate fallback for when the beep could not be scheduled ahead of time. */
+/* Immediate fallback for when the beep could not be scheduled ahead of time.
+   Same pattern, so the alarm sounds the same whichever path plays it. */
 function beep(){
   if (!state.settings.sound) return;
   const ctx = ensureAudio();
   if (!ctx) return;
   try{
     if (ctx.state === 'suspended') ctx.resume();
-    blipAt(ctx, ctx.currentTime, 880);
-    blipAt(ctx, ctx.currentTime + 0.28, 1175);
+    alarmAt(ctx, ctx.currentTime);
   }catch(e){ /* audio unavailable — visual announcement still happens */ }
+}
+/* The second channel, and the one that works with the phone face-down in a
+   bag. It cannot be queued the way the beep is — there is no vibration clock —
+   so it fires from completeRest(), on the 250 ms tick, and a backgrounded tab
+   will be late with it; browsers ignore vibrate() on a hidden page entirely,
+   and iOS Safari has no navigator.vibrate at all. Sound stays the reliable
+   channel; this is the one you feel when you are looking away from the screen. */
+function buzz(){
+  if (!state.settings.vibrate) return;
+  if (!navigator.vibrate) return;
+  try{ navigator.vibrate([260, 120, 260, 120, 420]); }catch(e){ /* not permitted here */ }
 }
 
 /* ---------- installability ----------
@@ -2497,8 +2639,8 @@ function newSetFrom(ex, copyFrom){
     unit: ex.unit === 'bw' ? 'bw' : (timed ? 'time' : state.settings.unit)
   };
 }
-/* item is a routine item ({exerciseId, sets, reps, weight, rest}); the returned
-   block is the workout-local copy that logging writes into. */
+/* item is a routine item ({exerciseId, sets, reps, weight}); the returned block
+   is the workout-local copy that logging writes into. */
 function buildWorkoutExercise(item){
   const exDef = exerciseById(item.exerciseId) || { name:'Unknown exercise', category:'', unit:state.settings.unit, notes:'' };
   const prev = lastPerformance(item.exerciseId);
@@ -2507,7 +2649,6 @@ function buildWorkoutExercise(item){
     unit:exDef.unit || 'kg', plannedSets:item.sets || 3,
     targetReps:item.reps != null ? item.reps : 8,
     targetWeight:item.weight != null ? item.weight : null,
-    restSeconds:item.rest || state.settings.defaultRest,
     notes:exDef.notes || '', skipped:false, sets:[]
   };
   const n = Math.max(1, item.sets || 3);
@@ -2571,7 +2712,7 @@ function startEmpty(){
 function newRoutineItem(exId){
   const def = exerciseById(exId);
   return { id:uid(), exerciseId:exId, sets:3,
-    reps:(def && def.unit === 'time') ? 30 : 8, weight:null, rest:state.settings.defaultRest };
+    reps:(def && def.unit === 'time') ? 30 : 8, weight:null };
 }
 function addExerciseToWorkout(exId){
   const w = state.activeWorkout;
@@ -2630,7 +2771,7 @@ function toggleSet(setId){
   if (s.completed){
     announce('Set ' + (i+1) + ' of ' + ex.sets.length + ' complete.');
     if (state.settings.autoRest){
-      loadTimer(ex.restSeconds || state.settings.defaultRest);
+      loadTimer(currentRestSeconds());
       startTimer();
     }
   }
@@ -2793,21 +2934,34 @@ function reopenExercise(idx){
   ui.focus = 'ex-panel-top';
   render();
 }
-/* The exercises the sheet draws as reorderable rows, by index: upcoming, not
-   skipped, not already finished, not the current one. Exactly the else-branch
-   of overviewSheetHTML(), and the two must agree — this is what keeps every
-   done and current index (and ui.expandedDone, which is keyed by index) fixed
-   while the rest move.
+/* An exercise the session has finished with: behind the current one, skipped,
+   or done and not the one being worked on. These are the rows the sheet draws
+   as a done row, and the positions a reorder must never disturb — ui.expandedDone
+   is keyed by index, so moving one would mis-key every row after it.
 
-   They are not always contiguous. Jumping back to an earlier exercise from the
-   sheet leaves any exercise you had already finished sitting among the ones
-   still to come, as a done row the reorder must step over rather than through.
-   Hence a list of positions rather than a lo..hi range. */
+   This is the single definition of that split. movableIndices() is its
+   negation and overviewSheetHTML() branches on it, so the list that can be
+   dragged and the list drawn with a grip cannot drift apart. */
+function isSettledRow(w, ex, i){
+  return i < w.currentExerciseIndex || ex.skipped || (allSetsDone(ex) && i !== w.currentExerciseIndex);
+}
+/* The exercises the sheet draws with a grip, by index: the current one and
+   everything still to come that has not been skipped or already finished.
+
+   The current exercise is in the set. It is always the lowest position in it,
+   so it can only move later — and when it does, whatever is dealt into its
+   position becomes the exercise being worked on, since currentExerciseIndex
+   names a position and reorderMovable() preserves the set of positions. That
+   is the point: "I'll come back to this one" is a thing you decide mid-session,
+   standing in front of an occupied machine.
+
+   The positions are not always contiguous. Jumping back to an earlier exercise
+   leaves any exercise you had already finished sitting among the ones still to
+   come, as a done row the reorder must step over rather than through. Hence a
+   list of positions rather than a lo..hi range. */
 function movableIndices(w){
   const out = [];
-  w.exercises.forEach((ex, i) => {
-    if (i > w.currentExerciseIndex && !ex.skipped && !allSetsDone(ex)) out.push(i);
-  });
+  w.exercises.forEach((ex, i) => { if (!isSettledRow(w, ex, i)) out.push(i); });
   return out;
 }
 /* Move one movable exercise to another movable position. The set of positions
@@ -2892,7 +3046,7 @@ function saveRoutineDraft(){
     it.sets   = clamp(parseInt(it.sets,10) || ITEM_LIMITS.sets[0], ITEM_LIMITS.sets[0], ITEM_LIMITS.sets[1]);
     it.reps   = clamp(parseInt(it.reps,10) || 0, ITEM_LIMITS.reps[0], ITEM_LIMITS.reps[1]);
     it.weight = toNum(it.weight);
-    it.rest   = clamp(parseInt(it.rest,10) || state.settings.defaultRest, ITEM_LIMITS.rest[0], ITEM_LIMITS.rest[1]);
+    delete it.rest;   /* v6 dropped it; a draft built from an older routine can still carry one */
   });
   if (d.id){
     const i = state.routines.findIndex(r => r.id === d.id);
@@ -2949,23 +3103,36 @@ function saveNewExercise(form){
   if (state.exercises.some(e => e.name.toLowerCase() === name.toLowerCase())){
     ui.exerciseFormError = 'An exercise with this name already exists.'; render(); return;
   }
+  /* A link that cannot be made into an http(s) one is dropped rather than
+     failing the save: the exercise is the thing being created, and a typo in
+     an optional field should not cost the name and the unit too. The toast
+     says so, so it is not silent. */
+  const url = safeUrl(form.url);
+  const badUrl = !url && String(form.url || '').trim() !== '';
   state.exercises.push({
     id:uid(), name,
     category: form.category.trim() || 'General',
     unit: form.unit || 'kg',
-    notes: form.notes.trim()
+    notes: form.notes.trim(),
+    url
   });
   ui.showExerciseForm = false; ui.exerciseFormError = '';
-  save(); render(); toast('Exercise added — ' + name);
+  save(); render();
+  toast(badUrl ? 'Exercise added — ' + name + ' (the link was not a valid web address)'
+               : 'Exercise added — ' + name);
 }
 function saveExerciseDraft(){
   const d = ui.exerciseDraft; if (!d) return;
   if (!d.name.trim()){ toast('Name is required'); return; }
   const i = state.exercises.findIndex(e => e.id === d.id);
   if (i === -1) return;
-  state.exercises[i] = { id:d.id, name:d.name.trim(), category:d.category.trim() || 'General', unit:d.unit, notes:d.notes.trim() };
+  const url = safeUrl(d.url);
+  const badUrl = !url && String(d.url || '').trim() !== '';
+  state.exercises[i] = { id:d.id, name:d.name.trim(), category:d.category.trim() || 'General',
+                         unit:d.unit, notes:d.notes.trim(), url };
   ui.exerciseDraft = null;
-  save(); render(); toast('Exercise updated');
+  save(); render();
+  toast(badUrl ? 'Exercise updated — the link was not a valid web address' : 'Exercise updated');
 }
 function deleteExercise(id){
   const ex = exerciseById(id); if (!ex) return;
@@ -3406,15 +3573,16 @@ function importRoutines(file){
         if (!local && src) local = byName(src.name);
         if (!local && src){
           state.exercises.push({ id:uid(), name:String(src.name), category:String(src.category || 'General'),
-            unit:isUnit(src.unit) ? src.unit : 'kg', notes:String(src.notes || '') });
+            unit:isUnit(src.unit) ? src.unit : 'kg', notes:String(src.notes || ''), url:safeUrl(src.url) });
           local = state.exercises[state.exercises.length - 1]; addedEx++;
         }
         if (!local) return null;
         return { id:uid(), exerciseId:local.id,
           sets:clamp(Number(it.sets) || 3, ITEM_LIMITS.sets[0], ITEM_LIMITS.sets[1]),
           reps:clamp(Number(it.reps) || 8, ITEM_LIMITS.reps[0], ITEM_LIMITS.reps[1]),
-          weight:toNum(it.weight),
-          rest:clamp(Number(it.rest) || state.settings.defaultRest, ITEM_LIMITS.rest[0], ITEM_LIMITS.rest[1]) };
+          /* `rest` on an imported item is read and dropped: files written
+             before v6 still carry one, and ignoring a key is not an error. */
+          weight:toNum(it.weight) };
       }).filter(Boolean);
       if (!items.length){ skippedR++; return; }
       state.routines.push({ id:uid(), name:String(r.name).trim(), items });
@@ -3436,14 +3604,15 @@ function importRoutines(file){
    see how items reference exercises. */
 function importFixture(){
   const exercises = [
-    { id:'ex-squat', name:'Back Squat', category:'Legs', unit:'kg', notes:'Belt above 100kg' },
-    { id:'ex-plank', name:'Plank', category:'Core', unit:'time', notes:'' }
+    { id:'ex-squat', name:'Back Squat', category:'Legs', unit:'kg', notes:'Belt above 100kg',
+      url:'https://en.wikipedia.org/wiki/Squat_(exercise)' },
+    { id:'ex-plank', name:'Plank', category:'Core', unit:'time', notes:'', url:'' }
   ];
   const routines = [{
     id:'rt-lower', name:'Lower body',
     items:[
-      { id:'it-1', exerciseId:'ex-squat', sets:3, reps:5, weight:100, rest:180 },
-      { id:'it-2', exerciseId:'ex-plank', sets:2, reps:45,  weight:null, rest:60 }
+      { id:'it-1', exerciseId:'ex-squat', sets:3, reps:5, weight:100 },
+      { id:'it-2', exerciseId:'ex-plank', sets:2, reps:45,  weight:null }
     ]
   }];
   /* two days back, so relative-date displays have something sensible to show */
@@ -3455,7 +3624,7 @@ function importFixture(){
     currentExerciseIndex:2,
     exercises:[
       { exerciseId:'ex-squat', name:'Back Squat', category:'Legs', unit:'kg',
-        plannedSets:3, targetReps:5, targetWeight:100, restSeconds:180, notes:'', skipped:false,
+        plannedSets:3, targetReps:5, targetWeight:100, notes:'', skipped:false,
         sets:[
           /* a warm-up: performed, but excluded from volume and from records */
           { id:'st-1', weight:60,  reps:5, rir:null, completed:true, completedAt:started + 120000,
@@ -3464,7 +3633,7 @@ function importFixture(){
           { id:'st-3', weight:100, reps:4, rir:0,    completed:true, completedAt:started + 1200000, unit:'kg' }
         ] },
       { exerciseId:'ex-plank', name:'Plank', category:'Core', unit:'time',
-        plannedSets:2, targetReps:45, targetWeight:null, restSeconds:60, notes:'', skipped:false,
+        plannedSets:2, targetReps:45, targetWeight:null, notes:'', skipped:false,
         sets:[
           /* timed work: seconds live in durationSeconds, never in reps */
           { id:'st-4', weight:null, durationSeconds:45, rir:null, completed:true,
@@ -3503,9 +3672,9 @@ function schemaHelpHTML(){
       ['items[].sets', 'integer', 'Clamped to ' + L.sets[0] + '\u2013' + L.sets[1] + '. Default 3.'],
       ['items[].reps', 'integer', 'Clamped to ' + L.reps[0] + '\u2013' + L.reps[1] + '. Default 8. For a timed movement this is <em>seconds</em>.'],
       ['items[].weight', 'number | null', 'Planned load. <code>null</code> leaves the bar to last time\u2019s figure.'],
-      ['items[].rest', 'integer', 'Seconds, clamped to ' + L.rest[0] + '\u2013' + L.rest[1] + '. Defaults to your setting.'],
-      ['exercises[]', 'optional', 'Definitions for the ids above: <code>id</code>, <code>name</code>, <code>category</code>, <code>unit</code>, <code>notes</code>.'],
-      ['exercises[].unit', 'enum', 'One of ' + units + '. Anything else becomes <code>kg</code>.']
+      ['exercises[]', 'optional', 'Definitions for the ids above: <code>id</code>, <code>name</code>, <code>category</code>, <code>unit</code>, <code>notes</code>, <code>url</code>.'],
+      ['exercises[].unit', 'enum', 'One of ' + units + '. Anything else becomes <code>kg</code>.'],
+      ['exercises[].url', 'string', 'A link showing how to perform the movement. Only <code>http</code> and <code>https</code> survive; anything else is dropped.']
     ]) +
     code(sampleRoutinesFile()) +
 
@@ -3627,7 +3796,6 @@ function normalizeImportedWorkout(w){
       unit:isUnit(ex.unit) ? ex.unit : 'kg',
       plannedSets:Number(ex.plannedSets) > 0 ? Math.round(ex.plannedSets) : null,
       targetReps:toNum(ex.targetReps), targetWeight:toNum(ex.targetWeight),
-      restSeconds:Number(ex.restSeconds) >= 0 ? Math.round(ex.restSeconds) : 0,
       notes:typeof ex.notes === 'string' ? ex.notes : '', skipped:!!ex.skipped,
       sets:(Array.isArray(ex.sets) ? ex.sets : []).map(s => s ? normalizeImportedSet(s, ex.unit) : null).filter(Boolean)
     };
@@ -4073,8 +4241,12 @@ function htmlCurrentExercise(w, ex){
         (ex.category ? '<span class="tag">' + esc(ex.category) + '</span>' : '') +
         '<span class="tag">target ' + ex.sets.length + ' × ' + (ex.targetReps != null ? ex.targetReps : '–') +
           (ex.targetWeight != null ? ' @ ' + fmtNum(ex.targetWeight) + ' ' + unitLabel() : '') + '</span>' +
-        '<span class="tag">' + icon('timer','ic-inline') + ' rest ' + fmtClock(ex.restSeconds || state.settings.defaultRest) + '</span>' +
+        '<span class="tag">' + icon('timer','ic-inline') + ' rest ' + fmtClock(currentRestSeconds()) + '</span>' +
       '</span>' +
+      /* Read from the library rather than from the session's own copy of the
+         exercise: a link corrected today should work in a session started
+         yesterday, and the workout block already duplicates enough. */
+      htmlHowTo((exerciseById(ex.exerciseId) || {}).url, ex.name) +
     '</div>' +
     prevHTML +
     (ex.notes ? '<p class="ex-notes">“' + esc(ex.notes) + '”</p>' : '') +
@@ -4127,35 +4299,37 @@ function overviewSheetHTML(w){
   let html = '';
 
   w.exercises.forEach((ex, i) => {
-    if (i < w.currentExerciseIndex || (allSetsDone(ex) && i !== w.currentExerciseIndex) || ex.skipped){
+    if (isSettledRow(w, ex, i)){
       html += htmlDoneRow(ex, i);
-    } else if (i === w.currentExerciseIndex){
-      const completed = ex.sets.filter(s => s.completed);
-      html += '<div class="done-ex-row is-current-row" aria-current="step">' +
-        '<span class="status-chip current">Now</span><strong>' + esc(ex.name) + '</strong>' +
-        '<span class="muted small">' + completed.length + '/' + ex.sets.length + ' sets</span>' +
-      '</div>';
-    } else {
-      /* The grip is the drag handle and nothing else — a whole draggable row
-         would have no way to tell a drag from the scroll it started with, on
-         the one surface (a full-screen sheet) that has to scroll. It answers
-         the arrow keys too, so the gesture is never the only way to move a
-         row; the buttons beside it stay because a grip does not announce what
-         it can do to anyone who is not already holding it. */
-      html += '<div class="overview-row" data-idx="' + i + '">' +
-        '<button type="button" class="grip" id="ov-grip-' + i + '" data-drag="session-exercises" ' +
-          'aria-label="Reorder ' + esc(ex.name) + '. Drag it, or use the up and down arrow keys." ' +
-          'title="Drag to reorder">' + IC.grip + '</button>' +
-        '<span class="item-name">' + esc(ex.name) + ' <span class="muted xs">· ' + plural(ex.sets.length, 'set') + ' planned</span></span>' +
-        '<span class="item-actions">' +
-          '<button type="button" class="icon-btn" id="ov-up-' + i + '" data-action="overview-up" data-idx="' + i + '" ' +
-            'aria-label="Move ' + esc(ex.name) + ' earlier"' + (i === lo ? ' disabled' : '') + '>' + IC.up + '</button>' +
-          '<button type="button" class="icon-btn" id="ov-down-' + i + '" data-action="overview-down" data-idx="' + i + '" ' +
-            'aria-label="Move ' + esc(ex.name) + ' later"' + (i === hi ? ' disabled' : '') + '>' + IC.down + '</button>' +
-          '<button type="button" class="btn btn-sm" data-action="overview-jump" data-idx="' + i + '">Start now</button>' +
-        '</span>' +
-      '</div>';
+      return;
     }
+    /* The grip is the drag handle and nothing else — a whole draggable row
+       would have no way to tell a drag from the scroll it started with, on
+       the one surface (a full-screen sheet) that has to scroll. It answers
+       the arrow keys too, so the gesture is never the only way to move a
+       row; the buttons beside it stay because a grip does not announce what
+       it can do to anyone who is not already holding it. */
+    const isNow = i === w.currentExerciseIndex;
+    const done = ex.sets.filter(s => s.completed).length;
+    html += '<div class="overview-row' + (isNow ? ' is-current-row' : '') + '" data-idx="' + i + '"' +
+        (isNow ? ' aria-current="step"' : '') + '>' +
+      '<button type="button" class="grip" id="ov-grip-' + i + '" data-drag="session-exercises" ' +
+        'aria-label="Reorder ' + esc(ex.name) + '. Drag it, or use the up and down arrow keys." ' +
+        'title="Drag to reorder">' + IC.grip + '</button>' +
+      '<span class="item-name">' +
+        (isNow ? '<span class="status-chip current">Now</span> ' : '') +
+        esc(ex.name) +
+        ' <span class="muted xs">· ' + (isNow ? done + '/' + ex.sets.length + ' sets'
+                                              : plural(ex.sets.length, 'set') + ' planned') + '</span></span>' +
+      '<span class="item-actions">' +
+        '<button type="button" class="icon-btn" id="ov-up-' + i + '" data-action="overview-up" data-idx="' + i + '" ' +
+          'aria-label="Move ' + esc(ex.name) + ' earlier"' + (i === lo ? ' disabled' : '') + '>' + IC.up + '</button>' +
+        '<button type="button" class="icon-btn" id="ov-down-' + i + '" data-action="overview-down" data-idx="' + i + '" ' +
+          'aria-label="Move ' + esc(ex.name) + ' later"' + (i === hi ? ' disabled' : '') + '>' + IC.down + '</button>' +
+        /* Nothing to jump to on the exercise you are already on. */
+        (isNow ? '' : '<button type="button" class="btn btn-sm" data-action="overview-jump" data-idx="' + i + '">Start now</button>') +
+      '</span>' +
+    '</div>';
   });
 
   html += htmlAddExercise();
@@ -4191,6 +4365,8 @@ function htmlActionBar(){
       '<div class="ab-row ab-timer">' +
         '<output id="timer-time" class="ab-time" aria-label="Rest time remaining">' + fmtClock(timer.remaining) + '</output>' +
         '<button type="button" class="btn" id="timer-toggle" data-action="timer-toggle">' + IC.play + '<span>Start</span></button>' +
+        '<button type="button" class="btn ab-icon" id="timer-reset" data-action="timer-reset" ' +
+          'aria-label="Reset rest timer" title="Reset rest timer"' + (canResetTimer() ? '' : ' hidden') + '>' + IC.reset + '</button>' +
         '<button type="button" class="btn ab-icon" data-action="timer-add30" aria-label="Add 30 seconds to rest">+0:30</button>' +
       '</div>' +
     '</div>' +
@@ -4271,7 +4447,7 @@ function htmlRoutineEditor(){
       '</div>' +
       (ui.routineError ? '<p class="error-text mt-2" role="alert">' + esc(ui.routineError) + '</p>' : '') +
       '<div class="section-title mt-5"><h2>Exercises</h2><span class="rule"></span>' +
-        '<span class="muted xs">sets × reps · target weight · rest</span></div>';
+        '<span class="muted xs">sets × reps · target weight</span></div>';
 
   if (!d.items.length){
     html += '<p class="muted small empty-line">No exercises yet — add the first one below.</p>';
@@ -4288,7 +4464,6 @@ function htmlRoutineEditor(){
       '<label class="field"><span class="cap">Sets</span><input type="number" min="1" max="12" inputmode="numeric" data-bind="ritem" data-idx="' + i + '" data-field="sets" value="' + esc(it.sets) + '"></label>' +
       '<label class="field"><span class="cap">Reps</span><input type="number" min="0" max="999" inputmode="numeric" data-bind="ritem" data-idx="' + i + '" data-field="reps" value="' + esc(it.reps) + '"></label>' +
       '<label class="field"><span class="cap">' + esc(wl) + '</span><input type="number" min="0" step="0.5" inputmode="decimal" data-bind="ritem" data-idx="' + i + '" data-field="weight" value="' + (it.weight != null ? it.weight : '') + '" placeholder="–"></label>' +
-      '<label class="field"><span class="cap">Rest s</span><input type="number" min="0" max="900" step="15" inputmode="numeric" data-bind="ritem" data-idx="' + i + '" data-field="rest" value="' + esc(it.rest) + '"></label>' +
       '<span class="item-actions">' +
         '<button type="button" class="icon-btn" id="ri-up-' + i + '" data-action="ritem-up" data-idx="' + i + '" aria-label="Move ' + esc(name) + ' up" ' + (i === 0 ? 'disabled' : '') + '>' + IC.up + '</button>' +
         '<button type="button" class="icon-btn" id="ri-down-' + i + '" data-action="ritem-down" data-idx="' + i + '" aria-label="Move ' + esc(name) + ' down" ' + (i === d.items.length-1 ? 'disabled' : '') + '>' + IC.down + '</button>' +
@@ -4361,8 +4536,13 @@ function viewHistory(){
     const vol = workoutVolume(w);
     html += '<div role="listitem">' +
       '<button type="button" class="hist-row" data-action="history-toggle" data-id="' + w.id + '" aria-expanded="' + open + '" aria-label="' + esc(w.routineName) + ', ' + fmtDate(w.startedAt) + '">' +
-        '<span class="hist-cell"><b>' + fmtDate(w.startedAt) + '</b><br><span class="k">' + relDays(w.startedAt) + '</span></span>' +
-        '<span class="hist-cell"><b>' + esc(w.routineName) + '</b></span>' +
+        /* One heading, not two competing ones. The session name is what the eye
+           looks for in this list, so it carries the weight; the date and how
+           long ago it was share the muted line under it, which keeps the time
+           axis of the list readable without the date fighting the name for
+           attention. */
+        '<span class="hist-cell hist-title"><b>' + esc(w.routineName) + '</b><br>' +
+          '<span class="k">' + fmtDate(w.startedAt) + ' · ' + relDays(w.startedAt) + '</span></span>' +
         '<span class="hist-cell hide-m">' + dur + '</span>' +
         '<span class="hist-cell hide-m">' + plural(workoutSets(w), 'set') + '</span>' +
         '<span class="hist-cell hide-m"><b>' + fmtNum(vol) + '</b> ' + unitLabel() + '</span>' +
@@ -4719,6 +4899,7 @@ function viewExercises(){
           (last ? ' · last ' + relDays(last.date) : '') +
         '</p>' +
         (e.notes ? '<p class="list-meta quote">“' + esc(e.notes) + '”</p>' : '') +
+        htmlHowTo(e.url, e.name) +
       '</div>' +
       '<span class="list-actions">' +
         '<button type="button" class="btn btn-sm" data-action="ex-edit" data-id="' + e.id + '" aria-label="Edit ' + esc(e.name) + '">Edit</button>' +
@@ -4747,12 +4928,31 @@ function htmlExerciseForm(){
       '</div>' +
       '<label class="field mt-3"><span class="cap">Notes (optional)</span>' +
         '<input type="text" name="exnotes" placeholder="Cues, tempo, grip…"></label>' +
+      /* type="text" with inputmode="url", not type="url": the native validator
+         refuses a bare "example.com" and blocks the whole submit over an
+         optional field, where safeUrl() simply gives it https://. The keyboard
+         is the same either way. */
+      '<label class="field mt-3"><span class="cap">How-to link (optional)</span>' +
+        '<input type="text" name="exurl" inputmode="url" autocomplete="url" spellcheck="false" ' +
+        'placeholder="https://… a video or page showing the movement"></label>' +
       (ui.exerciseFormError ? '<p class="error-text mt-2" role="alert">' + esc(ui.exerciseFormError) + '</p>' : '') +
       '<div class="form-actions mt-3">' +
         '<button type="submit" class="btn btn-primary">Add exercise</button>' +
         '<button type="button" class="btn" data-action="ex-form-close">Cancel</button>' +
       '</div>' +
     '</form></div></section>';
+}
+/* The how-to link, wherever it is shown. Rendered only for a URL that survives
+   safeUrl() — stored values already have, but an exercise object can also come
+   from a file or an older save, so the check is here rather than assumed. The
+   link leaves the app, which is the one place Liftlog sends you anywhere: it
+   opens in its own tab so a session is never navigated away from, and carries
+   noopener so the page it opens cannot reach back. */
+function htmlHowTo(rawUrl, name){
+  const url = safeUrl(rawUrl);
+  if (!url) return '';
+  return '<a class="how-to" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer" ' +
+    'aria-label="How to perform ' + esc(name) + ' (opens in a new tab)">' + IC.link + '<span>How to</span></a>';
 }
 function htmlExerciseEditRow(e){
   const d = ui.exerciseDraft;
@@ -4767,6 +4967,10 @@ function htmlExerciseEditRow(e){
       '</div>' +
       '<label class="field mt-3"><span class="cap">Notes</span>' +
         '<input type="text" data-bind="edraft" data-field="notes" value="' + esc(d.notes) + '"></label>' +
+      '<label class="field mt-3"><span class="cap">How-to link</span>' +
+        '<input type="text" inputmode="url" autocomplete="url" spellcheck="false" ' +
+        'data-bind="edraft" data-field="url" value="' + esc(d.url || '') + '" ' +
+        'placeholder="https://… a video or page showing the movement"></label>' +
       '<div class="form-actions mt-3">' +
         '<button type="submit" class="btn btn-primary btn-sm">Save</button>' +
         '<button type="button" class="btn btn-sm" data-action="ex-edit-cancel">Cancel</button>' +
@@ -4934,17 +5138,24 @@ function viewSettings(){
     '<div class="setting-block">' +
       '<h3>Rest timer</h3>' +
       '<div class="form-row">' +
-        '<label class="field rest-field"><span class="cap">Default rest (seconds)</span>' +
+        '<label class="field rest-field"><span class="cap">Rest between sets (seconds)</span>' +
         '<input type="number" min="' + REST_MIN + '" max="' + REST_MAX + '" step="15" inputmode="numeric" ' +
         'data-change="default-rest" value="' + s.defaultRest + '"></label>' +
       '</div>' +
       '<div class="switch-row">' +
-        '<label for="sw-autorest"><strong>Auto-start after each set</strong><br><span class="hint">Uses the exercise’s rest time</span></label>' +
+        '<label for="sw-autorest"><strong>Auto-start after each set</strong><br><span class="hint">Starts the rest above the moment a set is logged</span></label>' +
         '<span class="switch"><input type="checkbox" id="sw-autorest" data-change="setting" data-field="autoRest"' + (s.autoRest ? ' checked' : '') + '><span class="track" aria-hidden="true"></span></span>' +
       '</div>' +
       '<div class="switch-row">' +
-        '<label for="sw-sound"><strong>Sound when rest ends</strong><br><span class="hint">Two short blips; completion is always announced to screen readers</span></label>' +
+        '<label for="sw-sound"><strong>Sound when rest ends</strong><br><span class="hint">A rising four-tone alarm; completion is always announced to screen readers</span></label>' +
         '<span class="switch"><input type="checkbox" id="sw-sound" data-change="setting" data-field="sound"' + (s.sound ? ' checked' : '') + '><span class="track" aria-hidden="true"></span></span>' +
+      '</div>' +
+      '<div class="switch-row">' +
+        '<label for="sw-vibrate"><strong>Vibrate when rest ends</strong><br><span class="hint">' +
+          (navigator.vibrate ? 'Alongside the sound, for when you are not looking at the screen'
+                             : 'This browser cannot vibrate — iOS has no vibration API for web apps') + '</span></label>' +
+        '<span class="switch"><input type="checkbox" id="sw-vibrate" data-change="setting" data-field="vibrate"' +
+          (s.vibrate ? ' checked' : '') + (navigator.vibrate ? '' : ' disabled') + '><span class="track" aria-hidden="true"></span></span>' +
       '</div>' +
     '</div>' +
   '</section>' +
@@ -5048,6 +5259,7 @@ const actions = {
 
   'timer-toggle'(){ toggleTimer(); },
   'timer-add30'(){ addThirty(); },
+  'timer-reset'(){ resetTimer(); },
 
   'routine-new'(){ ui.routineDraft = newRoutineDraft(null); ui.routineError = ''; render(); },
   'routine-edit'(d){ const r = routineById(d.id); if (r){ ui.routineDraft = newRoutineDraft(r); ui.routineError=''; render(); } },
@@ -5065,7 +5277,7 @@ const actions = {
   'ex-form-toggle'(){ ui.showExerciseForm = !ui.showExerciseForm; ui.exerciseFormError=''; render();
     if (ui.showExerciseForm){ const f = $('[data-form="ex-new"] input[name="exname"]'); if (f) f.focus(); } },
   'ex-form-close'(){ ui.showExerciseForm = false; ui.exerciseFormError=''; render(); },
-  'ex-edit'(d){ const e = exerciseById(d.id); if (e){ ui.exerciseDraft = deepCopy(e); render(); } },
+  'ex-edit'(d){ const e = exerciseById(d.id); if (e){ ui.exerciseDraft = Object.assign({ url:'' }, deepCopy(e)); render(); } },
   'ex-edit-cancel'(){ ui.exerciseDraft = null; render(); },
   'ex-del'(d){ deleteExercise(d.id); },
 
@@ -5310,11 +5522,19 @@ const SORTABLES = {
       const w = state.activeWorkout; if (!w) return;
       const slots = movableIndices(w);
       if (from >= slots.length || to >= slots.length) return;
+      /* Which exercise the session is on is a position, and the reorder can
+         change what sits at it — moving the current exercise later hands
+         "Now" to whatever is dealt into its place. Captured before the move so
+         the announcement can tell the difference, because the screen behind
+         the sheet changes exercise and that must not be silent. */
+      const wasCurrent = w.exercises[w.currentExerciseIndex];
       const landed = reorderMovable(w, from, to);
       save();
       ui.focus = focus || ('ov-grip-' + landed);
       render();
-      announce(w.exercises[landed].name + ' moved to position ' + (to+1) + ' of ' + slots.length + '.');
+      const nowCurrent = w.exercises[w.currentExerciseIndex];
+      announce(w.exercises[landed].name + ' moved to position ' + (to+1) + ' of ' + slots.length + '.' +
+        (nowCurrent && nowCurrent !== wasCurrent ? ' Now: ' + nowCurrent.name + '.' : ''));
     }
   },
   /* The items of the routine being edited. A draft, so no save() — the form's
@@ -5452,13 +5672,24 @@ const changeHandlers = {
     const key = t.dataset.field;
     state.settings[key] = t.checked;
     save();
-    toast((key === 'autoRest' ? 'Auto-rest ' : 'Timer sound ') + (t.checked ? 'on' : 'off'));
+    /* Switching either alarm channel on plays it once. It is the only way to
+       judge whether it carries in the room you train in without sitting
+       through a rest, and the tap is a real gesture, which is also what audio
+       and vibration need before they are allowed to fire at all. */
+    if (t.checked && key === 'sound') beep();
+    if (t.checked && key === 'vibrate') buzz();
+    toast(SETTING_LABEL[key] + ' ' + (t.checked ? 'on' : 'off'));
   },
   'default-rest'(t){
     const v = clamp(Math.round(toNum(t.value) || defaultSettings().defaultRest), REST_MIN, REST_MAX);
     state.settings.defaultRest = v; t.value = v; save();
-    if (!state.activeWorkout) loadTimer(v);
-    toast('Default rest: ' + fmtClock(v));
+    /* Now that this is the only rest length there is, changing it mid-session
+       should be visible in the session — but not by cutting a rest already
+       under way. An idle timer takes the new value at once; one that is
+       running or paused part-way keeps its own countdown and picks the new
+       length up on the next rest. */
+    if (!timer.running && !timer.done && timer.remaining >= timer.total) loadTimer(v);
+    toast('Rest between sets: ' + fmtClock(v));
   },
   'workout-time'(t){
     const w = editingWorkout(); if (!w) return;
@@ -5502,7 +5733,7 @@ document.addEventListener('submit', e => {
   }
   else if (kind === 'ex-new'){
     const g = n => { const el = form.elements.namedItem(n); return el ? el.value : ''; };
-    saveNewExercise({ name:g('exname'), category:g('excat'), unit:g('exunit'), notes:g('exnotes') });
+    saveNewExercise({ name:g('exname'), category:g('excat'), unit:g('exunit'), notes:g('exnotes'), url:g('exurl') });
   }
   else if (kind === 'ex-save'){ saveExerciseDraft(); }
   else if (kind === 'remote-config'){ saveRemoteConfigForm(form); }
