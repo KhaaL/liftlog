@@ -53,7 +53,7 @@ holding an IIFE. Within each part, sections are marked by banner comments
 | `SEED / SAMPLE DATA` | The starting exercise library and program routines |
 | `STATE` | `state` (persisted) and `ui` (transient), navigation |
 | `FEEDBACK` | Toasts, screen-reader announcements, the confirm dialog |
-| `REST TIMER` | Timer model, persistence across reloads, scheduled beep, wake lock, painting |
+| `REST TIMER` | Timer model, persistence across reloads, the scheduled alarm, wake lock, painting |
 | `PERFORMANCE LOOKUPS` | Per-exercise history aggregates |
 | `ACTIONS — *` | State mutations, grouped by the screen that triggers them |
 | `RENDERING` | `render()` plus pure `viewX()` / `htmlX()` string builders |
@@ -314,7 +314,7 @@ the end of the stylesheet:
 ```
 state
 ├─ version         schema version (SCHEMA_VERSION)
-├─ settings        { theme, unit, defaultRest, autoRest, sound, effortMetric,
+├─ settings        { theme, unit, defaultRest, autoRest, sound, vibrate, effortMetric,
 │                    lastFileBackupAt, seededAt }
 ├─ exercises[]     { id, name, category, unit, notes }        — the library
 ├─ routines[]      { id, name, items[] }                      — the plan
@@ -435,7 +435,7 @@ with `app: 'liftlog'` and a `kind`:
   `backupPayload()`, which is also what the remote PUT uploads, so the file in
   your downloads folder and the object in your bucket are the same thing. It is
   a deep copy of the whole of `state`, so **every** setting travels with it
-  (theme, unit, default rest, auto-rest, sound, effort metric, and the backup
+  (theme, unit, default rest, auto-rest, sound, vibration, effort metric, and the backup
   stamps) and a restore puts them all back. The one deliberate exception is the
   remote-storage config: it lives under its own `localStorage` key and stays on
   the device, so a backup file — including the copy sitting in the bucket —
@@ -874,6 +874,13 @@ regions announce set completion, rest completion and workout restore. The rest
 timer uses `<output>`, dialogs are native `<dialog>`, and
 `prefers-reduced-motion` disables animation. Themes are token-driven, so a new
 theme is one `:root[data-theme="…"]` block plus an entry in `THEMES`.
+
+**The end of a rest is signalled three ways, and no one of them is required.**
+`announce()` puts it in the live region, the drain bar and clock turn green,
+and `ALARM` sounds. Vibration is a fourth where the browser has it. Sound and
+vibration each have their own switch in Settings and each can be off; the
+announcement and the colour cannot, which is what keeps a deaf user, a muted
+phone and a screen reader all served by the same transition.
 
 **No gesture is the only way in.** The long press that marks a warm-up
 (`data-longpress` on the done cell) has no keyboard equivalent, so the set

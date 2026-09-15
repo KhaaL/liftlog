@@ -1476,6 +1476,10 @@ const ITEM_LIMITS = { sets:[1,12], reps:[0,999], rest:[0,900] };
 const NAV_KEYS = { t:'today', r:'routines', h:'history', e:'exercises' };
 
 /* One list drives both the help dialog and the Settings table. */
+/* What a toggled switch is called in its confirmation toast. Every boolean
+   setting with a switch needs an entry, or the toast names the wrong one. */
+const SETTING_LABEL = { autoRest:'Auto-rest', sound:'Timer sound', vibrate:'Timer vibration' };
+
 const SHORTCUTS = [
   { keys:['?'], text:'Open shortcut help' },
   { keys:['/'], text:'Focus search (Exercises)' },
@@ -1720,6 +1724,7 @@ function normalizeState(s){
   set.defaultRest = clamp(Math.round(toNum(set.defaultRest) || d.defaultRest), REST_MIN, REST_MAX);
   set.autoRest = !!set.autoRest;
   set.sound = !!set.sound;
+  set.vibrate = !!set.vibrate;
   set.effortMetric = EFFORT_METRICS.includes(set.effortMetric) ? set.effortMetric : d.effortMetric;
   set.lastFileBackupAt = toNum(set.lastFileBackupAt);
   set.seededAt = toNum(set.seededAt);
@@ -1741,7 +1746,7 @@ function normalizeState(s){
    scale, so only one is shown at a time rather than both. */
 const EFFORT_METRICS = ['none', 'rpe', 'rir'];
 function defaultSettings(){
-  return { theme:'system', unit:'kg', defaultRest:90, autoRest:true, sound:true, effortMetric:'none',
+  return { theme:'system', unit:'kg', defaultRest:90, autoRest:true, sound:true, vibrate:true, effortMetric:'none',
            lastFileBackupAt:null, seededAt:null };
 }
 /* History is kept newest-first everywhere; every mutation that can change a
@@ -2308,6 +2313,7 @@ function completeRest(){
      immediate one if that could not be arranged */
   if (!timer.beepScheduled) beep();
   timer.beepScheduled = false;
+  buzz();
   drawTimer();
 }
 function tickTimer(){
@@ -2326,15 +2332,28 @@ function ensureAudio(){
   try{ audioCtx = new Ctx(); }catch(e){ return null; }
   return audioCtx;
 }
-function blipAt(ctx, t0, f){
+/* A triangle rather than a sine: the extra harmonics are what make this
+   audible over a gym's own noise at the same peak gain, and gain alone cannot
+   go much further — Web Audio is capped by the device volume, so loudness has
+   to come from timbre and repetition instead. */
+function blipAt(ctx, t0, f, peak){
   const o = ctx.createOscillator(), g = ctx.createGain();
-  o.type = 'sine'; o.frequency.value = f;
+  o.type = 'triangle'; o.frequency.value = f;
   o.connect(g); g.connect(ctx.destination);
   g.gain.setValueAtTime(0.0001, t0);
-  g.gain.exponentialRampToValueAtTime(0.18, t0 + 0.02);
+  g.gain.exponentialRampToValueAtTime(peak || 0.45, t0 + 0.02);
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.35);
   o.start(t0); o.stop(t0 + 0.4);
   return o;
+}
+/* The alarm, as offsets from the moment rest ends: four pulses over ~1.4s,
+   rising, with the last one held longest. It is a pattern rather than a single
+   tone because a repeated figure is what gets noticed across a room — and
+   because it has to be schedulable as a fixed list of oscillators (see
+   scheduleRestBeep), which rules out anything that reacts as it plays. */
+const ALARM = [ [0, 880], [0.22, 1175], [0.44, 880], [0.72, 1568] ];
+function alarmAt(ctx, t0){
+  return ALARM.map(([dt, f]) => blipAt(ctx, t0 + dt, f));
 }
 /* The 250 ms tick is throttled in a backgrounded tab, so the end-of-rest beep
    is queued in the audio clock the moment rest starts instead. Web Audio
@@ -2349,7 +2368,7 @@ function scheduleRestBeep(delaySec){
   try{
     if (ctx.state === 'suspended') ctx.resume();
     const t = ctx.currentTime + Math.max(0, delaySec);
-    scheduledBlips = [blipAt(ctx, t, 880), blipAt(ctx, t + 0.28, 1175)];
+    scheduledBlips = alarmAt(ctx, t);
     return true;
   }catch(e){ return false; }
 }
@@ -2357,16 +2376,27 @@ function cancelRestBeep(){
   scheduledBlips.forEach(o => { try{ o.stop(); }catch(e){ /* already stopped */ } });
   scheduledBlips = [];
 }
-/* Immediate fallback for when the beep could not be scheduled ahead of time. */
+/* Immediate fallback for when the beep could not be scheduled ahead of time.
+   Same pattern, so the alarm sounds the same whichever path plays it. */
 function beep(){
   if (!state.settings.sound) return;
   const ctx = ensureAudio();
   if (!ctx) return;
   try{
     if (ctx.state === 'suspended') ctx.resume();
-    blipAt(ctx, ctx.currentTime, 880);
-    blipAt(ctx, ctx.currentTime + 0.28, 1175);
+    alarmAt(ctx, ctx.currentTime);
   }catch(e){ /* audio unavailable — visual announcement still happens */ }
+}
+/* The second channel, and the one that works with the phone face-down in a
+   bag. It cannot be queued the way the beep is — there is no vibration clock —
+   so it fires from completeRest(), on the 250 ms tick, and a backgrounded tab
+   will be late with it; browsers ignore vibrate() on a hidden page entirely,
+   and iOS Safari has no navigator.vibrate at all. Sound stays the reliable
+   channel; this is the one you feel when you are looking away from the screen. */
+function buzz(){
+  if (!state.settings.vibrate) return;
+  if (!navigator.vibrate) return;
+  try{ navigator.vibrate([260, 120, 260, 120, 420]); }catch(e){ /* not permitted here */ }
 }
 
 /* ---------- installability ----------
@@ -4978,8 +5008,15 @@ function viewSettings(){
         '<span class="switch"><input type="checkbox" id="sw-autorest" data-change="setting" data-field="autoRest"' + (s.autoRest ? ' checked' : '') + '><span class="track" aria-hidden="true"></span></span>' +
       '</div>' +
       '<div class="switch-row">' +
-        '<label for="sw-sound"><strong>Sound when rest ends</strong><br><span class="hint">Two short blips; completion is always announced to screen readers</span></label>' +
+        '<label for="sw-sound"><strong>Sound when rest ends</strong><br><span class="hint">A rising four-tone alarm; completion is always announced to screen readers</span></label>' +
         '<span class="switch"><input type="checkbox" id="sw-sound" data-change="setting" data-field="sound"' + (s.sound ? ' checked' : '') + '><span class="track" aria-hidden="true"></span></span>' +
+      '</div>' +
+      '<div class="switch-row">' +
+        '<label for="sw-vibrate"><strong>Vibrate when rest ends</strong><br><span class="hint">' +
+          (navigator.vibrate ? 'Alongside the sound, for when you are not looking at the screen'
+                             : 'This browser cannot vibrate — iOS has no vibration API for web apps') + '</span></label>' +
+        '<span class="switch"><input type="checkbox" id="sw-vibrate" data-change="setting" data-field="vibrate"' +
+          (s.vibrate ? ' checked' : '') + (navigator.vibrate ? '' : ' disabled') + '><span class="track" aria-hidden="true"></span></span>' +
       '</div>' +
     '</div>' +
   '</section>' +
@@ -5488,7 +5525,13 @@ const changeHandlers = {
     const key = t.dataset.field;
     state.settings[key] = t.checked;
     save();
-    toast((key === 'autoRest' ? 'Auto-rest ' : 'Timer sound ') + (t.checked ? 'on' : 'off'));
+    /* Switching either alarm channel on plays it once. It is the only way to
+       judge whether it carries in the room you train in without sitting
+       through a rest, and the tap is a real gesture, which is also what audio
+       and vibration need before they are allowed to fire at all. */
+    if (t.checked && key === 'sound') beep();
+    if (t.checked && key === 'vibrate') buzz();
+    toast(SETTING_LABEL[key] + ' ' + (t.checked ? 'on' : 'off'));
   },
   'default-rest'(t){
     const v = clamp(Math.round(toNum(t.value) || defaultSettings().defaultRest), REST_MIN, REST_MAX);

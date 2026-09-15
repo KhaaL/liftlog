@@ -134,12 +134,18 @@ is set, and re-requests it on `visibilitychange` since the browser drops the
 lock whenever the page is hidden.
 
 ### 3.3 Timer that survives a backgrounded tab — **done**
-The end-of-rest beep is queued in the audio clock when rest starts
+The end-of-rest alarm is queued in the audio clock when rest starts
 (`scheduleRestBeep()`), which is sample-accurate and unaffected by the
 throttling that delays the 250 ms tick. `completeRest()` only sounds an
-immediate beep when scheduling was not possible, and settles a rest that
+immediate alarm when scheduling was not possible, and settles a rest that
 finished while the tab was hidden on the way back. A `Notification` would still
 be the way to reach a user who has switched apps entirely.
+
+Vibration (`buzz()`) is the one part that cannot be queued ahead — there is no
+vibration clock — so it fires from `completeRest()` on the throttled tick and a
+backgrounded tab is late with it. Browsers ignore `vibrate()` on a hidden page
+in any case, and iOS Safari has no `navigator.vibrate` at all, so the Settings
+switch is disabled and says so rather than offering something that cannot work.
 
 ### 3.4 Embed the UI font instead of hoping for it
 **Why:** `--font-ui` and `--font-mono` name only open-source families, but
