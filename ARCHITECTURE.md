@@ -209,14 +209,27 @@ phone in a gym is the case that matters:
 
   Both ways of reordering — and only these two — commit through
   `reorderMovable()`, over the positions `movableIndices()` reports. Those are
-  the exercises the sheet draws as reorderable rows: upcoming, not skipped, not
-  already finished, not the current one. It has to agree exactly with the
-  else-branch of `overviewSheetHTML()`, and it is a list of positions rather
-  than a range because they are not always contiguous — jumping back to an
-  earlier exercise leaves anything you had already finished sitting among the
-  ones still to come. Reordering deals the exercises back into the same set of
-  positions, so no done or current index (nor `ui.expandedDone`, which is keyed
-  by index) can move however far a row travels.
+  the exercises the sheet draws with a grip: the current one, plus everything
+  still to come that has not been skipped or already finished. It is the
+  negation of `isSettledRow()`, which `overviewSheetHTML()` also branches on,
+  so the list that can be dragged and the list drawn with a grip cannot drift
+  apart. It is a list of positions rather than a range because they are not
+  always contiguous — jumping back to an earlier exercise leaves anything you
+  had already finished sitting among the ones still to come. Reordering deals
+  the exercises back into the same set of positions, so no settled row (nor
+  `ui.expandedDone`, which is keyed by index) can move however far a row
+  travels.
+
+  **The current exercise is in that set, and moving it hands "Now" over.**
+  `currentExerciseIndex` names a position, not an exercise, and a reorder
+  preserves the set of positions — so dragging the current exercise later
+  leaves its position occupied by whatever was dealt into it, and that becomes
+  the exercise being worked on. This is the point rather than a side effect:
+  "I'll come back to this one" is a decision made standing in front of an
+  occupied machine. It is also why the current exercise is always the lowest
+  movable position and so can only move later, and why the drop announces the
+  new `Now:` — the screen behind the sheet changes exercise, and that must not
+  be silent.
 
   `syncOverviewSheet()` runs before
   `applyFocus()`, because `showModal()` takes the focus and whatever the render
@@ -387,8 +400,9 @@ neither guaranteed nor permanent:
   about whether the user typed anything).
 - **`ui.expandedDone` is keyed by position in `activeWorkout.exercises`.**
   Anything that inserts or removes an exercise invalidates every key after it,
-  so it is cleared — see `confirmExerciseRemoval()`. Reordering is deliberately
-  scoped to the upcoming sub-range for the same reason.
+  so it is cleared — see `confirmExerciseRemoval()`. Reordering never does:
+  `isSettledRow()` keeps every done and skipped position out of the movable
+  set, so the rows that key is about cannot move.
 - **Execution and analytics are separate.** `completed` says the set was
   performed; `countForVolume` / `countForPR` (default true) say whether it counts
   toward totals and records. A warm-up is `completed: true` with both flags
@@ -961,6 +975,14 @@ several rows at once must land where it looks like it landed. And the case the
 index arithmetic exists for: finish an exercise, jump ahead and finish another,
 jump back — the finished one now sits among the exercises still to come, and
 dragging a row past it must step over it without moving it.
+
+The current exercise drags like any other, and that needs its own pass. Its up
+arrow is always disabled (it is the lowest movable position) and it has no
+*Start now*. Moving it later must hand *Now* to whatever lands in its place,
+change the exercise on the screen behind the sheet, and announce it. Do it with
+sets already logged against the moved exercise and check they travel with it.
+The single-movable-exercise case is worth one look too: both arrows disabled, a
+drag that does nothing, and no error from pressing either.
 
 Session movement is worth walking end to end from the strip's pager: `‹` is
 disabled on the first exercise, steps back into a skipped one (un-skipping it),

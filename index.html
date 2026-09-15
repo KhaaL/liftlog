@@ -697,6 +697,11 @@ kbd{
   display:grid; grid-template-columns:44px 1fr auto; gap:var(--sp-2); align-items:center;
   padding:var(--sp-3) var(--sp-2); border-bottom:1px solid var(--border);
 }
+/* The exercise being worked on is reorderable like the rest, so it is the same
+   row — marked, not separated, since a row that looked different would also
+   look like it could not be dragged. */
+.overview-row.is-current-row{ background:var(--accent-soft); }
+.overview-row.is-current-row .item-name{ font-weight:650; }
 /* .item-name and .item-actions carry bottom padding for the routine editor's
    baseline-aligned grid; here it is 13px of nothing, once per row. */
 .overview-row .item-name,.overview-row .item-actions{ padding-bottom:0; }
@@ -2929,21 +2934,34 @@ function reopenExercise(idx){
   ui.focus = 'ex-panel-top';
   render();
 }
-/* The exercises the sheet draws as reorderable rows, by index: upcoming, not
-   skipped, not already finished, not the current one. Exactly the else-branch
-   of overviewSheetHTML(), and the two must agree — this is what keeps every
-   done and current index (and ui.expandedDone, which is keyed by index) fixed
-   while the rest move.
+/* An exercise the session has finished with: behind the current one, skipped,
+   or done and not the one being worked on. These are the rows the sheet draws
+   as a done row, and the positions a reorder must never disturb — ui.expandedDone
+   is keyed by index, so moving one would mis-key every row after it.
 
-   They are not always contiguous. Jumping back to an earlier exercise from the
-   sheet leaves any exercise you had already finished sitting among the ones
-   still to come, as a done row the reorder must step over rather than through.
-   Hence a list of positions rather than a lo..hi range. */
+   This is the single definition of that split. movableIndices() is its
+   negation and overviewSheetHTML() branches on it, so the list that can be
+   dragged and the list drawn with a grip cannot drift apart. */
+function isSettledRow(w, ex, i){
+  return i < w.currentExerciseIndex || ex.skipped || (allSetsDone(ex) && i !== w.currentExerciseIndex);
+}
+/* The exercises the sheet draws with a grip, by index: the current one and
+   everything still to come that has not been skipped or already finished.
+
+   The current exercise is in the set. It is always the lowest position in it,
+   so it can only move later — and when it does, whatever is dealt into its
+   position becomes the exercise being worked on, since currentExerciseIndex
+   names a position and reorderMovable() preserves the set of positions. That
+   is the point: "I'll come back to this one" is a thing you decide mid-session,
+   standing in front of an occupied machine.
+
+   The positions are not always contiguous. Jumping back to an earlier exercise
+   leaves any exercise you had already finished sitting among the ones still to
+   come, as a done row the reorder must step over rather than through. Hence a
+   list of positions rather than a lo..hi range. */
 function movableIndices(w){
   const out = [];
-  w.exercises.forEach((ex, i) => {
-    if (i > w.currentExerciseIndex && !ex.skipped && !allSetsDone(ex)) out.push(i);
-  });
+  w.exercises.forEach((ex, i) => { if (!isSettledRow(w, ex, i)) out.push(i); });
   return out;
 }
 /* Move one movable exercise to another movable position. The set of positions
@@ -4281,35 +4299,37 @@ function overviewSheetHTML(w){
   let html = '';
 
   w.exercises.forEach((ex, i) => {
-    if (i < w.currentExerciseIndex || (allSetsDone(ex) && i !== w.currentExerciseIndex) || ex.skipped){
+    if (isSettledRow(w, ex, i)){
       html += htmlDoneRow(ex, i);
-    } else if (i === w.currentExerciseIndex){
-      const completed = ex.sets.filter(s => s.completed);
-      html += '<div class="done-ex-row is-current-row" aria-current="step">' +
-        '<span class="status-chip current">Now</span><strong>' + esc(ex.name) + '</strong>' +
-        '<span class="muted small">' + completed.length + '/' + ex.sets.length + ' sets</span>' +
-      '</div>';
-    } else {
-      /* The grip is the drag handle and nothing else — a whole draggable row
-         would have no way to tell a drag from the scroll it started with, on
-         the one surface (a full-screen sheet) that has to scroll. It answers
-         the arrow keys too, so the gesture is never the only way to move a
-         row; the buttons beside it stay because a grip does not announce what
-         it can do to anyone who is not already holding it. */
-      html += '<div class="overview-row" data-idx="' + i + '">' +
-        '<button type="button" class="grip" id="ov-grip-' + i + '" data-drag="session-exercises" ' +
-          'aria-label="Reorder ' + esc(ex.name) + '. Drag it, or use the up and down arrow keys." ' +
-          'title="Drag to reorder">' + IC.grip + '</button>' +
-        '<span class="item-name">' + esc(ex.name) + ' <span class="muted xs">· ' + plural(ex.sets.length, 'set') + ' planned</span></span>' +
-        '<span class="item-actions">' +
-          '<button type="button" class="icon-btn" id="ov-up-' + i + '" data-action="overview-up" data-idx="' + i + '" ' +
-            'aria-label="Move ' + esc(ex.name) + ' earlier"' + (i === lo ? ' disabled' : '') + '>' + IC.up + '</button>' +
-          '<button type="button" class="icon-btn" id="ov-down-' + i + '" data-action="overview-down" data-idx="' + i + '" ' +
-            'aria-label="Move ' + esc(ex.name) + ' later"' + (i === hi ? ' disabled' : '') + '>' + IC.down + '</button>' +
-          '<button type="button" class="btn btn-sm" data-action="overview-jump" data-idx="' + i + '">Start now</button>' +
-        '</span>' +
-      '</div>';
+      return;
     }
+    /* The grip is the drag handle and nothing else — a whole draggable row
+       would have no way to tell a drag from the scroll it started with, on
+       the one surface (a full-screen sheet) that has to scroll. It answers
+       the arrow keys too, so the gesture is never the only way to move a
+       row; the buttons beside it stay because a grip does not announce what
+       it can do to anyone who is not already holding it. */
+    const isNow = i === w.currentExerciseIndex;
+    const done = ex.sets.filter(s => s.completed).length;
+    html += '<div class="overview-row' + (isNow ? ' is-current-row' : '') + '" data-idx="' + i + '"' +
+        (isNow ? ' aria-current="step"' : '') + '>' +
+      '<button type="button" class="grip" id="ov-grip-' + i + '" data-drag="session-exercises" ' +
+        'aria-label="Reorder ' + esc(ex.name) + '. Drag it, or use the up and down arrow keys." ' +
+        'title="Drag to reorder">' + IC.grip + '</button>' +
+      '<span class="item-name">' +
+        (isNow ? '<span class="status-chip current">Now</span> ' : '') +
+        esc(ex.name) +
+        ' <span class="muted xs">· ' + (isNow ? done + '/' + ex.sets.length + ' sets'
+                                              : plural(ex.sets.length, 'set') + ' planned') + '</span></span>' +
+      '<span class="item-actions">' +
+        '<button type="button" class="icon-btn" id="ov-up-' + i + '" data-action="overview-up" data-idx="' + i + '" ' +
+          'aria-label="Move ' + esc(ex.name) + ' earlier"' + (i === lo ? ' disabled' : '') + '>' + IC.up + '</button>' +
+        '<button type="button" class="icon-btn" id="ov-down-' + i + '" data-action="overview-down" data-idx="' + i + '" ' +
+          'aria-label="Move ' + esc(ex.name) + ' later"' + (i === hi ? ' disabled' : '') + '>' + IC.down + '</button>' +
+        /* Nothing to jump to on the exercise you are already on. */
+        (isNow ? '' : '<button type="button" class="btn btn-sm" data-action="overview-jump" data-idx="' + i + '">Start now</button>') +
+      '</span>' +
+    '</div>';
   });
 
   html += htmlAddExercise();
@@ -5502,11 +5522,19 @@ const SORTABLES = {
       const w = state.activeWorkout; if (!w) return;
       const slots = movableIndices(w);
       if (from >= slots.length || to >= slots.length) return;
+      /* Which exercise the session is on is a position, and the reorder can
+         change what sits at it — moving the current exercise later hands
+         "Now" to whatever is dealt into its place. Captured before the move so
+         the announcement can tell the difference, because the screen behind
+         the sheet changes exercise and that must not be silent. */
+      const wasCurrent = w.exercises[w.currentExerciseIndex];
       const landed = reorderMovable(w, from, to);
       save();
       ui.focus = focus || ('ov-grip-' + landed);
       render();
-      announce(w.exercises[landed].name + ' moved to position ' + (to+1) + ' of ' + slots.length + '.');
+      const nowCurrent = w.exercises[w.currentExerciseIndex];
+      announce(w.exercises[landed].name + ' moved to position ' + (to+1) + ' of ' + slots.length + '.' +
+        (nowCurrent && nowCurrent !== wasCurrent ? ' Now: ' + nowCurrent.name + '.' : ''));
     }
   },
   /* The items of the routine being edited. A draft, so no save() — the form's
