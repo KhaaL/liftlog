@@ -647,6 +647,13 @@ kbd{
 .ab-row .ab-grow{ flex:1; min-width:0; }
 .ab-row .btn{ white-space:nowrap; }
 .ab-icon{ flex:none; min-width:44px; padding-inline:10px; }
+/* Reset only exists while the rest is stopped part-way, so the room it needs is
+   only wanted then: below 420px the toggle gives up its label for it and keeps
+   its icon, exactly as it does unconditionally below 360px. */
+@media (max-width:420px){
+  .actionbar.is-resettable #timer-toggle span{ display:none; }
+  .actionbar.is-resettable #timer-toggle{ min-width:44px; padding-inline:10px; }
+}
 @keyframes flash-done{ 0%,100%{ background:var(--surface);} 30%{ background:var(--success-soft);} }
 .actionbar.is-done{ animation:flash-done 1.2s ease 2; }
 /* Width alone is the wrong test: a phone in landscape is wider than 720px and
@@ -1414,7 +1421,9 @@ const IC = {
   boxcheck:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="4.5" width="15" height="15" rx="3"/><path d="M8.5 12.2l2.6 2.6 4.9-5.4"/></svg>',
   help:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.4 9.2a2.7 2.7 0 015.2.9c0 1.8-2.6 2.1-2.6 3.9"/><path d="M12 17.3h.01"/></svg>',
   grip:'<svg class="ic" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>',
-  pen:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L18.5 9.5a2.1 2.1 0 00-3-3L5 17zM13.5 6.5l3 3"/></svg>'
+  pen:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L18.5 9.5a2.1 2.1 0 00-3-3L5 17zM13.5 6.5l3 3"/></svg>',
+  reset:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 107.5-7.5c-2.4 0-4.5 1.1-5.9 2.9"/><path d="M4 4.2v3.9h3.9"/></svg>',
+  link:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.5 13.5a4 4 0 005.7 0l2.8-2.8a4 4 0 00-5.7-5.7l-1.4 1.4"/><path d="M13.5 10.5a4 4 0 00-5.7 0l-2.8 2.8a4 4 0 005.7 5.7l1.4-1.4"/></svg>'
 };
 
 /* ============================================================
@@ -2220,6 +2229,21 @@ function toggleTimer(){
   timer.running ? pauseTimer() : startTimer();
   announce(timer.running ? 'Rest timer started' : 'Rest timer paused');
 }
+/* Back to a full, stopped rest — including whatever +0:30 added, which is the
+   point: the extension is a one-off, so undoing it should not mean waiting it
+   out. loadTimer() already cancels the scheduled beep, clears `done`, persists
+   and repaints, so there is nothing to repeat here. */
+function resetTimer(){
+  if (!state.activeWorkout) return;
+  loadTimer(currentRestSeconds());
+  announce('Rest timer reset');
+}
+/* There is nothing to reset on a full, untouched timer, and nothing to reset
+   *to* while it is running — pause first. Everything else (paused part-way,
+   extended, or finished) has somewhere to go back to. */
+function canResetTimer(){
+  return !timer.running && (timer.done || timer.remaining < timer.total);
+}
 function currentRestSeconds(){
   const w = state.activeWorkout;
   if (w){
@@ -2263,6 +2287,15 @@ function drawTimer(){
     toggle.innerHTML = (timer.running ? IC.pause : IC.play) + '<span>' + label + '</span>';
     toggle.setAttribute('aria-label', timer.running ? 'Pause rest timer' : label + ' rest timer');
   }
+  /* Reset is shown and hidden from here rather than from the template because
+     pause and resume repaint through drawTimer() without a render() — a button
+     that only existed in htmlActionBar() would never appear on a pause. The
+     class goes on the bar as well so the stylesheet can make room for the
+     fourth control on a narrow phone without knowing when it appears. */
+  const canReset = canResetTimer();
+  const reset = $('#timer-reset');
+  if (reset) reset.hidden = !canReset;
+  if (bar) bar.classList.toggle('is-resettable', canReset);
 }
 /* One place the rest-finished transition happens, so the wall-clock tick and a
    late wake-up cannot both run it. */
@@ -4191,6 +4224,8 @@ function htmlActionBar(){
       '<div class="ab-row ab-timer">' +
         '<output id="timer-time" class="ab-time" aria-label="Rest time remaining">' + fmtClock(timer.remaining) + '</output>' +
         '<button type="button" class="btn" id="timer-toggle" data-action="timer-toggle">' + IC.play + '<span>Start</span></button>' +
+        '<button type="button" class="btn ab-icon" id="timer-reset" data-action="timer-reset" ' +
+          'aria-label="Reset rest timer" title="Reset rest timer"' + (canResetTimer() ? '' : ' hidden') + '>' + IC.reset + '</button>' +
         '<button type="button" class="btn ab-icon" data-action="timer-add30" aria-label="Add 30 seconds to rest">+0:30</button>' +
       '</div>' +
     '</div>' +
@@ -5048,6 +5083,7 @@ const actions = {
 
   'timer-toggle'(){ toggleTimer(); },
   'timer-add30'(){ addThirty(); },
+  'timer-reset'(){ resetTimer(); },
 
   'routine-new'(){ ui.routineDraft = newRoutineDraft(null); ui.routineError = ''; render(); },
   'routine-edit'(d){ const r = routineById(d.id); if (r){ ui.routineDraft = newRoutineDraft(r); ui.routineError=''; render(); } },
