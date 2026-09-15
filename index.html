@@ -710,11 +710,17 @@ kbd{
 .list-meta{ color:var(--muted); font-size:var(--fs-xs); margin-top:1px; }
 .list-actions{ display:flex; gap:6px; flex-wrap:wrap; }
 
-.hist-row{ width:100%; text-align:left; background:none; border:0; border-bottom:1px solid var(--border); cursor:pointer; padding:var(--sp-3) var(--sp-4); display:grid; grid-template-columns:minmax(150px,1.2fr) 2fr repeat(3,minmax(70px,1fr)) 24px; gap:var(--sp-3); align-items:baseline; }
+.hist-row{ width:100%; text-align:left; background:none; border:0; border-bottom:1px solid var(--border); cursor:pointer; padding:var(--sp-3) var(--sp-4); display:grid; grid-template-columns:minmax(170px,2.2fr) repeat(3,minmax(70px,1fr)) 24px; gap:var(--sp-3); align-items:center; }
 .hist-row:last-child{ border-bottom:0; }
 .hist-cell{ font-variant-numeric:tabular-nums; font-size:var(--fs-sm); }
 .hist-cell .k{ color:var(--muted); font-size:var(--fs-xs); }
 .hist-cell b{ font-weight:650; }
+/* The heading cell is two lines, so it sets the row's height and the numeric
+   cells centre against it — which is why the row aligns centre rather than on
+   a baseline the other cells no longer share. */
+.hist-title{ min-width:0; line-height:1.35; }
+.hist-title b{ display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.hist-title .k{ display:block; margin-top:2px; }
 .hist-detail{ border-bottom:1px solid var(--border); background:var(--surface-2); padding:var(--sp-4); }
 .md-note{ border-left:3px solid var(--border-strong); padding-left:var(--sp-3); }
 .md-note p{ margin:0 0 var(--sp-2); }
@@ -738,7 +744,6 @@ kbd{
 @media (max-width:680px){
   .hist-row{ grid-template-columns:1fr 24px; }
   .hist-row .hist-cell.hide-m{ display:none; }
-  .hist-row .hist-cell{ grid-column:1; }
 }
 
 /* stats */
@@ -4426,8 +4431,13 @@ function viewHistory(){
     const vol = workoutVolume(w);
     html += '<div role="listitem">' +
       '<button type="button" class="hist-row" data-action="history-toggle" data-id="' + w.id + '" aria-expanded="' + open + '" aria-label="' + esc(w.routineName) + ', ' + fmtDate(w.startedAt) + '">' +
-        '<span class="hist-cell"><b>' + fmtDate(w.startedAt) + '</b><br><span class="k">' + relDays(w.startedAt) + '</span></span>' +
-        '<span class="hist-cell"><b>' + esc(w.routineName) + '</b></span>' +
+        /* One heading, not two competing ones. The session name is what the eye
+           looks for in this list, so it carries the weight; the date and how
+           long ago it was share the muted line under it, which keeps the time
+           axis of the list readable without the date fighting the name for
+           attention. */
+        '<span class="hist-cell hist-title"><b>' + esc(w.routineName) + '</b><br>' +
+          '<span class="k">' + fmtDate(w.startedAt) + ' · ' + relDays(w.startedAt) + '</span></span>' +
         '<span class="hist-cell hide-m">' + dur + '</span>' +
         '<span class="hist-cell hide-m">' + plural(workoutSets(w), 'set') + '</span>' +
         '<span class="hist-cell hide-m"><b>' + fmtNum(vol) + '</b> ' + unitLabel() + '</span>' +
