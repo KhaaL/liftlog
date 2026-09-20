@@ -1030,9 +1030,11 @@ For the storage and install paths specifically:
 ### Either-of routine pairs (state v7, transfer schema 1.4.0)
 
 Two items can share an optional `eitherOf` string key, scoped to their routine.
-They must reference different exercises. The editor lets either item select its
-partner; selecting Independent exercise or deleting one item dissolves the pair.
-Targets remain on each item. Reordering and duplication preserve the pair.
+They must reference different exercises. The editor has one **Pair exercises**
+button, which opens a picker of unpaired exercises already in that routine.
+Existing pairs are listed there with **Unpair** controls. Deleting one item also
+dissolves its pair. Targets remain on each item; reordering and duplication
+preserve the pair.
 
 Starting a routine asks for one choice per pair before creating any session.
 Cancel leaves the existing session untouched. Only the chosen item becomes a

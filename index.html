@@ -800,6 +800,17 @@ kbd{
 .item-row{ display:grid; grid-template-columns:44px 1fr repeat(3,minmax(64px,96px)) 84px; gap:var(--sp-2); align-items:end; padding:var(--sp-3) 0; border-top:1px solid var(--border); }
 .item-row:first-child{ border-top:0; }
 .item-name{ font-weight:600; font-size:var(--fs-sm); padding-bottom:9px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.item-name.has-pair{ white-space:normal; }
+.pair-badge{ display:block; margin-top:2px; color:var(--muted); font-size:var(--fs-xs); font-weight:400; line-height:1.3; }
+.routine-pair-toolbar{ margin:0 0 var(--sp-3); }
+.routine-pair-fields{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--sp-3); margin-top:var(--sp-3); }
+.routine-pair-existing{ margin:var(--sp-4) 0; }
+.routine-pair-existing h3{ font-size:var(--fs-sm); margin-bottom:var(--sp-2); }
+.routine-pair-existing-row{ display:flex; align-items:center; justify-content:space-between; gap:var(--sp-3); padding:var(--sp-2) 0; border-top:1px solid var(--border); font-size:var(--fs-sm); }
+.routine-pair-existing-row span{ min-width:0; }
+#routine-pair-picker[hidden]{ display:none; }
+#routine-pair-error{ color:var(--danger); }
+@media (max-width:540px){ .routine-pair-fields{ grid-template-columns:1fr; } }
 .item-actions{ display:flex; gap:2px; padding-bottom:4px; }
 .icon-btn{
   appearance:none; background:none; border:1px solid transparent; border-radius:var(--radius-sm);
@@ -850,6 +861,12 @@ html.is-reordering{ user-select:none; -webkit-user-select:none; }
 .setting-block h3{ margin-bottom:var(--sp-1); }
 .setting-block .desc{ color:var(--muted); font-size:var(--fs-sm); margin-bottom:var(--sp-3); }
 .setting-block .danger-heading{ color:var(--danger); }
+.transfer-grid{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--sp-3); }
+.transfer-group{ min-width:0; padding:var(--sp-3); border:1px solid var(--border); border-radius:var(--radius); background:var(--surface-2); }
+.transfer-group h4{ margin:0 0 var(--sp-2); font-size:var(--fs-sm); }
+.transfer-actions{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--sp-2); }
+.transfer-actions > .btn,.transfer-actions > .file-btn,.transfer-actions .file-btn span{ width:100%; min-width:0; justify-content:center; }
+@media (max-width:600px){ .transfer-grid{ grid-template-columns:1fr; } }
 .rest-field{ max-width:220px; }
 .radio-row{ display:flex; gap:var(--sp-2); flex-wrap:wrap; }
 .radio-pill{ position:relative; }
@@ -1243,13 +1260,31 @@ button,.btn,.icon-btn,.nav-btn,.strip-step,.strip-num,.set-num,.done-ex-row,.his
 
 <dialog id="schema-dlg" class="dlg-wide" aria-labelledby="schema-title">
   <div class="dlg-body">
-    <h2 id="schema-title">Import file format</h2>
+    <h2 id="schema-title">Transfer file format &amp; samples</h2>
     <div id="schema-body"></div>
   </div>
   <div class="dlg-actions">
     <button type="button" class="btn" data-action="sample-routines">Sample routines file</button>
     <button type="button" class="btn" data-action="sample-history">Sample history file</button>
     <button type="button" class="btn btn-primary" data-action="schema-close" autofocus>Close</button>
+  </div>
+</dialog>
+
+<dialog id="routine-pair-dlg" class="dlg-wide" aria-labelledby="routine-pair-title">
+  <div class="dlg-body">
+    <h2 id="routine-pair-title">Either of</h2>
+    <p class="desc">Choose two exercises already in this routine. You will pick one when starting a workout.</p>
+    <div id="routine-pair-existing" class="routine-pair-existing"></div>
+    <div id="routine-pair-picker" class="routine-pair-fields">
+      <label class="field"><span class="cap">First exercise</span><select id="routine-pair-first" data-change="routine-pair-first"></select></label>
+      <label class="field"><span class="cap">Or this exercise</span><select id="routine-pair-second"></select></label>
+    </div>
+    <p id="routine-pair-empty" class="hint" hidden>Add two unpaired exercises to create another pair.</p>
+    <p id="routine-pair-error" class="error-text" role="alert" hidden></p>
+  </div>
+  <div class="dlg-actions">
+    <button type="button" class="btn" data-action="routine-pair-close">Close</button>
+    <button type="button" class="btn btn-primary" id="routine-pair-add" data-action="routine-pair-add">Pair exercises</button>
   </div>
 </dialog>
 
@@ -3213,16 +3248,77 @@ function normalizeRoutineItem(it){
   delete it.rest;
   return it;
 }
-function pairRoutineItem(idx, partnerId){
-  const d = ui.routineDraft; if (!d || !d.items[idx]) return;
-  const item = d.items[idx];
-  const partner = d.items.find(it => it.id === partnerId && it !== item && it.exerciseId !== item.exerciseId && !it.eitherOf);
-  if (partnerId && !partner) return;
-  const old = item.eitherOf;
-  if (old) d.items.forEach(it => { if (it.eitherOf === old) delete it.eitherOf; });
-  if (partner) item.eitherOf = partner.eitherOf = uid();
-  ui.focus = 'ri-pair-' + idx;
-  render();
+function pairRoutineItems(firstId, secondId){
+  const items = ui.routineDraft && ui.routineDraft.items;
+  if (!items) return false;
+  const first = items.find(it => it.id === firstId);
+  const second = items.find(it => it.id === secondId);
+  if (!first || !second || first === second || first.eitherOf || second.eitherOf ||
+      first.exerciseId === second.exerciseId) return false;
+  first.eitherOf = second.eitherOf = uid();
+  return true;
+}
+function unpairRoutineItems(groupId){
+  const items = ui.routineDraft && ui.routineDraft.items;
+  if (!items || !groupId) return false;
+  let removed = false;
+  items.forEach(it => {
+    if (it.eitherOf === groupId){ delete it.eitherOf; removed = true; }
+  });
+  return removed;
+}
+function unpairedRoutineItems(){
+  return ui.routineDraft ? ui.routineDraft.items.filter(it => !it.eitherOf && exerciseById(it.exerciseId)) : [];
+}
+function pairPickerOptions(items){
+  const all = ui.routineDraft.items;
+  return items.map(it => '<option value="' + esc(it.id) + '">' +
+    esc((exerciseById(it.exerciseId) || {}).name || '(removed exercise)') +
+    ' · #' + (all.indexOf(it) + 1) + '</option>').join('');
+}
+function refreshSecondPairPicker(){
+  const first = unpairedRoutineItems().find(it => it.id === $('#routine-pair-first').value);
+  const second = $('#routine-pair-second');
+  const selected = second.value;
+  const choices = unpairedRoutineItems().filter(it => first && it !== first && it.exerciseId !== first.exerciseId);
+  second.innerHTML = pairPickerOptions(choices);
+  if (choices.some(it => it.id === selected)) second.value = selected;
+}
+function openRoutinePairDialog(){
+  const d = ui.routineDraft;
+  if (!d || d.items.length < 2) return;
+  const paired = routineGroups(d.items).filter(group => group.length === 2);
+  $('#routine-pair-existing').innerHTML = paired.length
+    ? '<h3>Current pairs</h3>' + paired.map(group =>
+      '<div class="routine-pair-existing-row"><span>' +
+        group.map(it => esc((exerciseById(it.exerciseId) || {}).name || '(removed exercise)')).join(' or ') +
+        '</span><button type="button" class="btn btn-sm" data-action="routine-pair-unpair" data-group="' +
+        esc(group[0].eitherOf) + '">Unpair</button></div>').join('') : '';
+  const available = unpairedRoutineItems();
+  const firstChoices = available.filter(it => available.some(other => other !== it && other.exerciseId !== it.exerciseId));
+  const canPair = firstChoices.length > 0;
+  $('#routine-pair-picker').hidden = !canPair;
+  $('#routine-pair-empty').hidden = canPair;
+  $('#routine-pair-add').disabled = !canPair;
+  $('#routine-pair-error').hidden = true;
+  $('#routine-pair-first').innerHTML = pairPickerOptions(firstChoices);
+  refreshSecondPairPicker();
+  $('#routine-pair-dlg').showModal();
+  (canPair ? $('#routine-pair-first') : $('#routine-pair-dlg [data-action="routine-pair-close"]')).focus();
+}
+function closeRoutinePairDialog(changed){
+  $('#routine-pair-dlg').close();
+  if (changed){ ui.focus = 'routine-pair-open'; render(); }
+  else $('#routine-pair-open').focus();
+}
+function addRoutinePair(){
+  if (pairRoutineItems($('#routine-pair-first').value, $('#routine-pair-second').value)){
+    closeRoutinePairDialog(true);
+    return;
+  }
+  const error = $('#routine-pair-error');
+  error.textContent = 'Choose two different, unpaired exercises.';
+  error.hidden = false;
 }
 function newRoutineDraft(r){
   return r ? deepCopy(r) : { id:null, name:'', items:[] };
@@ -4648,7 +4744,8 @@ function htmlRoutineEditor(){
       (ui.routineError ? '<p class="error-text mt-2" role="alert">' + esc(ui.routineError) + '</p>' : '') +
       '<div class="section-title mt-5"><h2>Exercises</h2><span class="rule"></span>' +
         '<span class="muted xs">sets × reps · target weight</span></div>' +
-      '<p class="hint">Pair two exercises with Either of to choose one when starting. Each keeps its own targets; the pair runs at its first position.</p>';
+      '<div class="routine-pair-toolbar"><button type="button" class="btn btn-sm" id="routine-pair-open" ' +
+        'data-action="routine-pair-open"' + (d.items.length < 2 ? ' disabled' : '') + '>Pair exercises…</button></div>';
 
   if (!d.items.length){
     html += '<p class="muted small empty-line">No exercises yet — add the first one below.</p>';
@@ -4656,15 +4753,15 @@ function htmlRoutineEditor(){
   d.items.forEach((it, i) => {
     const e = exerciseById(it.exerciseId);
     const name = e ? e.name : '(removed exercise)';
+    const partner = it.eitherOf && d.items.find(other => other !== it && other.eitherOf === it.eitherOf);
+    const partnerDef = partner && exerciseById(partner.exerciseId);
     const wl = e && (e.unit === 'bw' || e.unit === 'time') ? (e.unit === 'bw' ? 'BW' : 'sec') : unitLabel();
     html += '<div class="item-row">' +
       '<button type="button" class="grip" id="ri-grip-' + i + '" data-drag="routine-items" ' +
         'aria-label="Reorder ' + esc(name) + '. Drag it, or use the up and down arrow keys." ' +
         'title="Drag to reorder">' + IC.grip + '</button>' +
-      '<span class="item-name" title="' + esc(name) + '">' + esc(name) +
-        '<label class="field mt-2"><span class="cap">Either of</span><select id="ri-pair-' + i + '" data-change="rpair" data-idx="' + i + '" aria-label="Either-of partner for ' + esc(name) + '">' +
-        '<option value="">Independent exercise</option>' + d.items.filter(other => other !== it && other.exerciseId !== it.exerciseId && (!other.eitherOf || other.eitherOf === it.eitherOf)).map(other =>
-          '<option value="' + esc(other.id) + '"' + (it.eitherOf && other.eitherOf === it.eitherOf ? ' selected' : '') + '>' + esc((exerciseById(other.exerciseId) || {}).name || '(removed)') + '</option>').join('') + '</select></label></span>' +
+      '<span class="item-name' + (partner ? ' has-pair' : '') + '" title="' + esc(name) + '">' + esc(name) +
+        (partner ? '<span class="pair-badge">Either of ' + esc(partnerDef ? partnerDef.name : '(removed exercise)') + '</span>' : '') + '</span>' +
       '<label class="field"><span class="cap">Sets</span><input type="number" min="1" max="12" inputmode="numeric" data-bind="ritem" data-idx="' + i + '" data-field="sets" value="' + esc(it.sets) + '"></label>' +
       '<label class="field"><span class="cap">' + (e && e.unit === 'time' ? 'Seconds' : 'Reps') + '</span><input type="number" min="0" max="999" inputmode="numeric" data-bind="ritem" data-idx="' + i + '" data-field="reps" value="' + esc(it.reps) + '"></label>' +
       '<label class="field"><span class="cap">' + esc(wl) + '</span><input type="number" min="0" step="0.5" inputmode="decimal" data-bind="ritem" data-idx="' + i + '" data-field="weight" value="' + esc(it.weight != null ? it.weight : '') + '" placeholder="–"></label>' +
@@ -5385,20 +5482,25 @@ function viewSettings(){
       '<div class="block-head">' +
         '<h3>Transfer routines &amp; history</h3>' +
         '<button type="button" class="icon-btn" data-action="schema-open" ' +
-          'aria-label="What format do these files use?" title="What format do these files use?">' + IC.help + '</button>' +
+          'aria-label="File format and sample files" title="File format and sample files">' + IC.help + '</button>' +
       '</div>' +
-      '<p class="desc">Parts rather than the whole, for moving into a browser you do not want to overwrite: ' +
-        'these files merge instead of replacing. A routines file carries the exercises it needs — missing ones are ' +
-        'added on import; duplicates are skipped.</p>' +
-      '<div class="form-actions">' +
-        '<button type="button" class="btn" data-action="export-routines">' + IC.down + '<span>Routines JSON</span></button>' +
-        '<label class="file-btn"><span>' + IC.up + ' Import routines</span><input type="file" accept=".json,application/json" data-change="import-routines" aria-label="Import routines from a JSON file"></label>' +
-        '<button type="button" class="btn" data-action="export-history">' + IC.down + '<span>History JSON</span></button>' +
-        '<label class="file-btn"><span>' + IC.up + ' Import history</span><input type="file" accept=".json,application/json" data-change="import-history" aria-label="Import workout history from a JSON file"></label>' +
+      '<p class="desc">Imports merge into this browser. Duplicates are skipped, and a routine import adds any missing exercises.</p>' +
+      '<div class="transfer-grid">' +
+        '<div class="transfer-group" role="group" aria-labelledby="transfer-routines-title">' +
+          '<h4 id="transfer-routines-title">Routines</h4>' +
+          '<div class="transfer-actions">' +
+            '<button type="button" class="btn" data-action="export-routines" aria-label="Export routines">' + IC.down + '<span>Export</span></button>' +
+            '<label class="file-btn"><span>' + IC.up + ' Import</span><input type="file" accept=".json,application/json" data-change="import-routines" aria-label="Import routines from a JSON file"></label>' +
+          '</div>' +
+        '</div>' +
+        '<div class="transfer-group" role="group" aria-labelledby="transfer-history-title">' +
+          '<h4 id="transfer-history-title">Workout history</h4>' +
+          '<div class="transfer-actions">' +
+            '<button type="button" class="btn" data-action="export-history" aria-label="Export workout history">' + IC.down + '<span>Export</span></button>' +
+            '<label class="file-btn"><span>' + IC.up + ' Import</span><input type="file" accept=".json,application/json" data-change="import-history" aria-label="Import workout history from a JSON file"></label>' +
+          '</div>' +
+        '</div>' +
       '</div>' +
-      '<p class="hint mt-3">The <strong>?</strong> above describes the format. Or start from a sample file: ' +
-        '<button type="button" class="link-btn" data-action="sample-routines">routines</button> · ' +
-        '<button type="button" class="link-btn" data-action="sample-history">history</button>.</p>' +
     '</div>' +
     '<div class="setting-block">' +
       '<h3 class="danger-heading">Danger zone</h3>' +
@@ -5470,6 +5572,10 @@ const actions = {
   'routine-dup'(d){ duplicateRoutine(d.id); },
   'routine-del'(d){ deleteRoutine(d.id); },
   'routine-cancel'(){ ui.routineDraft = null; ui.routineError=''; render(); },
+  'routine-pair-open'(){ openRoutinePairDialog(); },
+  'routine-pair-close'(){ closeRoutinePairDialog(false); },
+  'routine-pair-add'(){ addRoutinePair(); },
+  'routine-pair-unpair'(d){ if (unpairRoutineItems(d.group)) closeRoutinePairDialog(true); },
   'ritem-up'(d){ routineStep(Number(d.idx), -1); },
   'ritem-down'(d){ routineStep(Number(d.idx), 1); },
   'ritem-rm'(d){ removeRoutineItem(Number(d.idx)); },
@@ -5863,7 +5969,7 @@ document.addEventListener('input', e => {
 
 /* Controls that commit on change rather than per keystroke. Keyed by data-change. */
 const changeHandlers = {
-  rpair(t){ pairRoutineItem(Number(t.dataset.idx), t.value); },
+  'routine-pair-first'(){ refreshSecondPairPicker(); },
   hexsel(t){ const ex = findHEx(t.dataset); if (ex){ ex.unit = t.value; save(); } },
   theme(t){ setTheme(t.value); },
   unit(t){ setUnit(t.value); },
