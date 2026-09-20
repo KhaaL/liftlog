@@ -1545,14 +1545,15 @@ const SHORTCUTS = [
    ============================================================ */
 const LS_KEY = 'liftlog.v1';
 const LS_RESCUE_KEY = 'liftlog.v1.unreadable';  /* holds data we could not load, so nothing is lost silently */
-const SCHEMA_VERSION = 6;   /* v3: sets carry durationSeconds (time no longer overloads reps)
+const SCHEMA_VERSION = 7;   /* v3: sets carry durationSeconds (time no longer overloads reps)
                                + countForVolume / countForPR split execution from analytics
                                v4: settings carry effortMetric ('none'|'rpe'|'rir'), sets carry rir
                                v5: library exercises carry url (how to perform the movement)
                                v6: rest is settings.defaultRest alone — items[].rest and
-                                   exercises[].restSeconds are gone */
-const EXPORT_SCHEMA = '1.3.0'; /* version of the documented import/export contract — 1.1: sets[].rir;
-                                  1.2: exercises[].url; 1.3: per-item rest dropped */
+                                   exercises[].restSeconds are gone
+                               v7: routine items can share an eitherOf pair key */
+const EXPORT_SCHEMA = '1.4.0'; /* version of the documented import/export contract — 1.1: sets[].rir;
+                                  1.2: exercises[].url; 1.3: per-item rest dropped; 1.4: items[].eitherOf */
 
 /* Set by load() when stored data could not be used, surfaced once after init. */
 let loadWarning = '';
@@ -1560,8 +1561,12 @@ let loadWarning = '';
    The app keeps working in memory either way, but silently doing so is how a
    session gets lost without anyone noticing — so it is shown, not swallowed. */
 let saveFailed = false;
+/* If rescuing unreadable storage fails, keep the original key intact even
+   when init(), a timer, or an edit tries to save the temporary seed state. */
+let storageRecoveryBlocked = false;
 
 function save(){
+  if (storageRecoveryBlocked){ saveFailed = true; updateSaveBanner(); return; }
   try{
     localStorage.setItem(LS_KEY, JSON.stringify(state));
     if (saveFailed){ saveFailed = false; updateSaveBanner(); }
@@ -1701,33 +1706,143 @@ function requestPersistence(fromUser){
 /* Stored data we cannot read is never overwritten in place: it is moved aside
    first so a bad parse or a downgrade can still be recovered by hand. */
 function rescueUnreadable(raw, why){
-  loadWarning = why;
-  try{ if (raw) localStorage.setItem(LS_RESCUE_KEY, raw); }catch(e){ /* nothing more we can do */ }
+  try{
+    const previous = localStorage.getItem(LS_RESCUE_KEY);
+    if (previous != null && previous !== raw) throw new Error('A previous recovery copy already exists');
+    localStorage.setItem(LS_RESCUE_KEY, raw);
+    if (localStorage.getItem(LS_RESCUE_KEY) !== raw) throw new Error('Recovery copy was not saved');
+    loadWarning = why + ' The original was set aside; starting fresh.';
+  }catch(e){
+    storageRecoveryBlocked = true;
+    loadWarning = why + ' The original is still stored. Saving is disabled until you restore a valid backup or clear all data.';
+  }
 }
 function load(){
   let raw = null;
   try{ raw = localStorage.getItem(LS_KEY); }catch(e){ return seedState(); }
   if (!raw) return seedState();
-  let parsed = null;
-  try{ parsed = JSON.parse(raw); }
+  try{ return prepareBackup(JSON.parse(raw)); }
   catch(e){
-    rescueUnreadable(raw, 'Saved data could not be read and was set aside; starting fresh.');
+    rescueUnreadable(raw, 'Saved data could not be loaded: ' + e.message);
     return seedState();
   }
-  if (!parsed || !Array.isArray(parsed.exercises) || !(parsed.version >= 1)){
-    rescueUnreadable(raw, 'Saved data was not in a recognizable shape and was set aside; starting fresh.');
-    return seedState();
+}
+/* IDs are opaque strings, not HTML or CSS selectors. Control characters cannot
+   round-trip through HTML attributes; punctuation, quotes and Unicode can. */
+function validId(id){
+  return typeof id === 'string' && !!id.trim() && !/[\u0000-\u001f\u007f]/.test(id);
+}
+/* Validate the complete candidate before migrations or state replacement. The
+   structure is the same for legacy exports (which had no app/kind markers).
+   Optional newer fields may be absent; missing collections are never silently
+   interpreted as empty, and dangling exercise references are legal after a
+   library deletion. ID uniqueness follows the scopes used by action handlers. */
+function validateBackup(s){
+  const fail = (path, expected) => { throw new Error(path + ': expected ' + expected); };
+  const object = (v, path) => {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) fail(path, 'an object');
+  };
+  const array = (v, path) => { if (!Array.isArray(v)) fail(path, 'an array'); };
+  const text = (v, path, required = false) => {
+    if (required ? typeof v !== 'string' || !v.trim() : v != null && typeof v !== 'string')
+      fail(path, required ? 'a nonempty string' : 'a string or null');
+  };
+  const number = (v, path, required = false) => {
+    if ((required || v != null) && (typeof v !== 'number' || !Number.isFinite(v))) fail(path, 'a finite number');
+  };
+  const fields = (o, path, keys, check) => keys.forEach(key => check(o[key], path + '.' + key));
+  const bool = (v, path) => { if (v != null && typeof v !== 'boolean') fail(path, 'a boolean'); };
+  const id = (v, path, seen) => {
+    if (!validId(v)) fail(path, 'a nonempty ID without control characters');
+    if (seen){ if (seen.has(v)) fail(path, 'a unique ID'); seen.add(v); }
+  };
+  const timestamp = (v, path, required = false) => {
+    number(v, path, required);
+    if (v != null && !Number.isFinite(new Date(v).getTime())) fail(path, 'a valid epoch timestamp');
+  };
+  object(s, 'backup');
+  if (!Number.isInteger(s.version) || s.version < 1 || s.version > SCHEMA_VERSION)
+    fail('version', 'an integer from 1 to ' + SCHEMA_VERSION + ' (newer backups need a newer Liftlog)');
+  if (s.app != null && s.app !== 'liftlog') fail('app', 'liftlog');
+  if (s.kind != null && s.kind !== 'backup') fail('kind', 'backup');
+  ['exercises', 'routines', 'workouts'].forEach(key => array(s[key], key));
+  if (s.settings != null){
+    object(s.settings, 'settings');
+    fields(s.settings, 'settings', ['theme', 'unit', 'effortMetric'], text);
+    fields(s.settings, 'settings', ['defaultRest', 'lastFileBackupAt', 'seededAt'], number);
+    fields(s.settings, 'settings', ['autoRest', 'sound', 'vibrate'], bool);
   }
-  if (parsed.version > SCHEMA_VERSION){
-    rescueUnreadable(raw, 'Saved data comes from a newer version of Liftlog and was set aside rather than downgraded.');
-    return seedState();
-  }
-  if (parsed.version === 1) migrateToV2(parsed);   /* old installs: refresh the seed library, keep history */
-  if (parsed.version === 2) migrateToV3(parsed);   /* v2 stored seconds in `reps` for timed sets */
-  if (parsed.version === 3) migrateToV4(parsed);   /* v3 had no effort-metric preference */
-  if (parsed.version === 4) migrateToV5(parsed);   /* v4 exercises had nowhere to put a how-to link */
-  if (parsed.version === 5) migrateToV6(parsed);   /* v5 kept a rest length per routine item */
-  return normalizeState(parsed);
+  const exercises = new Set(), routines = new Set(), workouts = new Set();
+  s.exercises.forEach((e, i) => {
+    const path = 'exercises[' + i + ']'; object(e, path);
+    id(e.id, path + '.id', exercises); text(e.name, path + '.name', true);
+    fields(e, path, ['category', 'unit', 'notes', 'url'], text);
+  });
+  s.routines.forEach((r, i) => {
+    const path = 'routines[' + i + ']'; object(r, path);
+    id(r.id, path + '.id', routines); text(r.name, path + '.name', true);
+    array(r.items, path + '.items');
+    const items = new Set();
+    r.items.forEach((it, j) => {
+      const at = path + '.items[' + j + ']'; object(it, at);
+      id(it.id, at + '.id', items); id(it.exerciseId, at + '.exerciseId');
+      fields(it, at, ['sets', 'reps', 'weight', 'rest'], number);
+      text(it.eitherOf, at + '.eitherOf');
+    });
+  });
+  const workout = (w, path, active = false) => {
+    object(w, path); id(w.id, path + '.id', workouts);
+    if (w.routineId != null) id(w.routineId, path + '.routineId');
+    fields(w, path, ['routineName', 'notes'], text);
+    timestamp(w.startedAt, path + '.startedAt', true);
+    timestamp(w.finishedAt, path + '.finishedAt');
+    array(w.exercises, path + '.exercises');
+    if (w.currentExerciseIndex != null && (!Number.isInteger(w.currentExerciseIndex) ||
+        w.currentExerciseIndex < 0 || (active && w.currentExerciseIndex > w.exercises.length)))
+      fail(path + '.currentExerciseIndex', 'an exercise index from 0 to ' + w.exercises.length);
+    if (w.timer != null){
+      object(w.timer, path + '.timer');
+      fields(w.timer, path + '.timer', ['seconds', 'total', 'remaining', 'endsAt'], number);
+      fields(w.timer, path + '.timer', ['running', 'done'], bool);
+    }
+    const sets = new Set();
+    w.exercises.forEach((ex, i) => {
+      const at = path + '.exercises[' + i + ']'; object(ex, at);
+      if (ex.exerciseId != null) id(ex.exerciseId, at + '.exerciseId');
+      fields(ex, at, ['name', 'category', 'unit', 'notes'], text);
+      fields(ex, at, ['plannedSets', 'targetReps', 'targetWeight', 'restSeconds'], number);
+      bool(ex.skipped, at + '.skipped');
+      array(ex.sets, at + '.sets');
+      ex.sets.forEach((set, j) => {
+        const here = at + '.sets[' + j + ']'; object(set, here);
+        id(set.id, here + '.id', sets);
+        fields(set, here, ['weight', 'reps', 'durationSeconds', 'rpe', 'rir', 'distance'], number);
+        timestamp(set.completedAt, here + '.completedAt');
+        fields(set, here, ['unit', 'setType', 'distanceUnit'], text);
+        fields(set, here, ['completed', 'countForVolume', 'countForPR', 'includeInVolume'], bool);
+      });
+    });
+  };
+  s.workouts.forEach((w, i) => workout(w, 'workouts[' + i + ']'));
+  if (s.activeWorkout != null) workout(s.activeWorkout, 'activeWorkout', true);
+}
+function prepareBackup(obj){
+  validateBackup(obj);
+  const candidate = deepCopy(obj); // migration/normalization must not mutate the caller
+  migrateState(candidate);
+  normalizeState(candidate);
+  validateBackup(candidate);
+  return candidate;
+}
+/* Startup and both restore paths must run the same migration chain. */
+function migrateState(s){
+  if (s.version === 1) migrateToV2(s);
+  if (s.version === 2) migrateToV3(s);
+  if (s.version === 3) migrateToV4(s);
+  if (s.version === 4) migrateToV5(s);
+  if (s.version === 5) migrateToV6(s);
+  if (s.version === 6) s.version = 7; // optional eitherOf: old routines need no conversion
+  return s;
 }
 /* v1 shipped an earlier seed library/routines. v2 refreshes both to the
    current sample data, but keeps logged workouts and prefs untouched. */
@@ -1793,7 +1908,7 @@ function migrateToV6(s){
    here, so the render layer never has to defend against stray strings. */
 function normalizeState(s){
   const d = defaultSettings();
-  const set = Object.assign(d, s.settings || {});
+  const set = { ...d, ...s.settings };
   set.theme = THEMES.some(t => t.id === set.theme) ? set.theme : d.theme;
   set.unit = set.unit === 'lb' ? 'lb' : 'kg';
   set.defaultRest = clamp(Math.round(toNum(set.defaultRest) || d.defaultRest), REST_MIN, REST_MAX);
@@ -1804,15 +1919,30 @@ function normalizeState(s){
   set.lastFileBackupAt = toNum(set.lastFileBackupAt);
   set.seededAt = toNum(set.seededAt);
   s.settings = set;
-  s.exercises = (s.exercises || []).map(e => Object.assign({}, e, {
+  s.exercises = (s.exercises || []).map(e => ({ ...e,
     category: typeof e.category === 'string' ? e.category : '',
     unit: isUnit(e.unit) ? e.unit : 'kg',
     notes: typeof e.notes === 'string' ? e.notes : '',
     url: safeUrl(e.url)
   }));
   s.routines  = s.routines || [];
+  s.routines.forEach(r => { r.items.forEach(normalizeRoutineItem); cleanRoutinePairs(r.items); });
   s.workouts  = s.workouts || [];
   s.activeWorkout = s.activeWorkout || null;
+  const normalizeWorkout = (w, active) => {
+    w.routineName = w.routineName == null ? 'Imported session' : w.routineName;
+    w.notes = w.notes || '';
+    /* History edits may have removed blocks since this cursor was recorded. */
+    w.currentExerciseIndex = w.currentExerciseIndex == null ? (active ? 0 : w.exercises.length)
+      : Math.min(w.currentExerciseIndex, w.exercises.length);
+    w.exercises.forEach(ex => {
+      ex.name = ex.name == null ? 'Unknown exercise' : ex.name;
+      ex.unit = isUnit(ex.unit) ? ex.unit : 'kg';
+      ex.sets.forEach(set => { set.unit = isUnit(set.unit) ? set.unit : ex.unit; });
+    });
+  };
+  s.workouts.forEach(w => normalizeWorkout(w, false));
+  if (s.activeWorkout) normalizeWorkout(s.activeWorkout, true);
   sortWorkouts(s.workouts);
   return s;
 }
@@ -2695,10 +2825,22 @@ function newWorkout(routine){
     timer:null
   };
 }
-function startRoutine(id){
+async function startRoutine(id){
   const r = routineById(id);
   if (!r) return;
-  startSession(() => newWorkout(r),
+  const chosen = [];
+  for (const group of routineGroups(r.items)){
+    let item = group[0];
+    if (group.length === 2){
+      const pick = await dialog({ title:'Either of', body:'Choose one exercise for “' + r.name + '”. Each keeps its own targets.',
+        buttons:[...group.map((it, i) => ({ label:(exerciseById(it.exerciseId) || {}).name || 'Removed exercise', value:i, cls:'btn-primary' })),
+          { label:'Cancel', value:null }] });
+      if (pick == null) return;
+      item = group[pick];
+    }
+    chosen.push(item);
+  }
+  startSession(() => newWorkout({ ...r, items:chosen }),
     'You already have a workout in progress. Starting “' + r.name + '” will discard it.',
     'Workout started — ' + r.name);
 }
@@ -2879,6 +3021,7 @@ function confirmExerciseRemoval(w, ex){
       /* the workout block does not record which routine item built it, so
          every item for this exercise goes — reported, not silent */
       routine.items = routine.items.filter(it => it.exerciseId !== ex.exerciseId);
+      cleanRoutinePairs(routine.items);
       msg = 'Removed ' + ex.name + ' from this session and from ' + routine.name +
         (inRoutine > 1 ? ' (' + inRoutine + ' entries)' : '');
     }
@@ -3035,6 +3178,52 @@ function discardWorkout(){
 /* ============================================================
    ACTIONS — routines
    ============================================================ */
+/* A pair key is local to a routine, independent of item order and IDs. */
+function cleanRoutinePairs(items){
+  const groups = new Map();
+  items.forEach(it => {
+    if (typeof it.eitherOf !== 'string' || !it.eitherOf.trim()){ delete it.eitherOf; return; }
+    if (!groups.has(it.eitherOf)) groups.set(it.eitherOf, []);
+    groups.get(it.eitherOf).push(it);
+  });
+  groups.forEach(pair => {
+    if (pair.length !== 2 || pair[0].exerciseId === pair[1].exerciseId)
+      pair.forEach(it => delete it.eitherOf);
+  });
+}
+function routineGroups(items){
+  const groups = [], pairs = new Map();
+  items.forEach(it => {
+    if (it.eitherOf && pairs.has(it.eitherOf)) pairs.get(it.eitherOf).push(it);
+    else { const group = [it]; groups.push(group); if (it.eitherOf) pairs.set(it.eitherOf, group); }
+  });
+  return groups;
+}
+function routineSummary(items){
+  const groups = routineGroups(items);
+  const low = groups.reduce((n, g) => n + Math.min(...g.map(it => it.sets)), 0);
+  const high = groups.reduce((n, g) => n + Math.max(...g.map(it => it.sets)), 0);
+  return plural(groups.length, 'exercise') + ' · ' + low + (high !== low ? '–' + high : '') + ' planned sets';
+}
+function normalizeRoutineItem(it){
+  it.sets = clamp(parseInt(it.sets, 10) || ITEM_LIMITS.sets[0], ...ITEM_LIMITS.sets);
+  it.reps = clamp(parseInt(it.reps, 10) || 0, ...ITEM_LIMITS.reps);
+  it.weight = toNum(it.weight);
+  if (it.weight != null && it.weight < 0) it.weight = null;
+  delete it.rest;
+  return it;
+}
+function pairRoutineItem(idx, partnerId){
+  const d = ui.routineDraft; if (!d || !d.items[idx]) return;
+  const item = d.items[idx];
+  const partner = d.items.find(it => it.id === partnerId && it !== item && it.exerciseId !== item.exerciseId && !it.eitherOf);
+  if (partnerId && !partner) return;
+  const old = item.eitherOf;
+  if (old) d.items.forEach(it => { if (it.eitherOf === old) delete it.eitherOf; });
+  if (partner) item.eitherOf = partner.eitherOf = uid();
+  ui.focus = 'ri-pair-' + idx;
+  render();
+}
 function newRoutineDraft(r){
   return r ? deepCopy(r) : { id:null, name:'', items:[] };
 }
@@ -3042,12 +3231,8 @@ function saveRoutineDraft(){
   const d = ui.routineDraft; if (!d) return;
   if (!d.name.trim()){ ui.routineError = 'Give the routine a name.'; render(); return; }
   if (d.items.length === 0){ ui.routineError = 'Add at least one exercise.'; render(); return; }
-  d.items.forEach(it => {
-    it.sets   = clamp(parseInt(it.sets,10) || ITEM_LIMITS.sets[0], ITEM_LIMITS.sets[0], ITEM_LIMITS.sets[1]);
-    it.reps   = clamp(parseInt(it.reps,10) || 0, ITEM_LIMITS.reps[0], ITEM_LIMITS.reps[1]);
-    it.weight = toNum(it.weight);
-    delete it.rest;   /* v6 dropped it; a draft built from an older routine can still carry one */
-  });
+  d.items.forEach(normalizeRoutineItem);
+  cleanRoutinePairs(d.items);
   if (d.id){
     const i = state.routines.findIndex(r => r.id === d.id);
     if (i !== -1) state.routines[i] = { id:d.id, name:d.name.trim(), items:d.items };
@@ -3086,6 +3271,7 @@ function routineStep(idx, dir){
 function removeRoutineItem(idx){
   const d = ui.routineDraft; if (!d) return;
   d.items.splice(idx,1);
+  cleanRoutinePairs(d.items);
   render();
 }
 function addRoutineItem(exId){
@@ -3190,9 +3376,13 @@ function downloadJSON(payload, filename){
 function readJSONFile(file, cb){
   const reader = new FileReader();
   reader.onload = () => {
-    try{ cb(JSON.parse(reader.result)); }
-    catch(e){ toast('That file is not valid JSON'); }
+    let obj;
+    try{ obj = JSON.parse(reader.result); }
+    catch(e){ toast('That file is not valid JSON'); return; }
+    try{ Promise.resolve(cb(obj)).catch(() => toast('Could not import that file')); }
+    catch(e){ toast('Could not import that file'); }
   };
+  reader.onerror = () => toast('Could not read that file');
   reader.readAsText(file);
 }
 
@@ -3268,16 +3458,19 @@ function applyFullBackup(obj){
   if (obj && (obj.kind === 'routines' || obj.kind === 'history')){
     toast('That is a ' + obj.kind + ' file — import it under Transfer routines & history'); return;
   }
-  if (!obj || !(obj.version >= 1 && obj.version <= SCHEMA_VERSION) || !Array.isArray(obj.exercises)){
-    toast('Unrecognized data — expected a Liftlog backup'); return;
-  }
-  confirmDlg('Import data?','This replaces everything currently stored (exercises, routines, history, settings) with the imported file.','Import & replace',true)
+  let candidate;
+  try{ candidate = prepareBackup(obj); }
+  catch(e){ toast('Invalid backup — ' + e.message); return; }
+  return confirmDlg('Import data?','This replaces everything currently stored (exercises, routines, history, settings) with the imported file.','Import & replace',true)
     .then(ok => {
       if (!ok) return;
-      if (obj.version === 1) migrateToV2(obj);
-      if (obj.version === 2) migrateToV3(obj);   /* older backups: seconds move out of reps */
-      state = normalizeState(obj);
-      applyTheme(); save(); loadTimer(state.settings.defaultRest);
+      state = candidate;
+      storageRecoveryBlocked = false;
+      applyTheme();
+      cancelRestBeep();
+      if (state.activeWorkout) restoreTimer();
+      else loadTimer(state.settings.defaultRest);
+      save();
       resetUI();
       render(); toast('Import complete');
     });
@@ -3558,12 +3751,12 @@ function importRoutines(file){
   readJSONFile(file, obj => {
     if (!obj) return;
     const list = Array.isArray(obj) ? obj : obj.routines;
-    const exIn = Array.isArray(obj.exercises) ? obj.exercises : [];
+    const exIn = Array.isArray(obj.exercises) ? obj.exercises.filter(e => e && typeof e.name === 'string' && e.name.trim()) : [];
     if (!Array.isArray(list) || !list.length){ toast('No routines found in that file'); return; }
     const byName = n => state.exercises.find(e => e.name.trim().toLowerCase() === String(n || '').trim().toLowerCase());
     let addedR = 0, skippedR = 0, addedEx = 0;
     list.forEach(r => {
-      if (!r || !r.name || !Array.isArray(r.items) ||
+      if (!r || typeof r.name !== 'string' || !r.name.trim() || !Array.isArray(r.items) ||
           state.routines.some(x => x.name.trim().toLowerCase() === String(r.name).trim().toLowerCase())){ skippedR++; return; }
       const items = r.items.map(it => {
         if (!it) return null;
@@ -3577,13 +3770,11 @@ function importRoutines(file){
           local = state.exercises[state.exercises.length - 1]; addedEx++;
         }
         if (!local) return null;
-        return { id:uid(), exerciseId:local.id,
-          sets:clamp(Number(it.sets) || 3, ITEM_LIMITS.sets[0], ITEM_LIMITS.sets[1]),
-          reps:clamp(Number(it.reps) || 8, ITEM_LIMITS.reps[0], ITEM_LIMITS.reps[1]),
-          /* `rest` on an imported item is read and dropped: files written
-             before v6 still carry one, and ignoring a key is not an error. */
-          weight:toNum(it.weight) };
+        return normalizeRoutineItem({ id:uid(), exerciseId:local.id,
+          sets:it.sets == null ? 3 : it.sets, reps:it.reps == null ? 8 : it.reps,
+          weight:it.weight, eitherOf:it.eitherOf });
       }).filter(Boolean);
+      cleanRoutinePairs(items);
       if (!items.length){ skippedR++; return; }
       state.routines.push({ id:uid(), name:String(r.name).trim(), items });
       addedR++;
@@ -3606,12 +3797,14 @@ function importFixture(){
   const exercises = [
     { id:'ex-squat', name:'Back Squat', category:'Legs', unit:'kg', notes:'Belt above 100kg',
       url:'https://en.wikipedia.org/wiki/Squat_(exercise)' },
+    { id:'ex-leg-press', name:'Leg Press', category:'Legs', unit:'kg', notes:'', url:'' },
     { id:'ex-plank', name:'Plank', category:'Core', unit:'time', notes:'', url:'' }
   ];
   const routines = [{
     id:'rt-lower', name:'Lower body',
     items:[
-      { id:'it-1', exerciseId:'ex-squat', sets:3, reps:5, weight:100 },
+      { id:'it-1', exerciseId:'ex-squat', sets:3, reps:5, weight:100, eitherOf:'pair-legs' },
+      { id:'it-3', exerciseId:'ex-leg-press', sets:3, reps:10, weight:120, eitherOf:'pair-legs' },
       { id:'it-2', exerciseId:'ex-plank', sets:2, reps:45,  weight:null }
     ]
   }];
@@ -3671,6 +3864,7 @@ function schemaHelpHTML(){
       ['items[].exerciseId', 'string, required', 'Resolved by id, then name, then created from <code>exercises[]</code>.'],
       ['items[].sets', 'integer', 'Clamped to ' + L.sets[0] + '\u2013' + L.sets[1] + '. Default 3.'],
       ['items[].reps', 'integer', 'Clamped to ' + L.reps[0] + '\u2013' + L.reps[1] + '. Default 8. For a timed movement this is <em>seconds</em>.'],
+      ['items[].eitherOf', 'optional string', 'Exactly two different exercises in a routine share a key to form an either-of pair. Choose one when starting. Invalid or incomplete pairs become independent exercises.'],
       ['items[].weight', 'number | null', 'Planned load. <code>null</code> leaves the bar to last time\u2019s figure.'],
       ['exercises[]', 'optional', 'Definitions for the ids above: <code>id</code>, <code>name</code>, <code>category</code>, <code>unit</code>, <code>notes</code>, <code>url</code>.'],
       ['exercises[].unit', 'enum', 'One of ' + units + '. Anything else becomes <code>kg</code>.'],
@@ -3691,8 +3885,8 @@ function schemaHelpHTML(){
       ['sets[].setType', 'enum', SET_TYPES.map(t => '<code>' + t + '</code>').join(' · ') + '. Decides which fields carry the measurement.'],
       ['sets[].weight', 'number | null', 'Negative values are dropped.'],
       ['sets[].reps', 'integer', 'A count, never seconds. Rounded, floored at 0.'],
-      ['sets[].durationSeconds', 'integer', 'Where timed work goes. A legacy file with seconds in <code>reps</code> is corrected on import.'],
-      ['sets[].rir', 'integer', 'Reps in reserve \u2014 what the sample file and the app log by default. Clamped to 0\u201310.'],
+      ['sets[].durationSeconds', 'number', 'Where timed work goes. A legacy file with seconds in <code>reps</code> is corrected on import.'],
+      ['sets[].rir', 'integer', 'Reps in reserve \u2014 shown in the sample file; enable RIR in Settings (effort is hidden by default). Clamped to 0\u201310.'],
       ['sets[].rpe', 'number', 'Rate of perceived exertion, the older of the two. Clamped to 1\u201310. Both are read; both are kept.'],
       ['sets[].completed', 'boolean', 'Whether the set was performed.'],
       ['sets[].countForVolume', 'boolean', 'Default true. <code>false</code> marks a warm-up: performed, but out of the totals. <code>includeInVolume</code> is accepted as an alias.'],
@@ -3749,7 +3943,8 @@ function exportHistory(){
    includeInVolume is accepted as an alias of countForVolume. */
 function normalizeImportedSet(s, exUnit){
   const num = toNum;
-  const o = { id:s.id || uid() };
+  const incomingId = s.id == null ? '' : String(s.id);
+  const o = { id:validId(incomingId) ? incomingId : uid() };
   o.weight = num(s.weight);          if (o.weight != null && o.weight < 0) o.weight = null;
   o.reps = num(s.reps);              if (o.reps != null) o.reps = Math.max(0, Math.round(o.reps));
   o.rpe = num(s.rpe);                if (o.rpe != null) o.rpe = Math.min(10, Math.max(1, o.rpe));
@@ -3761,7 +3956,7 @@ function normalizeImportedSet(s, exUnit){
   if (o.distance != null && o.distance >= 0)
     o.distanceUnit = String(s.distanceUnit || 'm').replace(/[^\w/²³°.-]/g, '').slice(0, 8) || 'm';
   o.completed = !!s.completed;
-  o.completedAt = (typeof s.completedAt === 'number' && s.completedAt > 0) ? s.completedAt : 0;
+  o.completedAt = (typeof s.completedAt === 'number' && s.completedAt > 0 && Number.isFinite(new Date(s.completedAt).getTime())) ? s.completedAt : 0;
   /* execution (completed) is separate from analytics inclusion; only explicit opt-outs are stored */
   const cv = s.countForVolume != null ? s.countForVolume : s.includeInVolume;
   if (cv === false) o.countForVolume = false;
@@ -3777,20 +3972,21 @@ function normalizeImportedSet(s, exUnit){
   return o;
 }
 function normalizeImportedWorkout(w){
-  const ts = v => typeof v === 'number' && isFinite(v) ? v : (typeof v === 'string' && v && !isNaN(Date.parse(v)) ? Date.parse(v) : NaN);
+  const ts = v => typeof v === 'number' && Number.isFinite(new Date(v).getTime()) ? v : (typeof v === 'string' && v && !isNaN(Date.parse(v)) ? Date.parse(v) : NaN);
   const started = ts(w.startedAt);
-  if (isNaN(started) || !Array.isArray(w.exercises)) return null;
+  if (isNaN(started) || !Array.isArray(w.exercises) || !validId(String(w.id))) return null;
   const o = {
-    id:String(w.id), routineId:w.routineId != null ? String(w.routineId) : null,
+    id:String(w.id), routineId:w.routineId != null && validId(String(w.routineId)) ? String(w.routineId) : null,
     routineName:typeof w.routineName === 'string' && w.routineName ? w.routineName : 'Imported session',
     startedAt:started, finishedAt:isNaN(ts(w.finishedAt)) ? null : ts(w.finishedAt),
     notes:typeof w.notes === 'string' ? w.notes : '', exercises:[]
   };
   if (o.finishedAt != null && o.finishedAt < o.startedAt) o.finishedAt = o.startedAt; /* no negative durations */
+  const setIds = new Set();
   w.exercises.forEach(ex => {
     if (!ex) return;
     const block = {
-      exerciseId:ex.exerciseId != null ? String(ex.exerciseId) : null,
+      exerciseId:ex.exerciseId != null && validId(String(ex.exerciseId)) ? String(ex.exerciseId) : null,
       name:typeof ex.name === 'string' && ex.name ? ex.name : 'Unknown exercise',
       category:typeof ex.category === 'string' ? ex.category : '',
       unit:isUnit(ex.unit) ? ex.unit : 'kg',
@@ -3799,9 +3995,13 @@ function normalizeImportedWorkout(w){
       notes:typeof ex.notes === 'string' ? ex.notes : '', skipped:!!ex.skipped,
       sets:(Array.isArray(ex.sets) ? ex.sets : []).map(s => s ? normalizeImportedSet(s, ex.unit) : null).filter(Boolean)
     };
+    block.sets.forEach(set => {
+      if (setIds.has(set.id)) set.id = uid();
+      setIds.add(set.id);
+    });
     o.exercises.push(block);
   });
-  o.currentExerciseIndex = Number.isInteger(w.currentExerciseIndex) ? w.currentExerciseIndex : o.exercises.length;
+  o.currentExerciseIndex = Number.isInteger(w.currentExerciseIndex) ? clamp(w.currentExerciseIndex, 0, o.exercises.length) : o.exercises.length;
   return o;
 }
 
@@ -3811,6 +4011,7 @@ function importHistory(file){
     const list = Array.isArray(obj) ? obj : obj.workouts;
     if (!Array.isArray(list) || !list.length){ toast('No workout history found in that file'); return; }
     const have = new Set(state.workouts.map(w => w.id));
+    if (state.activeWorkout) have.add(state.activeWorkout.id);
     let added = 0, skipped = 0;
     list.forEach(raw => {
       const w = (raw && raw.id && raw.startedAt) ? normalizeImportedWorkout(raw) : null;
@@ -3831,6 +4032,7 @@ function clearAllData(){
       { label:'Clear everything', value:true, cls:'btn-danger-solid' }
     ]}).then(ok => {
     if (!ok) return;
+    storageRecoveryBlocked = false;
     state = { version:SCHEMA_VERSION, settings:defaultSettings(), exercises:[], routines:[], workouts:[], activeWorkout:null };
     applyTheme(); save(); loadTimer(state.settings.defaultRest);
     resetUI();
@@ -4001,13 +4203,12 @@ function htmlPicker(){
     html += '<div class="routine-pick" role="group" aria-label="Choose a routine">';
     state.routines.forEach(r => {
       const sel = r.id === ui.selectedRoutineId;
-      const planned = r.items.reduce((a,it) => a + (it.sets || 0), 0);
       html += '<div class="routine-pick-row' + (sel ? ' is-selected' : '') + '">' +
-        '<button type="button" class="rp-select" data-action="select-routine" data-id="' + r.id + '" aria-pressed="' + sel + '">' +
+        '<button type="button" class="rp-select" data-action="select-routine" data-id="' + esc(r.id) + '" aria-pressed="' + sel + '">' +
           '<span class="rp-name">' + esc(r.name) + '</span>' +
-          '<span class="rp-meta">' + plural(r.items.length, 'exercise') + ' · ' + planned + ' planned sets</span>' +
+          '<span class="rp-meta">' + routineSummary(r.items) + '</span>' +
         '</button>' +
-        '<span class="rp-go"><button type="button" class="btn btn-primary btn-sm" data-action="routine-start" data-id="' + r.id + '" ' +
+        '<span class="rp-go"><button type="button" class="btn btn-primary btn-sm" data-action="routine-start" data-id="' + esc(r.id) + '" ' +
           'aria-label="Start ' + esc(r.name) + '">' + IC.play + '<span>Start</span></button></span>' +
       '</div>';
     });
@@ -4189,7 +4390,7 @@ function htmlCurrentExercise(w, ex){
     const warm = isWarmup(s);
     setsHTML += '<div class="set-row' + (isCur ? ' is-current' : '') + (s.completed ? ' is-done' : '') +
         (warm ? ' is-warmup' : '') + '">' +
-      '<button type="button" id="sn-' + s.id + '" class="set-num" data-action="toggle-warmup" data-id="' + s.id + '" ' +
+      '<button type="button" id="sn-' + esc(s.id) + '" class="set-num" data-action="toggle-warmup" data-id="' + esc(s.id) + '" ' +
         'aria-pressed="' + warm + '" aria-label="Set ' + n +
         (warm ? ' is a warm-up. Mark it as a working set' : ' is a working set. Mark it as a warm-up') + '">' +
         '<span class="n">' + n + '</span>' +
@@ -4201,36 +4402,36 @@ function htmlCurrentExercise(w, ex){
        names it better than the bare unit ever did. */
     if (showWeight){
       setsHTML += '<label class="field"><span class="cap">' + esc(wLabel) + '</span>' +
-        '<input id="sw-' + s.id + '" type="number" inputmode="decimal" min="0" step="0.5" ' +
+        '<input id="sw-' + esc(s.id) + '" type="number" inputmode="decimal" min="0" step="0.5" ' +
         'aria-label="Set ' + n + ' weight in ' + esc(wLabel) + '" ' +
-        'data-bind="set" data-change="set-weight" data-id="' + s.id + '" data-field="weight" ' +
-        'value="' + (s.weight != null ? s.weight : '') + '" placeholder="0"></label>';
+        'data-bind="set" data-change="set-weight" data-id="' + esc(s.id) + '" data-field="weight" ' +
+        'value="' + esc(s.weight != null ? s.weight : '') + '" placeholder="0"></label>';
     }
     const timedField = ex.unit === 'time';
     const midVal = timedField ? setDuration(s) : s.reps;
     setsHTML += '<label class="field"><span class="cap">' + esc(repsLabel) + '</span>' +
-      '<input id="sr-' + s.id + '" type="number" inputmode="numeric" min="0" step="1" ' +
+      '<input id="sr-' + esc(s.id) + '" type="number" inputmode="numeric" min="0" step="1" ' +
       'aria-label="Set ' + n + ' ' + esc(repsLabel) + '" ' +
-      'data-bind="set" data-change="set-reps" data-id="' + s.id + '" data-field="' + (timedField ? 'durationSeconds' : 'reps') + '" ' +
-      'value="' + (midVal != null ? midVal : '') + '" placeholder="' + (ex.targetReps != null ? ex.targetReps : '0') + '"></label>';
+      'data-bind="set" data-change="set-reps" data-id="' + esc(s.id) + '" data-field="' + (timedField ? 'durationSeconds' : 'reps') + '" ' +
+      'value="' + esc(midVal != null ? midVal : '') + '" placeholder="' + esc(ex.targetReps != null ? ex.targetReps : '0') + '"></label>';
     if (showMetric){
       const mv = s[metricField];
       setsHTML += '<label class="field"><span class="cap">' + metricLabel + '</span>' +
         '<input type="number" inputmode="decimal" min="' + (metric === 'rir' ? 0 : 1) + '" max="10" step="' + (metric === 'rir' ? 1 : 0.5) + '" ' +
         'aria-label="Set ' + n + ' ' + metricLabel + '" ' +
-        'data-bind="set" data-id="' + s.id + '" data-field="' + metricField + '" ' +
-        'value="' + (mv != null ? mv : '') + '" placeholder="–"></label>';
+        'data-bind="set" data-id="' + esc(s.id) + '" data-field="' + metricField + '" ' +
+        'value="' + esc(mv != null ? mv : '') + '" placeholder="–"></label>';
     }
     /* A long press here toggles the warm-up flag (data-longpress); a tap still
        logs the set. The set number keeps the same toggle as a plain button, so
        the gesture is never the only way in — a keyboard has no long press. */
-    setsHTML += '<button type="button" id="sd-' + s.id + '" class="btn set-done-btn" data-action="toggle-set" ' +
-      'data-longpress="toggle-warmup" data-id="' + s.id + '" ' +
-      'aria-pressed="' + s.completed + '" aria-label="' + (s.completed ? 'Mark set ' + n + ' as not done' : 'Mark set ' + n + ' as done') +
+    setsHTML += '<button type="button" id="sd-' + esc(s.id) + '" class="btn set-done-btn" data-action="toggle-set" ' +
+      'data-longpress="toggle-warmup" data-id="' + esc(s.id) + '" ' +
+      'aria-pressed="' + esc(s.completed) + '" aria-label="' + (s.completed ? 'Mark set ' + n + ' as not done' : 'Mark set ' + n + ' as done') +
       '" title="' + (s.completed ? 'Mark set ' + n + ' as not done' : 'Mark set ' + n + ' as done') +
       ' · hold to mark it a warm-up">' +
       (s.completed ? IC.boxcheck : IC.box) + '</button>';
-    setsHTML += '<button type="button" class="btn set-del-btn" data-action="delete-set" data-id="' + s.id + '" ' +
+    setsHTML += '<button type="button" class="btn set-del-btn" data-action="delete-set" data-id="' + esc(s.id) + '" ' +
       'aria-label="Delete set ' + n + '" title="Delete set ' + n + '">' + IC.trash + '</button>';
     setsHTML += '</div>';
   });
@@ -4239,7 +4440,7 @@ function htmlCurrentExercise(w, ex){
     '<div class="ex-head">' +
       '<span class="ex-tags">' +
         (ex.category ? '<span class="tag">' + esc(ex.category) + '</span>' : '') +
-        '<span class="tag">target ' + ex.sets.length + ' × ' + (ex.targetReps != null ? ex.targetReps : '–') +
+        '<span class="tag">target ' + ex.sets.length + ' × ' + esc(ex.targetReps != null ? ex.targetReps : '–') +
           (ex.targetWeight != null ? ' @ ' + fmtNum(ex.targetWeight) + ' ' + unitLabel() : '') + '</span>' +
         '<span class="tag">' + icon('timer','ic-inline') + ' rest ' + fmtClock(currentRestSeconds()) + '</span>' +
       '</span>' +
@@ -4274,8 +4475,8 @@ function htmlDoneRow(ex, i){
   if (open){
     html += '<div class="done-ex-detail">' +
       (ex.sets.map((s, j) => '<div class="dset"><span class="muted">Set ' + (j+1) + '</span><span>' + setSummary(s) +
-        (s.rpe != null ? ' <span class="muted">@ RPE ' + s.rpe + '</span>' : '') +
-        (s.rir != null ? ' <span class="muted">@ RIR ' + s.rir + '</span>' : '') +
+        (s.rpe != null ? ' <span class="muted">@ RPE ' + esc(s.rpe) + '</span>' : '') +
+        (s.rir != null ? ' <span class="muted">@ RIR ' + esc(s.rir) + '</span>' : '') +
         (s.completed ? '' : ' <span class="status-chip skip">open</span>') + '</span></div>').join('')) +
       '<div class="mt-2"><button type="button" class="btn btn-sm" data-action="overview-jump" data-idx="' + i + '">Reopen exercise</button></div>' +
     '</div>';
@@ -4398,7 +4599,7 @@ function exerciseOptions(selected, skip){
   return state.exercises
     .filter(e => !(skip && skip.has(e.id)))
     .sort((a,b) => String(a.name).localeCompare(String(b.name), undefined, { numeric:true, sensitivity:'base' }))
-    .map(e => '<option value="' + e.id + '"' + (e.id === selected ? ' selected' : '') + '>' + esc(e.name) + '</option>')
+    .map(e => '<option value="' + esc(e.id) + '"' + (e.id === selected ? ' selected' : '') + '>' + esc(e.name) + '</option>')
     .join('');
 }
 
@@ -4419,18 +4620,17 @@ function viewRoutines(){
   }
   html += '<ul class="list">';
   state.routines.forEach(r => {
-    const planned = r.items.reduce((a,it) => a + (it.sets || 0), 0);
-    const names = r.items.map(it => { const e = exerciseById(it.exerciseId); return e ? e.name : '(removed)'; }).slice(0,4).join(', ');
+    const names = routineGroups(r.items).map(g => g.map(it => (exerciseById(it.exerciseId) || {}).name || '(removed)').join(' or ')).slice(0,4).join(', ');
     html += '<li class="list-row">' +
       '<div class="list-main">' +
         '<p class="list-name">' + esc(r.name) + '</p>' +
-        '<p class="list-meta">' + plural(r.items.length, 'exercise') + ' · ' + planned + ' sets — ' + esc(names) + (r.items.length > 4 ? '…' : '') + '</p>' +
+        '<p class="list-meta">' + routineSummary(r.items) + ' — ' + esc(names) + (routineGroups(r.items).length > 4 ? '…' : '') + '</p>' +
       '</div>' +
       '<span class="list-actions">' +
-        '<button type="button" class="btn btn-sm btn-primary" data-action="routine-start" data-id="' + r.id + '">' + IC.play + '<span>Start</span></button>' +
-        '<button type="button" class="btn btn-sm" data-action="routine-edit" data-id="' + r.id + '" aria-label="Edit ' + esc(r.name) + '">Edit</button>' +
-        '<button type="button" class="btn btn-sm" data-action="routine-dup" data-id="' + r.id + '" aria-label="Duplicate ' + esc(r.name) + '">' + IC.copy + '<span class="sr-only">Duplicate</span></button>' +
-        '<button type="button" class="btn btn-sm btn-danger" data-action="routine-del" data-id="' + r.id + '" aria-label="Delete ' + esc(r.name) + '">' + IC.trash + '<span class="sr-only">Delete</span></button>' +
+        '<button type="button" class="btn btn-sm btn-primary" data-action="routine-start" data-id="' + esc(r.id) + '">' + IC.play + '<span>Start</span></button>' +
+        '<button type="button" class="btn btn-sm" data-action="routine-edit" data-id="' + esc(r.id) + '" aria-label="Edit ' + esc(r.name) + '">Edit</button>' +
+        '<button type="button" class="btn btn-sm" data-action="routine-dup" data-id="' + esc(r.id) + '" aria-label="Duplicate ' + esc(r.name) + '">' + IC.copy + '<span class="sr-only">Duplicate</span></button>' +
+        '<button type="button" class="btn btn-sm btn-danger" data-action="routine-del" data-id="' + esc(r.id) + '" aria-label="Delete ' + esc(r.name) + '">' + IC.trash + '<span class="sr-only">Delete</span></button>' +
       '</span></li>';
   });
   html += '</ul>';
@@ -4447,7 +4647,8 @@ function htmlRoutineEditor(){
       '</div>' +
       (ui.routineError ? '<p class="error-text mt-2" role="alert">' + esc(ui.routineError) + '</p>' : '') +
       '<div class="section-title mt-5"><h2>Exercises</h2><span class="rule"></span>' +
-        '<span class="muted xs">sets × reps · target weight</span></div>';
+        '<span class="muted xs">sets × reps · target weight</span></div>' +
+      '<p class="hint">Pair two exercises with Either of to choose one when starting. Each keeps its own targets; the pair runs at its first position.</p>';
 
   if (!d.items.length){
     html += '<p class="muted small empty-line">No exercises yet — add the first one below.</p>';
@@ -4460,10 +4661,13 @@ function htmlRoutineEditor(){
       '<button type="button" class="grip" id="ri-grip-' + i + '" data-drag="routine-items" ' +
         'aria-label="Reorder ' + esc(name) + '. Drag it, or use the up and down arrow keys." ' +
         'title="Drag to reorder">' + IC.grip + '</button>' +
-      '<span class="item-name" title="' + esc(name) + '">' + esc(name) + '</span>' +
+      '<span class="item-name" title="' + esc(name) + '">' + esc(name) +
+        '<label class="field mt-2"><span class="cap">Either of</span><select id="ri-pair-' + i + '" data-change="rpair" data-idx="' + i + '" aria-label="Either-of partner for ' + esc(name) + '">' +
+        '<option value="">Independent exercise</option>' + d.items.filter(other => other !== it && other.exerciseId !== it.exerciseId && (!other.eitherOf || other.eitherOf === it.eitherOf)).map(other =>
+          '<option value="' + esc(other.id) + '"' + (it.eitherOf && other.eitherOf === it.eitherOf ? ' selected' : '') + '>' + esc((exerciseById(other.exerciseId) || {}).name || '(removed)') + '</option>').join('') + '</select></label></span>' +
       '<label class="field"><span class="cap">Sets</span><input type="number" min="1" max="12" inputmode="numeric" data-bind="ritem" data-idx="' + i + '" data-field="sets" value="' + esc(it.sets) + '"></label>' +
-      '<label class="field"><span class="cap">Reps</span><input type="number" min="0" max="999" inputmode="numeric" data-bind="ritem" data-idx="' + i + '" data-field="reps" value="' + esc(it.reps) + '"></label>' +
-      '<label class="field"><span class="cap">' + esc(wl) + '</span><input type="number" min="0" step="0.5" inputmode="decimal" data-bind="ritem" data-idx="' + i + '" data-field="weight" value="' + (it.weight != null ? it.weight : '') + '" placeholder="–"></label>' +
+      '<label class="field"><span class="cap">' + (e && e.unit === 'time' ? 'Seconds' : 'Reps') + '</span><input type="number" min="0" max="999" inputmode="numeric" data-bind="ritem" data-idx="' + i + '" data-field="reps" value="' + esc(it.reps) + '"></label>' +
+      '<label class="field"><span class="cap">' + esc(wl) + '</span><input type="number" min="0" step="0.5" inputmode="decimal" data-bind="ritem" data-idx="' + i + '" data-field="weight" value="' + esc(it.weight != null ? it.weight : '') + '" placeholder="–"></label>' +
       '<span class="item-actions">' +
         '<button type="button" class="icon-btn" id="ri-up-' + i + '" data-action="ritem-up" data-idx="' + i + '" aria-label="Move ' + esc(name) + ' up" ' + (i === 0 ? 'disabled' : '') + '>' + IC.up + '</button>' +
         '<button type="button" class="icon-btn" id="ri-down-' + i + '" data-action="ritem-down" data-idx="' + i + '" aria-label="Move ' + esc(name) + ' down" ' + (i === d.items.length-1 ? 'disabled' : '') + '>' + IC.down + '</button>' +
@@ -4535,7 +4739,7 @@ function viewHistory(){
     const dur = fmtDuration(workoutDuration(w));
     const vol = workoutVolume(w);
     html += '<div role="listitem">' +
-      '<button type="button" class="hist-row" data-action="history-toggle" data-id="' + w.id + '" aria-expanded="' + open + '" aria-label="' + esc(w.routineName) + ', ' + fmtDate(w.startedAt) + '">' +
+      '<button type="button" class="hist-row" data-action="history-toggle" data-id="' + esc(w.id) + '" aria-expanded="' + open + '" aria-label="' + esc(w.routineName) + ', ' + fmtDate(w.startedAt) + '">' +
         /* One heading, not two competing ones. The session name is what the eye
            looks for in this list, so it carries the weight; the date and how
            long ago it was share the muted line under it, which keeps the time
@@ -4557,7 +4761,7 @@ function viewHistory(){
 function htmlWorkoutDetail(w){
   if (ui.editWorkoutId === w.id) return htmlWorkoutEditor(w);
   let html = '<div class="hist-detail">' +
-    '<div class="hedit-bar"><button type="button" class="btn" data-action="history-edit" data-id="' + w.id + '">' + IC.pen + '<span>Edit session</span></button></div>';
+    '<div class="hedit-bar"><button type="button" class="btn" data-action="history-edit" data-id="' + esc(w.id) + '">' + IC.pen + '<span>Edit session</span></button></div>';
   if (w.notes) html += '<div class="small mb-3 md-note">' + mdToHtml(w.notes) + '</div>';
   let shown = 0;
   w.exercises.forEach(ex => {
@@ -4621,18 +4825,18 @@ function htmlWorkoutEditor(w){
         { cap:effortKey.toUpperCase(), key:effortKey }
       ];
       const f = (d, id) => '<label class="field"><span class="cap">' + d.cap + '</span>' +
-        '<input' + (id ? ' id="' + id + '"' : '') + ' inputmode="decimal" data-bind="hset" data-idx="' + xi + '" data-sid="' + s.id + '" data-field="' + d.key + '" ' +
-        'value="' + (s[d.key] != null ? s[d.key] : '') + '" placeholder="–"></label>';
+        '<input' + (id ? ' id="' + esc(id) + '"' : '') + ' inputmode="decimal" data-bind="hset" data-idx="' + xi + '" data-sid="' + esc(s.id) + '" data-field="' + d.key + '" ' +
+        'value="' + esc(s[d.key] != null ? s[d.key] : '') + '" placeholder="–"></label>';
       html += '<div class="hset-row' + (s.completed ? ' done' : '') + '">' +
         '<span class="hset-num muted xs mono">' + (si+1) + '</span>' +
         f(flds[0], 'hw-' + s.id) + f(flds[1]) + f(flds[2]) +
         '<span class="hset-ctl">' +
-          '<button type="button" class="btn hset-warm" data-action="hset-warmup" data-idx="' + xi + '" data-sid="' + s.id + '" ' +
+          '<button type="button" class="btn hset-warm" data-action="hset-warmup" data-idx="' + xi + '" data-sid="' + esc(s.id) + '" ' +
             'aria-pressed="' + isWarmup(s) + '" title="Warm-up: performed, but out of volume and records" ' +
             'aria-label="Set ' + (si+1) + (isWarmup(s) ? ' is a warm-up. Mark it as a working set' : ' is a working set. Mark it as a warm-up') + '">W</button>' +
-          '<button type="button" class="btn hset-done" data-action="hset-toggle" data-idx="' + xi + '" data-sid="' + s.id + '" ' +
-            'aria-pressed="' + s.completed + '" aria-label="Set ' + (si+1) + ' completed">' + (s.completed ? IC.boxcheck : IC.box) + '</button>' +
-          '<button type="button" class="btn hset-del" data-action="hset-del" data-idx="' + xi + '" data-sid="' + s.id + '" aria-label="Delete set ' + (si+1) + '">' + IC.trash + '</button>' +
+          '<button type="button" class="btn hset-done" data-action="hset-toggle" data-idx="' + xi + '" data-sid="' + esc(s.id) + '" ' +
+            'aria-pressed="' + esc(s.completed) + '" aria-label="Set ' + (si+1) + ' completed">' + (s.completed ? IC.boxcheck : IC.box) + '</button>' +
+          '<button type="button" class="btn hset-del" data-action="hset-del" data-idx="' + xi + '" data-sid="' + esc(s.id) + '" aria-label="Delete set ' + (si+1) + '">' + IC.trash + '</button>' +
         '</span>' +
       '</div>';
     });
@@ -4759,7 +4963,7 @@ function trendPanel(){
       progressModes() +
       '<label class="field trend-picker"><span class="cap">Exercise</span>' +
       '<select data-change="trend">' +
-      candidates.map(e => '<option value="' + e.id + '"' + (e.id === ui.trendExId ? ' selected' : '') + '>' + esc(e.name) + '</option>').join('') +
+      candidates.map(e => '<option value="' + esc(e.id) + '"' + (e.id === ui.trendExId ? ' selected' : '') + '>' + esc(e.name) + '</option>').join('') +
       '</select></label>' +
     '</div>' +
     '<p class="muted xs mb-2">' + esc(metricName) + ' per session</p>' +
@@ -4902,8 +5106,8 @@ function viewExercises(){
         htmlHowTo(e.url, e.name) +
       '</div>' +
       '<span class="list-actions">' +
-        '<button type="button" class="btn btn-sm" data-action="ex-edit" data-id="' + e.id + '" aria-label="Edit ' + esc(e.name) + '">Edit</button>' +
-        '<button type="button" class="btn btn-sm btn-danger" data-action="ex-del" data-id="' + e.id + '" aria-label="Delete ' + esc(e.name) + '">' + IC.trash + '<span class="sr-only">Delete</span></button>' +
+        '<button type="button" class="btn btn-sm" data-action="ex-edit" data-id="' + esc(e.id) + '" aria-label="Edit ' + esc(e.name) + '">Edit</button>' +
+        '<button type="button" class="btn btn-sm btn-danger" data-action="ex-del" data-id="' + esc(e.id) + '" aria-label="Delete ' + esc(e.name) + '">' + IC.trash + '<span class="sr-only">Delete</span></button>' +
       '</span></li>';
   });
   html += '</ul>';
@@ -4913,7 +5117,7 @@ function viewExercises(){
 /* the muscle-group values already in the library, offered as autocomplete */
 function categoryDatalist(id){
   const cats = Array.from(new Set(state.exercises.map(e => e.category).filter(Boolean)));
-  return '<datalist id="' + id + '">' + cats.map(c => '<option value="' + esc(c) + '">').join('') + '</datalist>';
+  return '<datalist id="' + esc(id) + '">' + cats.map(c => '<option value="' + esc(c) + '">').join('') + '</datalist>';
 }
 function htmlExerciseForm(){
   return '<section class="panel mb-4"><div class="pad">' +
@@ -5659,6 +5863,7 @@ document.addEventListener('input', e => {
 
 /* Controls that commit on change rather than per keystroke. Keyed by data-change. */
 const changeHandlers = {
+  rpair(t){ pairRoutineItem(Number(t.dataset.idx), t.value); },
   hexsel(t){ const ex = findHEx(t.dataset); if (ex){ ex.unit = t.value; save(); } },
   theme(t){ setTheme(t.value); },
   unit(t){ setUnit(t.value); },

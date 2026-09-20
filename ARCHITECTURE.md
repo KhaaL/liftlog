@@ -331,7 +331,7 @@ state
 │                    lastFileBackupAt, seededAt }
 ├─ exercises[]     { id, name, category, unit, notes, url }   — the library
 ├─ routines[]      { id, name, items[] }                      — the plan
-│   └─ items[]     { id, exerciseId, sets, reps, weight }
+│   └─ items[]     { id, exerciseId, sets, reps, weight, eitherOf? }
 ├─ workouts[]      logged sessions, newest first              — the log
 │   └─ exercises[] { exerciseId, name, unit, targetReps, skipped, sets[] }
 │       └─ sets[]  { id, weight, reps, durationSeconds, rpe, rir, unit, completed, completedAt,
@@ -438,7 +438,8 @@ neither guaranteed nor permanent:
 
 ### Schema migrations
 
-`load()` runs migrations in sequence for older data:
+`prepareBackup()` validates and clones candidates, then runs migrations in
+sequence for older data. Startup and file/remote restore all use it:
 
 - **v1 → v2** — refreshes the seed exercise library and routines to the
   current sample data, keeps logged workouts and preferences.
@@ -455,11 +456,14 @@ neither guaranteed nor permanent:
 Data that cannot be read — corrupt JSON, an unrecognized shape, or a *newer*
 schema version — is never overwritten in place. It is copied to
 `localStorage['liftlog.v1.unreadable']` and the app starts from seed with a
-warning, so a bad parse or a downgrade is always recoverable by hand.
+warning. If that copy cannot be saved, or would replace a different recovery
+copy, the original key is left intact and automatic writes are blocked. The
+save banner and startup message explain this state; explicitly restoring a
+valid backup or clearing all data re-enables writes.
 
 ## Import / export
 
-Four flows, all plain JSON (`EXPORT_SCHEMA = '1.0.0'`). Every file names itself
+Four flows, all plain JSON (`EXPORT_SCHEMA = '1.4.0'`). Every file names itself
 with `app: 'liftlog'` and a `kind`:
 
 - **`backup`** — the entire `state`; importing replaces everything. Built by
@@ -1022,3 +1026,49 @@ For the storage and install paths specifically:
   (e.g. bumping `CACHE`) should produce the same toast via the older
   `updatefound`/`SKIP_WAITING` path — the two are independent signals for the
   same message, and a release can trip either one.
+
+### Either-of routine pairs (state v7, transfer schema 1.4.0)
+
+Two items can share an optional `eitherOf` string key, scoped to their routine.
+They must reference different exercises. The editor lets either item select its
+partner; selecting Independent exercise or deleting one item dissolves the pair.
+Targets remain on each item. Reordering and duplication preserve the pair.
+
+Starting a routine asks for one choice per pair before creating any session.
+Cancel leaves the existing session untouched. Only the chosen item becomes a
+workout block, at the position of the first member of the pair; unchosen items
+do not affect progress, volume, or records. Routine summaries count pairs once
+and show a set-count range if targets differ.
+
+`cleanRoutinePairs` removes singleton, oversized, and same-exercise pair keys
+on load, import, and save. Routine export and backup retain keys. The sample
+routines JSON demonstrates Back Squat or Leg Press followed by Plank. Old
+state migrates through the shared `migrateState` chain; v6 to v7 only advances
+the version because the new field is optional.
+
+Browser regression coverage lives in `tests/regression.cjs`. With Node and
+Playwright available, run `node tests/regression.cjs`; optionally set
+`BROWSER_PATH` to an installed Chromium executable. It uses an isolated browser
+profile and synthetic origin, and never reads the user's workout data.
+
+### Backup validation and HTML boundaries
+
+`validateBackup` checks all required collections and nested object/array shapes
+before migrations can traverse them. IDs are nonempty strings without control
+characters. Exercise IDs, routine IDs, and workout IDs are unique in their own
+collections (active and finished workouts share a scope); item IDs are unique
+within a routine and set IDs within a workout. References to removed library
+entries are intentionally valid. Missing optional fields from earlier versions
+receive defaults; incomplete top-level collections are rejected, not emptied.
+Numeric versions must be integers from 1 through the current state version.
+
+`prepareBackup` produces an independent migrated/normalized candidate and checks
+it again before returning. `applyFullBackup` prepares it before opening the
+replace confirmation. Cancel and validation errors leave current data untouched.
+The file reader distinguishes invalid JSON from failures in import processing.
+
+IDs stay raw in storage, dataset lookups, and `getElementById`. Templates call
+`esc` when placing them in HTML, including option values and prefixed field IDs.
+This preserves unusual IDs while preventing attribute/markup injection. Numeric
+input values are escaped too; URL and Markdown rendering retain their existing
+specialized handling. Test commands and setup are in `tests/README.md`.
