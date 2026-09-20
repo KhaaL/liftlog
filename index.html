@@ -40,6 +40,7 @@
   --danger-soft:#faeae8;
   --success:#1e7a44;
   --success-soft:#e4f3ea;
+  --either:#7650a8;
   --warning:#8a5800;
   --warning-soft:#f9efd9;
   --focus:#2b5fd9;
@@ -85,6 +86,7 @@
     --danger-soft:#3a2422;
     --success:#5fc48c;
     --success-soft:#1f3329;
+    --either:#c6a2e8;
     --warning:#dfb45e;
     --warning-soft:#37301d;
     --focus:#8ab1f2;
@@ -109,6 +111,7 @@
   --danger-soft:#3a2422;
   --success:#5fc48c;
   --success-soft:#1f3329;
+  --either:#c6a2e8;
   --warning:#dfb45e;
   --warning-soft:#37301d;
   --focus:#8ab1f2;
@@ -123,6 +126,7 @@
   --accent:#bd93f9; --accent-strong:#b183f7; --on-accent:#282a36; --accent-soft:#3d3559;
   --danger:#ff5555; --danger-strong:#e04545; --danger-soft:#4b2b33;
   --success:#50fa7b; --success-soft:#23402e;
+  --either:#bd93f9;
   --warning:#f1fa8c; --warning-soft:#454426;
   --focus:#bd93f9;
   --shadow-sm:0 1px 2px rgb(0 0 0 / .35); --shadow-md:0 4px 14px rgb(0 0 0 / .45);
@@ -134,6 +138,7 @@
   --accent:#fe8019; --accent-strong:#f07312; --on-accent:#282828; --accent-soft:#4d3a26;
   --danger:#fb4934; --danger-strong:#d83a27; --danger-soft:#4b2a25;
   --success:#b8bb26; --success-soft:#3c3d21;
+  --either:#d7a6df;
   --warning:#fabd2f; --warning-soft:#4b4122;
   --focus:#fe8019;
   --shadow-sm:0 1px 2px rgb(0 0 0 / .35); --shadow-md:0 4px 14px rgb(0 0 0 / .45);
@@ -145,6 +150,7 @@
   --accent:#88c0d0; --accent-strong:#79b4c6; --on-accent:#2e3440; --accent-soft:#3a4a55;
   --danger:#bf616a; --danger-strong:#ad5059; --danger-soft:#45333c;
   --success:#a3be8c; --success-soft:#394230;
+  --either:#c7a6d8;
   --warning:#ebcb8b; --warning-soft:#4a4230;
   --focus:#88c0d0;
   --shadow-sm:0 1px 2px rgb(0 0 0 / .35); --shadow-md:0 4px 14px rgb(0 0 0 / .45);
@@ -156,6 +162,7 @@
   --accent:#268bd2; --accent-strong:#2380c2; --on-accent:#ffffff; --accent-soft:#0d3f56;
   --danger:#e5544f; --danger-strong:#c42b28; --danger-soft:#42232b;
   --success:#b3c63a; --success-soft:#323f17;
+  --either:#c5a0df;
   --warning:#d9a921; --warning-soft:#423617;
   --focus:#268bd2;
   --shadow-sm:0 1px 2px rgb(0 0 0 / .4); --shadow-md:0 4px 14px rgb(0 0 0 / .5);
@@ -167,6 +174,7 @@
   --accent:#66d9ef; --accent-strong:#4fcbe4; --on-accent:#272822; --accent-soft:#2b4548;
   --danger:#f92672; --danger-strong:#e01f63; --danger-soft:#4b2536;
   --success:#a6e22e; --success-soft:#39451e;
+  --either:#ae81ff;
   --warning:#e6db74; --warning-soft:#474325;
   --focus:#66d9ef;
   --shadow-sm:0 1px 2px rgb(0 0 0 / .35); --shadow-md:0 4px 14px rgb(0 0 0 / .45);
@@ -705,6 +713,11 @@ kbd{
 /* .item-name and .item-actions carry bottom padding for the routine editor's
    baseline-aligned grid; here it is 13px of nothing, once per row. */
 .overview-row .item-name,.overview-row .item-actions{ padding-bottom:0; }
+.either-inline{
+  display:inline-block; margin-right:5px; padding:1px 5px;
+  border:1px solid var(--either); border-radius:99px;
+  color:var(--either); font-size:10px; font-weight:750; vertical-align:1px;
+}
 @media (max-width:480px){
   /* Three controls and a name do not fit a 320px line without truncating the
      name, which is the one thing the running order exists to show. The buttons
@@ -799,11 +812,22 @@ kbd{
 /* routine editor */
 .item-row{ display:grid; grid-template-columns:44px 1fr repeat(3,minmax(64px,96px)) 84px; gap:var(--sp-2); align-items:end; padding:var(--sp-3) 0; border-top:1px solid var(--border); }
 .item-row:first-child{ border-top:0; }
-.item-row.is-paired{ position:relative; }
-.item-row.is-paired::before{ content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--success); }
+/* Shape and label carry the meaning; violet keeps green free for supersets. */
+.either-pair{ position:relative; }
+.either-pair::before{
+  content:""; position:absolute; left:10px; top:0; bottom:0; width:15px;
+  border-left:2px solid var(--either); pointer-events:none;
+}
+.either-first::before{ border-top:2px solid var(--either); border-top-left-radius:7px; }
+.either-last::before{ border-bottom:2px solid var(--either); border-bottom-left-radius:7px; }
+.either-last::after{
+  content:"OR"; position:absolute; left:0; top:0; transform:translateY(-50%);
+  width:22px; height:20px; display:grid; place-items:center; z-index:1;
+  border:1px solid var(--either); border-radius:99px;
+  background:var(--surface); color:var(--either); font-size:10px; font-weight:750;
+  line-height:1; pointer-events:none;
+}
 .item-name{ font-weight:600; font-size:var(--fs-sm); padding-bottom:9px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.item-name.has-pair{ white-space:normal; }
-.pair-badge{ display:block; margin-top:2px; color:var(--muted); font-size:var(--fs-xs); font-weight:400; line-height:1.3; }
 .routine-pair-toolbar{ margin:0 0 var(--sp-3); }
 .routine-pair-fields{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--sp-3); margin-top:var(--sp-3); }
 .routine-pair-existing{ margin:var(--sp-4) 0; }
@@ -4585,14 +4609,14 @@ function htmlCurrentExercise(w, ex){
 /* A completed/skipped exercise row, expandable via ui.expandedDone (keyed by
    array index — safe because upcoming-only reordering never moves a done
    exercise's index). Lives in the session-overview drawer. */
-function htmlDoneRow(ex, i){
+function htmlDoneRow(ex, i, showEither){
   const open = ui.expandedDone.has(String(i));
   const completed = ex.sets.filter(s => s.completed);
   const status = ex.skipped ? '<span class="status-chip skip">Skipped</span>'
     : '<span class="status-chip ok">' + (allSetsDone(ex) ? icon('check','ic-xs') + ' ' : '') +
       completed.length + '/' + ex.sets.length + '</span>';
   let html = '<button type="button" class="done-ex-row" data-action="toggle-done-ex" data-idx="' + i + '" aria-expanded="' + open + '">' +
-    status + '<strong>' + esc(ex.name) + '</strong>' +
+    status + (showEither ? '<span class="either-inline">OR</span>' : '') + '<strong>' + esc(ex.name) + '</strong>' +
     '<span class="muted small">' + completed.map(setSummary).join(', ') + '</span>' +
     IC.chev + '</button>';
   if (open){
@@ -4623,8 +4647,14 @@ function overviewSheetHTML(w){
   let html = '';
 
   w.exercises.forEach((ex, i) => {
+    const partnerIndex = ex.eitherOf
+      ? w.exercises.findIndex((other, j) => j !== i && other.eitherOf === ex.eitherOf) : -1;
+    const joined = partnerIndex >= 0 && Math.abs(partnerIndex - i) === 1 &&
+      !isSettledRow(w, ex, i) && !isSettledRow(w, w.exercises[partnerIndex], partnerIndex);
+    const pairClass = joined ? ' either-pair ' + (i < partnerIndex ? 'either-first' : 'either-last') : '';
+    const showEither = partnerIndex >= 0 && !joined;
     if (isSettledRow(w, ex, i)){
-      html += htmlDoneRow(ex, i);
+      html += htmlDoneRow(ex, i, showEither);
       return;
     }
     /* The grip is the drag handle and nothing else — a whole draggable row
@@ -4635,14 +4665,16 @@ function overviewSheetHTML(w){
        it can do to anyone who is not already holding it. */
     const isNow = i === w.currentExerciseIndex;
     const done = ex.sets.filter(s => s.completed).length;
-    html += '<div class="overview-row' + (isNow ? ' is-current-row' : '') + '" data-idx="' + i + '"' +
+    html += '<div class="overview-row' + (isNow ? ' is-current-row' : '') + pairClass + '" data-idx="' + i + '"' +
         (isNow ? ' aria-current="step"' : '') + '>' +
       '<button type="button" class="grip" id="ov-grip-' + i + '" data-drag="session-exercises" ' +
         'aria-label="Reorder ' + esc(ex.name) + '. Drag it, or use the up and down arrow keys." ' +
         'title="Drag to reorder">' + IC.grip + '</button>' +
       '<span class="item-name">' +
         (isNow ? '<span class="status-chip current">Now</span> ' : '') +
+        (showEither ? '<span class="either-inline">OR</span> ' : '') +
         esc(ex.name) +
+        (joined && i < partnerIndex ? '<span class="sr-only"> or ' + esc(w.exercises[partnerIndex].name) + '</span>' : '') +
         ' <span class="muted xs">· ' + (isNow ? done + '/' + ex.sets.length + ' sets'
                                               : plural(ex.sets.length, 'set') + ' planned') + '</span></span>' +
       '<span class="item-actions">' +
@@ -4786,12 +4818,13 @@ function htmlRoutineEditor(){
     const groupIndex = groups.findIndex(group => group.includes(it));
     const moveName = partner ? name + ' and ' + (partnerDef ? partnerDef.name : 'alternative') : name;
     const wl = e && (e.unit === 'bw' || e.unit === 'time') ? (e.unit === 'bw' ? 'BW' : 'sec') : unitLabel();
-    html += '<div class="item-row' + (partner ? ' is-paired' : '') + '">' +
+    const pairClass = partner ? ' either-pair ' + (groups[groupIndex][0] === it ? 'either-first' : 'either-last') : '';
+    html += '<div class="item-row' + pairClass + '">' +
       '<button type="button" class="grip" id="ri-grip-' + i + '" data-drag="routine-items" ' +
         'aria-label="Reorder ' + esc(moveName) + '. Drag it, or use the up and down arrow keys." ' +
         'title="Drag to reorder">' + IC.grip + '</button>' +
-      '<span class="item-name' + (partner ? ' has-pair' : '') + '" title="' + esc(name) + '">' + esc(name) +
-        (partner ? '<span class="pair-badge">Either of ' + esc(partnerDef ? partnerDef.name : '(removed exercise)') + '</span>' : '') + '</span>' +
+      '<span class="item-name" title="' + esc(name) + '">' + esc(name) +
+        (partner && groups[groupIndex][0] === it ? '<span class="sr-only"> or ' + esc(partnerDef ? partnerDef.name : 'alternative') + '</span>' : '') + '</span>' +
       '<label class="field"><span class="cap">Sets</span><input type="number" min="1" max="12" inputmode="numeric" data-bind="ritem" data-idx="' + i + '" data-field="sets" value="' + esc(it.sets) + '"></label>' +
       '<label class="field"><span class="cap">' + (e && e.unit === 'time' ? 'Seconds' : 'Reps') + '</span><input type="number" min="0" max="999" inputmode="numeric" data-bind="ritem" data-idx="' + i + '" data-field="reps" value="' + esc(it.reps) + '"></label>' +
       '<label class="field"><span class="cap">' + esc(wl) + '</span><input type="number" min="0" step="0.5" inputmode="decimal" data-bind="ritem" data-idx="' + i + '" data-field="weight" value="' + esc(it.weight != null ? it.weight : '') + '" placeholder="–"></label>' +

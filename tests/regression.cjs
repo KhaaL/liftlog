@@ -73,24 +73,31 @@ const fs = require('node:fs');
     await page.getByRole('button', {name:'Pair exercises…'}).click();
     const pairDialog = page.getByRole('dialog', {name:'Either of'});
     await pairDialog.getByRole('button', {name:'Close'}).click();
-    assert.equal(await page.locator('.pair-badge').count(), 2, 'closing picker keeps existing pair');
+    assert.equal(await page.locator('#routine-form .either-pair').count(), 2, 'closing picker keeps existing pair');
     await page.getByRole('button', {name:'Pair exercises…'}).click();
     await pairDialog.getByRole('button', {name:'Unpair'}).click();
-    assert.equal(await page.locator('.pair-badge').count(), 0, 'unpair removes both markers');
+    assert.equal(await page.locator('#routine-form .either-pair').count(), 0, 'unpair removes both markers');
     await page.getByRole('button', {name:'Pair exercises…'}).click();
     await pairDialog.getByLabel('First exercise').selectOption({label:'Back Squat · #1'});
     await pairDialog.getByLabel('Or this exercise').selectOption({label:'Leg Press · #2'});
     await pairDialog.screenshot({path:'/tmp/liftlog-pair-picker.png'});
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'pair picker fits phone width');
     await pairDialog.getByRole('button', {name:'Pair exercises'}).click();
-    assert.equal(await page.locator('.pair-badge').count(), 2, 'picker creates a visible pair');
+    assert.equal(await page.locator('#routine-form .either-pair').count(), 2, 'picker creates a visible pair');
+    assert.equal(await page.locator('#routine-form .pair-badge').count(), 0, 'editor omits repeated pair labels');
     assert.equal(await page.evaluate(() => {
       const rows = [...document.querySelectorAll('#routine-form .item-row')];
-      return rows.length === 3 && rows[0].classList.contains('is-paired') &&
-        rows[1].classList.contains('is-paired') && !rows[2].classList.contains('is-paired') &&
-        getComputedStyle(rows[0], '::before').width === '3px' &&
-        getComputedStyle(rows[1], '::before').backgroundColor !== 'rgba(0, 0, 0, 0)';
-    }), true, 'adjacent alternatives have a green left marker');
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--either)'; document.body.append(probe);
+      const violet = getComputedStyle(probe).color;
+      probe.style.color = 'var(--success)';
+      const green = getComputedStyle(probe).color;
+      probe.remove();
+      return rows.length === 3 && rows[0].classList.contains('either-first') &&
+        rows[1].classList.contains('either-last') && !rows[2].classList.contains('either-pair') &&
+        getComputedStyle(rows[0], '::before').borderLeftColor === violet && violet !== green &&
+        getComputedStyle(rows[1], '::after').content === '"OR"';
+    }), true, 'adjacent alternatives have a violet bracket and one OR pill');
     await page.getByRole('button', {name:'Move Back Squat and Leg Press down'}).first().click();
     assert.deepEqual(await page.evaluate(() => {
       const t = window.testAPI;
@@ -108,6 +115,23 @@ const fs = require('node:fs');
     await page.locator('[data-action="routine-start"]').first().click();
     let workout = await page.evaluate(() => window.testAPI.state.activeWorkout);
     assert.deepEqual(workout.exercises.map(e => e.name), ['Back Squat', 'Leg Press', 'Plank'], 'both alternatives start in session');
+    await page.locator('#overview-toggle-btn').click();
+    assert.equal(await page.evaluate(() => {
+      const rows = [...document.querySelectorAll('#overview-dlg-body .overview-row')];
+      return rows.length === 3 && rows[0].classList.contains('either-first') &&
+        rows[1].classList.contains('either-last') && !rows[2].classList.contains('either-pair') &&
+        getComputedStyle(rows[1], '::after').content === '"OR"';
+    }), true, 'active workout overview shows the same paired marker');
+    await page.locator('#overview-dlg').screenshot({path:'/tmp/liftlog-overview-pair.png'});
+    await page.getByRole('button', {name:'Move Leg Press later'}).click();
+    assert.equal(await page.locator('#overview-dlg-body .either-inline').count(), 2,
+      'separated alternatives keep individual OR cues');
+    assert.equal(await page.locator('#overview-dlg-body .either-pair').count(), 0,
+      'bracket does not connect unrelated rows');
+    await page.getByRole('button', {name:'Move Leg Press earlier'}).click();
+    assert.equal(await page.locator('#overview-dlg-body .either-pair').count(), 2,
+      'bringing alternatives together restores bracket');
+    await page.getByRole('button', {name:'Back to workout'}).click();
     assert.equal(await page.evaluate(() => {
       const t = window.testAPI;
       t.validateBackup(t.backupPayload());
@@ -128,6 +152,9 @@ const fs = require('node:fs');
     });
     workout = await page.evaluate(() => window.testAPI.state.activeWorkout);
     assert.deepEqual(workout.exercises.map(e => e.name), ['Back Squat', 'Plank'], 'completing first alternative removes second from session');
+    await page.locator('#overview-toggle-btn').click();
+    assert.equal(await page.locator('#overview-dlg-body .either-pair').count(), 0, 'pair marker clears after choosing an alternative');
+    await page.getByRole('button', {name:'Back to workout'}).click();
     assert.equal(workout.currentExerciseIndex, 1, 'advances to next exercise after first alternative');
     assert.equal(workout.exercises[1].sets[0].durationSeconds, 45);
     assert.equal(await page.evaluate(() => window.testAPI.state.routines[0].items.length), 3, 'saved routine retains both alternatives');

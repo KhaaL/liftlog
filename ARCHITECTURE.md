@@ -1034,9 +1034,12 @@ They must reference different exercises. The editor has one **Pair exercises**
 button, which opens a picker of unpaired exercises already in that routine.
 Existing pairs are listed there with **Unpair** controls. Deleting one item also
 dissolves its pair. Targets remain on each item; reordering and duplication
-preserve the pair. Pairing moves the two items next to each other, and a green
-line at the left edge of both rows marks the connection. Dragging or using the
-arrow buttons moves the pair as a unit.
+preserve the pair. Pairing moves the two items next to each other. A violet
+bracket with one **OR** pill between the rows marks the choice without using
+green, which is reserved for supersets. The session overview uses the same
+marker while both alternatives remain; if they are separated by reordering,
+each keeps an inline **OR** cue. Dragging or using the arrow buttons moves the
+pair as a unit in the routine editor.
 
 Starting a routine includes both alternatives as adjacent workout blocks. Once
 all sets of either block are completed, its partner is removed from that active
