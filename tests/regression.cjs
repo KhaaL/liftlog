@@ -9,7 +9,7 @@ const fs = require('node:fs');
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
     let html = fs.readFileSync('index.html', 'utf8');
-    html = html.replace('init();\n})();', `window.testAPI = { sampleRoutinesFile, sampleHistoryFile, routinesPayload, backupPayload, applyFullBackup, importRoutines, importHistory, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, routineGroups, routineSummary, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, startRoutine, htmlRoutineEditor, get state(){return state}, get ui(){return ui} };\ninit();\n})();`);
+    html = html.replace('init();\n})();', `window.testAPI = { sampleRoutinesFile, sampleHistoryFile, routinesPayload, backupPayload, applyFullBackup, validateBackup, importRoutines, importHistory, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, startRoutine, toggleSet, htmlRoutineEditor, get state(){return state}, get ui(){return ui} };\ninit();\n})();`);
     await page.route('http://liftlog.test/**', route => route.fulfill({ contentType:'text/html', body:html }));
     await page.goto('http://liftlog.test/');
     const result = await page.evaluate(async () => {
@@ -47,6 +47,9 @@ const fs = require('node:fs');
       t.cleanRoutinePairs(invalid);
       check(invalid.every(it => !it.eitherOf), 'oversized groups become independent');
       check(t.routineSummary([{exerciseId:'a',sets:2,eitherOf:'g'}, {exerciseId:'b',sets:4,eitherOf:'g'}]) === '1 exercise · 2–4 planned sets', 'pair summary shows target range');
+      const separated = [{exerciseId:'a',eitherOf:'g'}, {exerciseId:'c'}, {exerciseId:'b',eitherOf:'g'}];
+      t.keepRoutinePairsAdjacent(separated);
+      check(separated.map(it => it.exerciseId).join(',') === 'a,b,c', 'pair normalization places alternatives together');
       t.duplicateRoutine(r.id);
       check(t.routineGroups(t.state.routines[1].items).length === 2 && t.state.routines[1].items[0].id !== r.items[0].id, 'duplicate preserves pairs with new item IDs');
       t.ui.routineDraft = structuredClone(r);
@@ -55,7 +58,10 @@ const fs = require('node:fs');
       t.ui.routineDraft = structuredClone(r);
       t.unpairRoutineItems(t.ui.routineDraft.items[0].eitherOf);
       check(!t.ui.routineDraft.items.some(it => it.eitherOf), 'unlink dissolves pair');
-      check(t.pairRoutineItems(t.ui.routineDraft.items[0].id, t.ui.routineDraft.items[1].id), 'pair distinct items');
+      const second = t.ui.routineDraft.items.splice(1, 1)[0];
+      t.ui.routineDraft.items.push(second);
+      check(t.pairRoutineItems(t.ui.routineDraft.items[0].id, second.id), 'pair distinct items');
+      check(t.ui.routineDraft.items[1] === second, 'pairing nonadjacent items moves them together');
       t.ui.routineDraft.items.reverse();
       check(t.routineGroups(t.ui.routineDraft.items).length === 2, 'reordering preserves pair');
       t.ui.routineDraft = structuredClone(r); t.ui.view = 'routines';
@@ -78,19 +84,65 @@ const fs = require('node:fs');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'pair picker fits phone width');
     await pairDialog.getByRole('button', {name:'Pair exercises'}).click();
     assert.equal(await page.locator('.pair-badge').count(), 2, 'picker creates a visible pair');
+    assert.equal(await page.evaluate(() => {
+      const rows = [...document.querySelectorAll('#routine-form .item-row')];
+      return rows.length === 3 && rows[0].classList.contains('is-paired') &&
+        rows[1].classList.contains('is-paired') && !rows[2].classList.contains('is-paired') &&
+        getComputedStyle(rows[0], '::before').width === '3px' &&
+        getComputedStyle(rows[1], '::before').backgroundColor !== 'rgba(0, 0, 0, 0)';
+    }), true, 'adjacent alternatives have a green left marker');
+    await page.getByRole('button', {name:'Move Back Squat and Leg Press down'}).first().click();
+    assert.deepEqual(await page.evaluate(() => {
+      const t = window.testAPI;
+      return t.ui.routineDraft.items.map(it => t.state.exercises.find(ex => ex.id === it.exerciseId).name);
+    }), ['Plank', 'Back Squat', 'Leg Press'], 'arrow moves both alternatives together');
+    await page.getByRole('button', {name:'Move Back Squat and Leg Press up'}).first().click();
+    assert.deepEqual(await page.evaluate(() => {
+      const t = window.testAPI;
+      return t.ui.routineDraft.items.map(it => t.state.exercises.find(ex => ex.id === it.exerciseId).name);
+    }), ['Back Squat', 'Leg Press', 'Plank'], 'arrow restores paired position');
     await page.waitForTimeout(3000); // let transient import toasts leave the layout
     await page.screenshot({path:'/tmp/liftlog-editor.png', fullPage:true});
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'mobile editor fits viewport');
     await page.getByRole('button', {name:'Save routine', exact:true}).click();
     await page.locator('[data-action="routine-start"]').first().click();
-    await page.getByRole('button', {name:'Cancel', exact:true}).click();
-    assert.equal(await page.evaluate(() => window.testAPI.state.activeWorkout), null, 'cancel does not start workout');
-    await page.locator('[data-action="routine-start"]').first().click();
-    await page.getByRole('button', { name:'Leg Press', exact:true }).click();
-    const workout = await page.evaluate(() => window.testAPI.state.activeWorkout);
-    assert.deepEqual(workout.exercises.map(e => e.name), ['Leg Press', 'Plank']);
-    assert.equal(workout.exercises[0].sets[0].weight, 120);
+    let workout = await page.evaluate(() => window.testAPI.state.activeWorkout);
+    assert.deepEqual(workout.exercises.map(e => e.name), ['Back Squat', 'Leg Press', 'Plank'], 'both alternatives start in session');
+    assert.equal(await page.evaluate(() => {
+      const t = window.testAPI;
+      t.validateBackup(t.backupPayload());
+      return t.state.activeWorkout.exercises[0].eitherOf === t.state.activeWorkout.exercises[1].eitherOf;
+    }), true, 'backup schema accepts an active either-of pair');
+    assert.equal(await page.evaluate(() => window.testAPI.workoutPlannedSets(window.testAPI.state.activeWorkout)), 5,
+      'paired alternatives count once in planned sets');
+    assert.deepEqual(await page.evaluate(() => {
+      const t = window.testAPI, w = structuredClone(t.state.activeWorkout);
+      w.exercises[0].sets[0].completed = true;
+      w.exercises[1].sets[0].completed = true;
+      return [t.workoutSets(w), t.workoutPlannedSets(w)];
+    }), [1, 5], 'partial work on both alternatives counts once in progress');
+    await page.evaluate(() => {
+      const t = window.testAPI;
+      t.state.settings.autoRest = false;
+      t.state.activeWorkout.exercises[0].sets.map(s => s.id).forEach(t.toggleSet);
+    });
+    workout = await page.evaluate(() => window.testAPI.state.activeWorkout);
+    assert.deepEqual(workout.exercises.map(e => e.name), ['Back Squat', 'Plank'], 'completing first alternative removes second from session');
+    assert.equal(workout.currentExerciseIndex, 1, 'advances to next exercise after first alternative');
     assert.equal(workout.exercises[1].sets[0].durationSeconds, 45);
+    assert.equal(await page.evaluate(() => window.testAPI.state.routines[0].items.length), 3, 'saved routine retains both alternatives');
+    await page.evaluate(() => {
+      const t = window.testAPI;
+      t.state.activeWorkout = null;
+      t.startRoutine(t.state.routines[0].id);
+      t.state.activeWorkout.currentExerciseIndex = 1;
+      t.state.activeWorkout.exercises[1].sets.map(s => s.id).forEach(t.toggleSet);
+    });
+    workout = await page.evaluate(() => window.testAPI.state.activeWorkout);
+    assert.deepEqual(workout.exercises.map(e => e.name), ['Leg Press', 'Plank'], 'completing second alternative removes first from session');
+    assert.equal(workout.currentExerciseIndex, 1, 'advances correctly when removed partner was earlier');
+    assert.equal(workout.exercises[0].sets[0].weight, 120);
+    assert.equal(await page.evaluate(() => window.testAPI.state.routines[0].items.length), 3, 'saved routine still retains pair');
     await page.screenshot({path:'/tmp/liftlog-workout.png'});
     await page.evaluate(() => {
       const payload = window.testAPI.backupPayload();
@@ -102,8 +154,8 @@ const fs = require('node:fs');
     assert.equal(await page.evaluate(() => window.testAPI.state.version), 7, 'full backup restore migrates');
     assert.equal(await page.evaluate(() => window.testAPI.state.activeWorkout.timer.remaining), 37, 'backup restore retains rest timer');
     await page.reload();
-    assert.equal(await page.evaluate(() => window.testAPI.state.activeWorkout.exercises[0].name), 'Leg Press', 'chosen workout survives reload');
+    assert.equal(await page.evaluate(() => window.testAPI.state.activeWorkout.exercises[0].name), 'Leg Press', 'settled workout survives reload');
     assert.deepEqual(errors, []);
-    console.log([...result, 'mobile editor pairing and chosen workout targets', 'no browser errors'].map(s => 'PASS ' + s).join('\n'));
+    console.log([...result, 'mobile editor pairing and in-session alternative completion', 'no browser errors'].map(s => 'PASS ' + s).join('\n'));
   } finally { await browser.close(); }
 })().catch(e => { console.error(e); process.exit(1); });

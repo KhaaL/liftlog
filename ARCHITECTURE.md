@@ -333,7 +333,7 @@ state
 ├─ routines[]      { id, name, items[] }                      — the plan
 │   └─ items[]     { id, exerciseId, sets, reps, weight, eitherOf? }
 ├─ workouts[]      logged sessions, newest first              — the log
-│   └─ exercises[] { exerciseId, name, unit, targetReps, skipped, sets[] }
+│   └─ exercises[] { exerciseId, name, unit, targetReps, skipped, eitherOf?, sets[] }
 │       └─ sets[]  { id, weight, reps, durationSeconds, rpe, rir, unit, completed, completedAt,
 │                    countForVolume?, countForPR? }   — absent means "counts"
 └─ activeWorkout   a workout in progress, or null
@@ -1034,13 +1034,15 @@ They must reference different exercises. The editor has one **Pair exercises**
 button, which opens a picker of unpaired exercises already in that routine.
 Existing pairs are listed there with **Unpair** controls. Deleting one item also
 dissolves its pair. Targets remain on each item; reordering and duplication
-preserve the pair.
+preserve the pair. Pairing moves the two items next to each other, and a green
+line at the left edge of both rows marks the connection. Dragging or using the
+arrow buttons moves the pair as a unit.
 
-Starting a routine asks for one choice per pair before creating any session.
-Cancel leaves the existing session untouched. Only the chosen item becomes a
-workout block, at the position of the first member of the pair; unchosen items
-do not affect progress, volume, or records. Routine summaries count pairs once
-and show a set-count range if targets differ.
+Starting a routine includes both alternatives as adjacent workout blocks. Once
+all sets of either block are completed, its partner is removed from that active
+workout only; the saved routine keeps both. Planned-set progress counts the pair
+once until it is settled. Routine summaries count pairs once and show a set-count
+range if targets differ.
 
 `cleanRoutinePairs` removes singleton, oversized, and same-exercise pair keys
 on load, import, and save. Routine export and backup retain keys. The sample

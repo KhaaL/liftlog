@@ -799,6 +799,8 @@ kbd{
 /* routine editor */
 .item-row{ display:grid; grid-template-columns:44px 1fr repeat(3,minmax(64px,96px)) 84px; gap:var(--sp-2); align-items:end; padding:var(--sp-3) 0; border-top:1px solid var(--border); }
 .item-row:first-child{ border-top:0; }
+.item-row.is-paired{ position:relative; }
+.item-row.is-paired::before{ content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--success); }
 .item-name{ font-weight:600; font-size:var(--fs-sm); padding-bottom:9px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .item-name.has-pair{ white-space:normal; }
 .pair-badge{ display:block; margin-top:2px; color:var(--muted); font-size:var(--fs-xs); font-weight:400; line-height:1.3; }
@@ -1844,7 +1846,7 @@ function validateBackup(s){
     w.exercises.forEach((ex, i) => {
       const at = path + '.exercises[' + i + ']'; object(ex, at);
       if (ex.exerciseId != null) id(ex.exerciseId, at + '.exerciseId');
-      fields(ex, at, ['name', 'category', 'unit', 'notes'], text);
+      fields(ex, at, ['name', 'category', 'unit', 'notes', 'eitherOf'], text);
       fields(ex, at, ['plannedSets', 'targetReps', 'targetWeight', 'restSeconds'], number);
       bool(ex.skipped, at + '.skipped');
       array(ex.sets, at + '.sets');
@@ -1961,7 +1963,7 @@ function normalizeState(s){
     url: safeUrl(e.url)
   }));
   s.routines  = s.routines || [];
-  s.routines.forEach(r => { r.items.forEach(normalizeRoutineItem); cleanRoutinePairs(r.items); });
+  s.routines.forEach(r => { r.items.forEach(normalizeRoutineItem); cleanRoutinePairs(r.items); keepRoutinePairsAdjacent(r.items); });
   s.workouts  = s.workouts || [];
   s.activeWorkout = s.activeWorkout || null;
   const normalizeWorkout = (w, active) => {
@@ -2759,8 +2761,13 @@ function setSummary(s){
   return fmtNum(s.weight) + ' ' + esc(s.unit || 'kg') + ' × ' + (s.reps != null ? s.reps : '–');
 }
 function workoutVolume(w){ return w.exercises.reduce((a,ex) => a + sumVolume(ex.sets), 0); }
-function workoutSets(w){ return w.exercises.reduce((a,ex) => a + ex.sets.filter(s => s.completed).length, 0); }
-function workoutPlannedSets(w){ return w.exercises.reduce((a,ex) => a + ex.sets.length, 0); }
+function workoutSets(w){
+  return routineGroups(w.exercises).reduce((a, group) =>
+    a + Math.max(...group.map(ex => ex.sets.filter(s => s.completed).length)), 0);
+}
+function workoutPlannedSets(w){
+  return routineGroups(w.exercises).reduce((a, group) => a + Math.max(...group.map(ex => ex.sets.length)), 0);
+}
 /* Minutes left, measured from this session's own pace: the median gap between
    consecutive completed sets, times the sets still to do. Returns null until
    there are enough gaps to be worth showing — a guess from one data point is
@@ -2814,6 +2821,7 @@ function buildWorkoutExercise(item){
     unit:exDef.unit || 'kg', plannedSets:item.sets || 3,
     targetReps:item.reps != null ? item.reps : 8,
     targetWeight:item.weight != null ? item.weight : null,
+    ...(item.eitherOf ? { eitherOf:item.eitherOf } : {}),
     notes:exDef.notes || '', skipped:false, sets:[]
   };
   const n = Math.max(1, item.sets || 3);
@@ -2860,22 +2868,10 @@ function newWorkout(routine){
     timer:null
   };
 }
-async function startRoutine(id){
+function startRoutine(id){
   const r = routineById(id);
   if (!r) return;
-  const chosen = [];
-  for (const group of routineGroups(r.items)){
-    let item = group[0];
-    if (group.length === 2){
-      const pick = await dialog({ title:'Either of', body:'Choose one exercise for “' + r.name + '”. Each keeps its own targets.',
-        buttons:[...group.map((it, i) => ({ label:(exerciseById(it.exerciseId) || {}).name || 'Removed exercise', value:i, cls:'btn-primary' })),
-          { label:'Cancel', value:null }] });
-      if (pick == null) return;
-      item = group[pick];
-    }
-    chosen.push(item);
-  }
-  startSession(() => newWorkout({ ...r, items:chosen }),
+  startSession(() => newWorkout(r),
     'You already have a workout in progress. Starting “' + r.name + '” will discard it.',
     'Workout started — ' + r.name);
 }
@@ -2914,6 +2910,18 @@ function currentExercise(){
   return w ? w.exercises[w.currentExerciseIndex] : null;
 }
 function allSetsDone(ex){ return ex && ex.sets.length > 0 && ex.sets.every(s => s.completed); }
+/* Finishing one alternative settles only this session's copy of the plan.
+   Keep the current block's identity stable when its partner was before it. */
+function settleEitherOf(w, ex){
+  if (!ex.eitherOf) return null;
+  const partnerIndex = w.exercises.findIndex(other => other !== ex && other.eitherOf === ex.eitherOf);
+  delete ex.eitherOf;
+  if (partnerIndex < 0) return null;
+  const [partner] = w.exercises.splice(partnerIndex, 1);
+  if (partnerIndex < w.currentExerciseIndex) w.currentExerciseIndex--;
+  ui.expandedDone.clear();  /* these keys are exercise indexes */
+  return partner;
+}
 
 /* A set left blank falls back to the target. Timed work must land in
    durationSeconds — writing it to `reps` is exactly the v2 bug v3 undid. */
@@ -2944,7 +2952,10 @@ function toggleSet(setId){
   s.completed = !s.completed;
   if (s.completed){ s.completedAt = Date.now(); fillSetDefaults(ex, s); }
   else s.completedAt = null;
+  const finished = s.completed && allSetsDone(ex);
+  const removed = finished ? settleEitherOf(state.activeWorkout, ex) : null;
   save();
+  if (removed) toast('Either of: removed ' + removed.name + ' from this workout');
   if (s.completed){
     announce('Set ' + (i+1) + ' of ' + ex.sets.length + ' complete.');
     if (state.settings.autoRest){
@@ -2954,7 +2965,7 @@ function toggleSet(setId){
   }
   /* checking the last open box leaves nothing to log here, so move on rather
      than sit on a fully-done set list */
-  if (s.completed && allSetsDone(ex)) advanceExercise(false);
+  if (finished) advanceExercise(false);
   else { ui.focus = 'sd-' + setId; render(); }
 }
 /* Setting a weight or a rep/duration target is nearly always a decision about
@@ -3049,6 +3060,10 @@ function confirmExerciseRemoval(w, ex){
     /* ui.expandedDone is keyed by position in w.exercises, and every index
        after this one is about to shift — so the expand state goes with it */
     w.exercises.splice(idx, 1);
+    if (ex.eitherOf){
+      const partner = w.exercises.find(other => other.eitherOf === ex.eitherOf);
+      if (partner) delete partner.eitherOf;
+    }
     w.currentExerciseIndex = Math.min(idx, w.exercises.length);
     ui.expandedDone.clear();
     let msg = 'Removed ' + ex.name + ' from this session';
@@ -3234,6 +3249,9 @@ function routineGroups(items){
   });
   return groups;
 }
+function keepRoutinePairsAdjacent(items){
+  items.splice(0, items.length, ...routineGroups(items).flat());
+}
 function routineSummary(items){
   const groups = routineGroups(items);
   const low = groups.reduce((n, g) => n + Math.min(...g.map(it => it.sets)), 0);
@@ -3256,6 +3274,7 @@ function pairRoutineItems(firstId, secondId){
   if (!first || !second || first === second || first.eitherOf || second.eitherOf ||
       first.exerciseId === second.exerciseId) return false;
   first.eitherOf = second.eitherOf = uid();
+  keepRoutinePairsAdjacent(items);
   return true;
 }
 function unpairRoutineItems(groupId){
@@ -3329,6 +3348,7 @@ function saveRoutineDraft(){
   if (d.items.length === 0){ ui.routineError = 'Add at least one exercise.'; render(); return; }
   d.items.forEach(normalizeRoutineItem);
   cleanRoutinePairs(d.items);
+  keepRoutinePairsAdjacent(d.items);
   if (d.id){
     const i = state.routines.findIndex(r => r.id === d.id);
     if (i !== -1) state.routines[i] = { id:d.id, name:d.name.trim(), items:d.items };
@@ -3358,11 +3378,17 @@ function deleteRoutine(id){
 }
 function routineStep(idx, dir){
   const d = ui.routineDraft; if (!d) return;
-  const to = idx + dir;
-  if (to < 0 || to >= d.items.length) return;
-  const atBound = dir < 0 ? to === 0 : to === d.items.length - 1;
+  const groups = routineGroups(d.items);
+  const groupIndex = groups.findIndex(group => group.includes(d.items[idx]));
+  const next = groupIndex + dir;
+  if (groupIndex < 0 || next < 0 || next >= groups.length) return;
+  const target = groups[next];
+  const row = dir < 0 ? d.items.indexOf(target[0]) : d.items.indexOf(target[target.length - 1]);
+  const offset = groups[groupIndex].indexOf(d.items[idx]);
+  const landed = (dir < 0 ? d.items.indexOf(target[0]) : d.items.indexOf(groups[groupIndex][0]) + target.length) + offset;
+  const atBound = dir < 0 ? next === 0 : next === groups.length - 1;
   const keep = atBound ? (dir < 0 ? 'ri-down-' : 'ri-up-') : (dir < 0 ? 'ri-up-' : 'ri-down-');
-  SORTABLES['routine-items'].drop(idx, to, keep + to);
+  SORTABLES['routine-items'].drop(idx, row, keep + landed);
 }
 function removeRoutineItem(idx){
   const d = ui.routineDraft; if (!d) return;
@@ -3871,6 +3897,7 @@ function importRoutines(file){
           weight:it.weight, eitherOf:it.eitherOf });
       }).filter(Boolean);
       cleanRoutinePairs(items);
+      keepRoutinePairsAdjacent(items);
       if (!items.length){ skippedR++; return; }
       state.routines.push({ id:uid(), name:String(r.name).trim(), items });
       addedR++;
@@ -3960,7 +3987,7 @@ function schemaHelpHTML(){
       ['items[].exerciseId', 'string, required', 'Resolved by id, then name, then created from <code>exercises[]</code>.'],
       ['items[].sets', 'integer', 'Clamped to ' + L.sets[0] + '\u2013' + L.sets[1] + '. Default 3.'],
       ['items[].reps', 'integer', 'Clamped to ' + L.reps[0] + '\u2013' + L.reps[1] + '. Default 8. For a timed movement this is <em>seconds</em>.'],
-      ['items[].eitherOf', 'optional string', 'Exactly two different exercises in a routine share a key to form an either-of pair. Choose one when starting. Invalid or incomplete pairs become independent exercises.'],
+      ['items[].eitherOf', 'optional string', 'Exactly two different exercises in a routine share a key to form an either-of pair. They are placed together; completing one removes the other from that workout only. Invalid or incomplete pairs become independent exercises.'],
       ['items[].weight', 'number | null', 'Planned load. <code>null</code> leaves the bar to last time\u2019s figure.'],
       ['exercises[]', 'optional', 'Definitions for the ids above: <code>id</code>, <code>name</code>, <code>category</code>, <code>unit</code>, <code>notes</code>, <code>url</code>.'],
       ['exercises[].unit', 'enum', 'One of ' + units + '. Anything else becomes <code>kg</code>.'],
@@ -4735,6 +4762,7 @@ function viewRoutines(){
 
 function htmlRoutineEditor(){
   const d = ui.routineDraft;
+  const groups = routineGroups(d.items);
   let html = '<section class="panel"><div class="pad">' +
     '<form data-form="routine-save" id="routine-form">' +
       '<div class="form-row">' +
@@ -4755,10 +4783,12 @@ function htmlRoutineEditor(){
     const name = e ? e.name : '(removed exercise)';
     const partner = it.eitherOf && d.items.find(other => other !== it && other.eitherOf === it.eitherOf);
     const partnerDef = partner && exerciseById(partner.exerciseId);
+    const groupIndex = groups.findIndex(group => group.includes(it));
+    const moveName = partner ? name + ' and ' + (partnerDef ? partnerDef.name : 'alternative') : name;
     const wl = e && (e.unit === 'bw' || e.unit === 'time') ? (e.unit === 'bw' ? 'BW' : 'sec') : unitLabel();
-    html += '<div class="item-row">' +
+    html += '<div class="item-row' + (partner ? ' is-paired' : '') + '">' +
       '<button type="button" class="grip" id="ri-grip-' + i + '" data-drag="routine-items" ' +
-        'aria-label="Reorder ' + esc(name) + '. Drag it, or use the up and down arrow keys." ' +
+        'aria-label="Reorder ' + esc(moveName) + '. Drag it, or use the up and down arrow keys." ' +
         'title="Drag to reorder">' + IC.grip + '</button>' +
       '<span class="item-name' + (partner ? ' has-pair' : '') + '" title="' + esc(name) + '">' + esc(name) +
         (partner ? '<span class="pair-badge">Either of ' + esc(partnerDef ? partnerDef.name : '(removed exercise)') + '</span>' : '') + '</span>' +
@@ -4766,8 +4796,8 @@ function htmlRoutineEditor(){
       '<label class="field"><span class="cap">' + (e && e.unit === 'time' ? 'Seconds' : 'Reps') + '</span><input type="number" min="0" max="999" inputmode="numeric" data-bind="ritem" data-idx="' + i + '" data-field="reps" value="' + esc(it.reps) + '"></label>' +
       '<label class="field"><span class="cap">' + esc(wl) + '</span><input type="number" min="0" step="0.5" inputmode="decimal" data-bind="ritem" data-idx="' + i + '" data-field="weight" value="' + esc(it.weight != null ? it.weight : '') + '" placeholder="–"></label>' +
       '<span class="item-actions">' +
-        '<button type="button" class="icon-btn" id="ri-up-' + i + '" data-action="ritem-up" data-idx="' + i + '" aria-label="Move ' + esc(name) + ' up" ' + (i === 0 ? 'disabled' : '') + '>' + IC.up + '</button>' +
-        '<button type="button" class="icon-btn" id="ri-down-' + i + '" data-action="ritem-down" data-idx="' + i + '" aria-label="Move ' + esc(name) + ' down" ' + (i === d.items.length-1 ? 'disabled' : '') + '>' + IC.down + '</button>' +
+        '<button type="button" class="icon-btn" id="ri-up-' + i + '" data-action="ritem-up" data-idx="' + i + '" aria-label="Move ' + esc(moveName) + ' up" ' + (groupIndex === 0 ? 'disabled' : '') + '>' + IC.up + '</button>' +
+        '<button type="button" class="icon-btn" id="ri-down-' + i + '" data-action="ritem-down" data-idx="' + i + '" aria-label="Move ' + esc(moveName) + ' down" ' + (groupIndex === groups.length-1 ? 'disabled' : '') + '>' + IC.down + '</button>' +
         '<button type="button" class="icon-btn danger" data-action="ritem-rm" data-idx="' + i + '" aria-label="Remove ' + esc(name) + '">' + IC.trash + '</button>' +
       '</span>' +
     '</div>';
@@ -5854,11 +5884,19 @@ const SORTABLES = {
     drop(from, to, focus){
       const d = ui.routineDraft; if (!d) return;
       if (from >= d.items.length || to >= d.items.length) return;
-      d.items.splice(to, 0, d.items.splice(from, 1)[0]);
-      ui.focus = focus || ('ri-grip-' + to);
+      const item = d.items[from], target = d.items[to];
+      const groups = routineGroups(d.items);
+      const source = groups.findIndex(group => group.includes(item));
+      const destination = groups.findIndex(group => group.includes(target));
+      if (source === destination) return;
+      const moving = groups.splice(source, 1)[0];
+      groups.splice(destination, 0, moving);
+      d.items.splice(0, d.items.length, ...groups.flat());
+      const landed = d.items.indexOf(item);
+      ui.focus = focus || ('ri-grip-' + landed);
       render();
-      const e = exerciseById(d.items[to].exerciseId);
-      announce((e ? e.name : 'Exercise') + ' moved to position ' + (to+1) + ' of ' + d.items.length + '.');
+      const e = exerciseById(item.exerciseId);
+      announce((e ? e.name : 'Exercise') + ' moved to position ' + (landed+1) + ' of ' + d.items.length + '.');
     }
   }
 };
