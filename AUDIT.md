@@ -30,6 +30,9 @@ top pager and bottom timer anchored at all three sizes.
    overflow/settings control. A bottom bar would conflict with the workout
    timer and is therefore a poorer fit here.
 
+   The label was subsequently restored to **Exercises**. The equal-width layout
+   and tighter type still keep all five complete labels visible at 320px.
+
 2. **Frequent and destructive row actions are below the app's own 44px touch
    standard.** Routine and exercise cards use 30–36px-high action buttons; the
    routine editor's move and remove controls are 30×30px. At 320px, duplicate

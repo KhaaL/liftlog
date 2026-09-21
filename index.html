@@ -1254,7 +1254,7 @@ button,.btn,.icon-btn,.nav-btn,.strip-step,.strip-num,.set-num,.done-ex-row,.his
         <li><button type="button" class="nav-btn" data-action="nav" data-view="today">Today</button></li>
         <li><button type="button" class="nav-btn" data-action="nav" data-view="routines">Routines</button></li>
         <li><button type="button" class="nav-btn" data-action="nav" data-view="history">History</button></li>
-        <li><button type="button" class="nav-btn" data-action="nav" data-view="exercises">Library</button></li>
+        <li><button type="button" class="nav-btn" data-action="nav" data-view="exercises">Exercises</button></li>
         <li><button type="button" class="nav-btn" data-action="nav" data-view="settings">Settings</button></li>
       </ul>
     </nav>
@@ -1622,11 +1622,11 @@ const SETTING_LABEL = { autoRest:'Auto-rest', sound:'Timer sound', vibrate:'Time
 
 const SHORTCUTS = [
   { keys:['?'], text:'Open shortcut help' },
-  { keys:['/'], text:'Focus search (Library)' },
+  { keys:['/'], text:'Focus search (Exercises)' },
   { keys:['t'], text:'Go to Today' },
   { keys:['r'], text:'Go to Routines' },
   { keys:['h'], text:'Go to History' },
-  { keys:['e'], text:'Go to Library' },
+  { keys:['e'], text:'Go to Exercises' },
   { keys:['s'], text:'Start selected routine · save current edit' },
   { keys:['p'], text:'Previous exercise' },
   { keys:['n'], text:'Next exercise' },
@@ -3716,7 +3716,7 @@ function deleteExercise(id){
   const ex = exerciseById(id); if (!ex) return;
   const usedBy = state.routines.filter(r => r.items.some(it => it.exerciseId === id)).length;
   const extra = usedBy ? ' It is used by ' + usedBy + ' routine' + (usedBy > 1 ? 's' : '') + ', which will show it as removed.' : '';
-  confirmDlg('Delete exercise?','“' + ex.name + '” will be removed from your library.' + extra,'Delete exercise',true)
+  confirmDlg('Delete exercise?','“' + ex.name + '” will be removed from your exercises.' + extra,'Delete exercise',true)
     .then(ok => {
       if (!ok) return;
       state.exercises = state.exercises.filter(e => e.id !== id);
@@ -4266,7 +4266,7 @@ function schemaHelpHTML(){
 
     '<h3 class="sh-h">Routines file</h3>' +
     '<p class="desc">A routine references exercises by <code>exerciseId</code>. Each id is resolved against your ' +
-      'library first, then by name, and finally created from the file\u2019s own <code>exercises</code> array \u2014 ' +
+      'exercises first, then by name, and finally created from the file\u2019s own <code>exercises</code> array \u2014 ' +
       'which is why routines travel with the exercises they need. Routines whose name you already have are skipped.</p>' +
     rows([
       ['routines[]', 'required', 'The list. A bare top-level array is accepted too.'],
@@ -4288,7 +4288,7 @@ function schemaHelpHTML(){
     '<h3 class="sh-h">History file</h3>' +
     '<p class="desc">Workouts are deduplicated by <code>id</code> \u2014 first write wins, so re-importing the same ' +
       'file adds no second copy. A workout needs an <code>id</code> and a <code>startedAt</code>; without either it is invalid. ' +
-      'Historical exercise IDs that no longer exist in the Library remain visible in Progress and can be linked later.</p>' +
+      'Historical exercise IDs that no longer exist in Exercises remain visible in Progress and can be linked later.</p>' +
     rows([
       ['workouts[]', 'required', 'The list. A bare top-level array is accepted too.'],
       ['workouts[].id', 'string, required', 'The dedupe key. An identical reused id is reported as already present; different content with the same id is a conflict, and the local copy is kept.'],
@@ -4308,7 +4308,7 @@ function schemaHelpHTML(){
       ['sets[].completed', 'boolean', 'Whether the set was performed.'],
       ['sets[].countForVolume', 'boolean', 'Default true. <code>false</code> marks a warm-up: performed, but out of the totals. <code>includeInVolume</code> is accepted as an alias.'],
       ['sets[].countForPR', 'boolean', 'Default true. <code>false</code> keeps a set out of records.'],
-      ['exerciseLinks[]', 'optional', 'Reversible analytics links from a historical <code>sourceId</code> to a current Library <code>targetId</code>. Imported only when the target exists locally. Workout records are never rewritten.'],
+      ['exerciseLinks[]', 'optional', 'Reversible analytics links from a historical <code>sourceId</code> to a current exercise <code>targetId</code>. Imported only when the target exists locally. Workout records are never rewritten.'],
       ['historySeparateIds[]', 'optional', 'Historical exercise IDs explicitly reviewed and intentionally kept as their own progression series.']
     ]) +
     code(sampleHistoryFile()) +
@@ -4644,7 +4644,7 @@ function htmlPicker(){
   }
   html += '<section aria-labelledby="pick-title"><div class="section-title"><h2 id="pick-title">Start a workout</h2><span class="rule"></span></div>';
   if (state.routines.length === 0){
-    html += '<div class="empty"><h3>No routines yet</h3><p>Build one from your exercise library, or import a routines file.</p>' +
+    html += '<div class="empty"><h3>No routines yet</h3><p>Build one from your exercises, or import a routines file.</p>' +
       '<div class="form-actions"><button type="button" class="btn btn-primary" data-action="nav" data-view="routines">Go to Routines</button>' +
       '<button type="button" class="btn" data-action="nav" data-view="settings">Import a file</button></div></div>';
   } else {
@@ -5052,10 +5052,12 @@ function htmlAddExercise(){
 /* The exercise library as <option>s, by name — used by both "add" pickers: a
    library long enough to need scrolling is unusable in insertion order.
    `skip` is a Set of ids to leave out (see htmlAddExercise). */
+const compareExerciseNames = (a,b) => String(a.name).localeCompare(String(b.name), undefined,
+  { numeric:true, sensitivity:'base' });
 function exerciseOptions(selected, skip){
   return state.exercises
     .filter(e => !(skip && skip.has(e.id)))
-    .sort((a,b) => String(a.name).localeCompare(String(b.name), undefined, { numeric:true, sensitivity:'base' }))
+    .sort(compareExerciseNames)
     .map(e => '<option value="' + esc(e.id) + '"' + (e.id === selected ? ' selected' : '') + '>' + esc(e.name) + '</option>')
     .join('');
 }
@@ -5150,9 +5152,9 @@ function htmlRoutineEditor(){
 
   const hasLibrary = state.exercises.length > 0;
   html += '<div class="form-row mt-4">' +
-    '<label class="field flex-2"><span class="cap">Add exercise from library</span>' +
+    '<label class="field flex-2"><span class="cap">Add exercise</span>' +
     '<select id="routine-add-select"' + (hasLibrary ? '' : ' disabled') + '>' +
-    (hasLibrary ? exerciseOptions() : '<option value="">Library is empty</option>') + '</select></label>' +
+    (hasLibrary ? exerciseOptions() : '<option value="">No exercises available</option>') + '</select></label>' +
     '<button type="button" class="btn" data-action="ritem-add"' + (hasLibrary ? '' : ' disabled') + '>' + IC.plus + '<span>Add</span></button>' +
   '</div>' +
   '<div class="form-actions form-footer">' +
@@ -5186,7 +5188,7 @@ function historyImportSummaryHTML(){
       s.invalid + ' invalid · ' + s.conflicts + ' conflict' + (s.conflicts === 1 ? '' : 's') +
       (s.importedLinks ? ' · ' + plural(s.importedLinks, 'exercise link') + ' restored' : '') + '.</p>' +
     (s.conflicts ? '<p class="hint mt-2">Existing copies were kept. No local workout was overwritten.</p>' : '') +
-    (unresolved ? '<p class="hint mt-2">' + plural(unresolved, 'historical exercise') + ' still need a linking decision for continuity with the current Library.</p>' : '') +
+    (unresolved ? '<p class="hint mt-2">' + plural(unresolved, 'historical exercise') + ' still need a linking decision for continuity with your current exercises.</p>' : '') +
     '<div class="import-summary-actions">' +
       (unresolved ? '<button type="button" class="btn btn-primary" data-action="history-links-open">Review exercise links</button>' : '') +
       '<button type="button" class="btn" data-action="history-import-dismiss">Done</button>' +
@@ -5208,12 +5210,12 @@ function historyLinksPanel(){
   const filter = normalizedExerciseName(ui.historyLinkFilter);
   let shown = identities.filter(x => ui.historyLinksShowAll || (!exerciseLink(x.id) && !separate.has(x.id)));
   if (filter) shown = shown.filter(x => normalizedExerciseName(x.name + ' ' + x.category).includes(filter));
-  const library = state.exercises.slice().sort((a,b) => a.name.localeCompare(b.name));
+  const library = state.exercises.slice().sort(compareExerciseNames);
   const row = x => {
     const link = exerciseLink(x.id), target = link && exerciseById(link.targetId);
     const suggestion = !link && !separate.has(x.id) ? suggestedExercise(x) : null;
     const status = target ? 'Linked to ' + target.name : separate.has(x.id) ? 'Kept as separate history' : 'Needs review';
-    const options = '<option value="">Choose a Library exercise…</option>' +
+    const options = '<option value="">Choose an exercise…</option>' +
       '<option value="__separate"' + (separate.has(x.id) ? ' selected' : '') + '>Keep as separate history</option>' +
       library.map(ex => '<option value="' + esc(ex.id) + '"' + (target && target.id === ex.id ? ' selected' : '') + '>' +
         esc(ex.name) + ' · ' + esc(ex.unit) + '</option>').join('');
@@ -5227,7 +5229,7 @@ function historyLinksPanel(){
       '<div class="history-link-controls"><label class="field"><span class="cap">History belongs to</span>' +
         '<select data-change="history-link" data-source="' + esc(x.id) + '">' + options + '</select></label>' +
         (suggestion ? '<button type="button" class="btn btn-sm" data-action="history-link-suggest" data-source="' + esc(x.id) + '" data-target="' + esc(suggestion.id) + '">Use exact match</button>' : '') +
-        '<button type="button" class="btn btn-sm" data-action="history-link-add" data-source="' + esc(x.id) + '">Add to Library</button>' +
+        '<button type="button" class="btn btn-sm" data-action="history-link-add" data-source="' + esc(x.id) + '">Create exercise</button>' +
       '</div></div>';
   };
   const linkedCount = identities.filter(x => exerciseLink(x.id)).length;
@@ -5693,7 +5695,7 @@ function musclePanel(){
 /* ---------- EXERCISES ---------- */
 function viewExercises(){
   const head = '<div class="view-head"><div><h1>Exercises</h1>' +
-    '<p class="view-sub">Your library · ' + plural(state.exercises.length, 'movement') + '</p></div>' +
+    '<p class="view-sub">Your exercises · ' + plural(state.exercises.length, 'movement') + '</p></div>' +
     '<button type="button" class="btn btn-primary" data-action="ex-form-toggle">' + IC.plus + '<span>New exercise</span></button></div>';
 
   let html = '<div class="mb-4">' +
@@ -5704,7 +5706,7 @@ function viewExercises(){
   if (ui.showExerciseForm) html += htmlExerciseForm();
 
   if (!state.exercises.length){
-    html += '<div class="empty"><h3>Library is empty</h3><p>Add your first movement. Importing a routines file also creates any exercises it needs.</p>' +
+    html += '<div class="empty"><h3>No exercises yet</h3><p>Add your first movement. Importing a routines file also creates any exercises it needs.</p>' +
       '<div class="form-actions"><button type="button" class="btn btn-primary" data-action="ex-form-toggle">' + IC.plus + '<span>New exercise</span></button>' +
       '<button type="button" class="btn" data-action="nav" data-view="settings">Import routines</button></div></div>';
     return head + html;
@@ -5713,7 +5715,7 @@ function viewExercises(){
   const q = ui.exerciseFilter.trim().toLowerCase();
   const matches = e => !q ||
     e.name.toLowerCase().includes(q) || (e.category || '').toLowerCase().includes(q);
-  const shown = state.exercises.filter(matches);
+  const shown = state.exercises.filter(matches).sort(compareExerciseNames);
 
   html += '<ul class="list" id="ex-list">';
   shown.forEach(e => {
@@ -6163,7 +6165,7 @@ const actions = {
   },
   'history-link-add'(d){
     if (!addHistoricalExerciseToLibrary(d.source)) return;
-    save(); render(); toast('Exercise added to Library');
+    save(); render(); toast('Exercise created');
   },
   'hset-toggle'(d){
     const s = findHSet(d); if (!s) return;

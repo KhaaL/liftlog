@@ -993,8 +993,11 @@ straight afterwards must. Warm-up marking has two entry points because the
 set-number cell is dropped below 360px when an effort column is on — worth
 checking at 320px too.
 
-And the session picker: it lists the library A–Z, leaves out what is already in
-the session, and refuses a duplicate even if a stale value is submitted.
+The Exercises screen and session picker list movements A–Z using the same
+case-insensitive, numeric-aware comparison. The picker also leaves out what is
+already in the session and refuses a duplicate even if a stale value is
+submitted. Sorting is applied to the rendered copy; stored order and ID
+references are unchanged.
 
 The session sheet needs its modal edges checked: Esc, the scrim, the X and
 "Back to workout" all close it and return focus to the strip button; a reorder

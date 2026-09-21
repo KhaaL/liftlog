@@ -112,6 +112,10 @@ const fs = require('node:fs');
     await page.locator('[data-change="history-link"][data-source="old-back-squat"]').selectOption('ex-squat');
     assert.equal(await page.evaluate(() => window.testAPI.canonicalExerciseId('old-back-squat')), 'ex-squat',
       'review can relink a previously separated series');
+    await page.evaluate(() => window.testAPI.state.exercises.reverse());
+    await page.getByRole('button', {name:'Exercises', exact:true}).click();
+    assert.deepEqual(await page.locator('#ex-list .list-name').allTextContents(), ['Back Squat','Leg Press','Plank'],
+      'exercise list is alphabetical regardless of stored order');
     await page.getByRole('button', {name:'Routines'}).click();
     await page.getByRole('button', { name:'Edit Lower body', exact:true }).click();
     assert.equal(await page.getByLabel('Reps min').count(), 2, 'routine editor exposes lower rep targets');
@@ -311,8 +315,11 @@ const fs = require('node:fs');
       const nav = document.querySelector('#nav-list');
       const settings = document.querySelector('[data-view="settings"]');
       const r = settings.getBoundingClientRect();
-      return nav.scrollWidth <= nav.clientWidth && r.left >= 0 && r.right <= innerWidth;
+      return nav.scrollWidth <= nav.clientWidth && r.left >= 0 && r.right <= innerWidth &&
+        [...nav.querySelectorAll('.nav-btn')].every(button => button.scrollWidth <= button.clientWidth);
     }), true, 'all five primary tabs fit at 320px');
+    assert.equal(await touch.getByRole('button', {name:'Exercises', exact:true}).count(), 1,
+      'primary navigation uses the Exercises label');
     assert.equal(await touch.getByText('Tip: press').evaluate(el => getComputedStyle(el).display), 'none',
       'keyboard tip is hidden on touch');
     assert.equal(await touch.locator('.app-footer').evaluate(el => getComputedStyle(el).display), 'none',
