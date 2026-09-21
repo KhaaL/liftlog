@@ -2299,10 +2299,12 @@ function navigate(view){
 const exerciseById = id => state.exercises.find(e => e.id === id);
 const routineById  = id => state.routines.find(r => r.id === id);
 
-/* Workout exercise blocks are immutable snapshots: their names and IDs record
-   what was logged at the time. A link joins analytics without rewriting that
-   record, so it is reversible and the session detail remains historically
-   honest. Link targets are always live Library entries; chains cannot form. */
+/* Finished workout exercise blocks are immutable snapshots: their names and
+   IDs record what was logged at the time. An active workout starts from the
+   same shape, but exercise edits refresh its display metadata until it is
+   finished. A link joins analytics without rewriting finished records, so it
+   is reversible and session detail remains historically honest. Link targets
+   are always live Library entries; chains cannot form. */
 function exerciseLink(sourceId){
   if (exerciseById(sourceId)) return null;
   return (state.exerciseLinks || []).find(link => link.sourceId === sourceId) || null;
@@ -3699,18 +3701,46 @@ function saveNewExercise(form){
   toast(badUrl ? 'Exercise added — ' + name + ' (the link was not a valid web address)'
                : 'Exercise added — ' + name);
 }
+const exerciseMeasureKind = unit => unit === 'time' ? 'time' : unit === 'bw' ? 'bodyweight' : 'weighted';
+/* An active workout is not history yet. Keep its exercise identity metadata in
+   step with Exercises so a correction made mid-session is visible at once.
+   Changing between reps, bodyweight, and time would reinterpret fields that
+   may already contain work, so that unit change begins with the next workout;
+   kg/lb remain the same weighted measurement kind and are safe to refresh. */
+function syncExerciseDefinitionToActiveWorkout(previous, updated){
+  const w = state.activeWorkout;
+  if (!w) return { updated:0, unitDeferred:false };
+  const sameMeasure = exerciseMeasureKind(previous.unit) === exerciseMeasureKind(updated.unit);
+  let count = 0, unitDeferred = false;
+  w.exercises.forEach(ex => {
+    if (ex.exerciseId !== updated.id) return;
+    ex.name = updated.name;
+    ex.category = updated.category;
+    ex.notes = updated.notes;
+    if (sameMeasure) ex.unit = updated.unit;
+    else unitDeferred = true;
+    count++;
+  });
+  return { updated:count, unitDeferred };
+}
 function saveExerciseDraft(){
   const d = ui.exerciseDraft; if (!d) return;
   if (!d.name.trim()){ toast('Name is required'); return; }
   const i = state.exercises.findIndex(e => e.id === d.id);
   if (i === -1) return;
+  const previous = state.exercises[i];
   const url = safeUrl(d.url);
   const badUrl = !url && String(d.url || '').trim() !== '';
-  state.exercises[i] = { id:d.id, name:d.name.trim(), category:d.category.trim() || 'General',
-                         unit:d.unit, notes:d.notes.trim(), url };
+  const updated = { id:d.id, name:d.name.trim(), category:d.category.trim() || 'General',
+                    unit:d.unit, notes:d.notes.trim(), url };
+  state.exercises[i] = updated;
+  const activeSync = syncExerciseDefinitionToActiveWorkout(previous, updated);
   ui.exerciseDraft = null;
   save(); render();
-  toast(badUrl ? 'Exercise updated — the link was not a valid web address' : 'Exercise updated');
+  const notes = [];
+  if (badUrl) notes.push('the link was not a valid web address');
+  if (activeSync.unitDeferred) notes.push('the new unit starts next workout');
+  toast('Exercise updated' + (notes.length ? ' — ' + notes.join('; ') : ''));
 }
 function deleteExercise(id){
   const ex = exerciseById(id); if (!ex) return;

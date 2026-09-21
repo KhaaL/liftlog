@@ -342,6 +342,14 @@ state
 └─ activeWorkout   a workout in progress, or null
 ```
 
+Workout exercise blocks copy their exercise definition when a session starts.
+Finished blocks remain immutable history. While a workout is active,
+`saveExerciseDraft()` refreshes the matching block's name, category, notes, and
+compatible unit so corrections appear immediately. A change between weighted,
+bodyweight, and timed measurement is deferred until the next workout because
+reinterpreting existing set fields would corrupt work already entered. The
+how-to URL is always read from the current exercise definition.
+
 ### Durability
 
 The log lives under one `localStorage` key (`liftlog.v1`), rewritten in full by

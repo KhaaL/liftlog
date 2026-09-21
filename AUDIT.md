@@ -201,6 +201,11 @@ failure. See `tests/README.md` for commands.
   is no effort column. The description now matches Settings. Duration is
   documented as a number, matching the importer, which retains fractions.
 - Timed routine targets now read “Seconds” instead of “Reps”.
+- Editing an exercise previously updated only the exercise definition while an
+  active workout continued rendering its start-time snapshot. Name, category,
+  notes, and compatible unit changes now refresh matching blocks in the active
+  workout; finished History is unchanged. Measurement-kind changes begin with
+  the next workout to avoid reinterpreting entered reps, weights, or seconds.
 
 ## Either-of feature, progression targets, and history reconciliation
 

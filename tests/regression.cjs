@@ -9,7 +9,7 @@ const fs = require('node:fs');
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
     let html = fs.readFileSync('index.html', 'utf8');
-    html = html.replace('init();\n})();', `window.testAPI = { sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, validateBackup, importRoutines, importHistory, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, progressionStatus, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, startRoutine, toggleSet, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, render, get state(){return state}, get ui(){return ui} };\ninit();\n})();`);
+    html = html.replace('init();\n})();', `window.testAPI = { sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, validateBackup, importRoutines, importHistory, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, progressionStatus, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, render, get state(){return state}, get ui(){return ui} };\ninit();\n})();`);
     await page.route('http://liftlog.test/**', route => route.fulfill({ contentType:'text/html', body:html }));
     await page.goto('http://liftlog.test/');
     const result = await page.evaluate(async () => {
@@ -171,6 +171,26 @@ const fs = require('node:fs');
       'active workout shows the full double-progression prescription');
     assert.equal(await page.getByLabel('Set 1 RIR').count(), 1,
       'a target RIR exposes the logging field even when global effort tracking is off');
+    const activeEdit = await page.evaluate(() => {
+      const t = window.testAPI;
+      const def = t.state.exercises.find(ex => ex.id === 'ex-squat');
+      const past = t.state.workouts.find(w => w.exercises.some(ex => ex.exerciseId === def.id));
+      const pastBefore = past.exercises.find(ex => ex.exerciseId === def.id).name;
+      t.ui.exerciseDraft = {...def, name:'Back Squat Updated', category:'Strength', notes:'Updated during session'};
+      t.saveExerciseDraft();
+      const active = t.state.activeWorkout.exercises.find(ex => ex.exerciseId === def.id);
+      const pastAfter = past.exercises.find(ex => ex.exerciseId === def.id).name;
+      const result = {name:active.name, category:active.category, notes:active.notes, pastBefore, pastAfter};
+      t.ui.exerciseDraft = {...t.state.exercises.find(ex => ex.id === def.id),
+        name:def.name, category:def.category, notes:def.notes, unit:def.unit};
+      t.saveExerciseDraft();
+      return result;
+    });
+    assert.deepEqual(activeEdit, {name:'Back Squat Updated', category:'Strength', notes:'Updated during session',
+      pastBefore:'Back Squat', pastAfter:'Back Squat'},
+      'exercise edits refresh the ongoing workout without rewriting History');
+    assert.equal(await page.locator('#workout-title').innerText(), 'Back Squat',
+      'restoring an exercise edit also refreshes the ongoing workout immediately');
     await page.locator('#overview-toggle-btn').click();
     assert.equal(await page.evaluate(() => {
       const rows = [...document.querySelectorAll('#overview-dlg-body .overview-row')];
