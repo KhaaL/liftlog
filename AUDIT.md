@@ -199,9 +199,9 @@ failure. See `tests/README.md` for commands.
   documented as a number, matching the importer, which retains fractions.
 - Timed routine targets now read “Seconds” instead of “Reps”.
 
-## Either-of feature and sample JSON
+## Either-of feature, progression targets, and history reconciliation
 
-State version is **8**; transfer contract version is **1.5.0**. Exactly two
+State version is **9**; transfer contract version is **1.6.0**. Exactly two
 routine items with different exercise IDs share an optional `eitherOf` string.
 Invalid/incomplete groups become independent items. Each item keeps its own
 sets, lower/upper reps or seconds, optional target RIR, and weight. Pairing,
@@ -218,16 +218,28 @@ file-reader handlers in the browser. Export/reimport preserves pair keys.
 Legacy single-target routines migrate that value into equal lower and upper
 bounds. Unpaired routines otherwise require no field conversion.
 
+History now derives progress candidates from workout snapshots rather than
+requiring every historical ID to exist in the current Library. A reversible
+link table can join true renames to a current exercise while preserving the
+original workout record; reviewed variations can be kept separate or promoted
+to the Library. Routine imports preserve safe source IDs, so separately
+exported routines and history continue to line up. History import reports new,
+already-present, invalid, and conflicting workouts independently, and a
+duplicate-only import still offers exercise reconciliation.
+
 ## Verification
 
-`tests/regression.cjs` exercises generated sample imports and deduplication,
+`tests/regression.cjs` exercises generated sample imports and precise deduplication,
 export/reimport, migration/default handling, target normalization, invalid pair
 cleanup, pair summaries, duplication, unlinking, deletion and reordering.
+It also covers orphaned-history analytics, reversible linking, source-ID
+preservation, and the review UI.
 Browser interactions cover pairing through the editor at 390px width, completing
 either alternative, per-exercise targets, full-backup restore and reload. A
 touch-enabled 320px pass checks equal-width navigation, the compact History
-grid, accurate copy, and removal of keyboard-only material. The test checks
-page errors and horizontal overflow; editor/workout screenshots were inspected.
+grid, accurate copy, exercise reconciliation, and removal of keyboard-only
+material. The test checks page errors and horizontal overflow; editor/workout
+screenshots were inspected.
 Tests use an isolated profile and synthetic origin.
 
 Run with Node and Playwright installed: `node tests/regression.cjs`.

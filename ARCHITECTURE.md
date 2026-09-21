@@ -328,8 +328,10 @@ the end of the stylesheet:
 state
 ├─ version         schema version (SCHEMA_VERSION)
 ├─ settings        { theme, unit, defaultRest, autoRest, sound, vibrate, effortMetric,
-│                    lastFileBackupAt, seededAt }
+│                    lastFileBackupAt, seededAt, historyLinksDismissedKey }
 ├─ exercises[]     { id, name, category, unit, notes, url }   — the library
+├─ exerciseLinks[] { sourceId, targetId } — historical ID → current Library ID
+├─ historySeparateIds[] historical IDs explicitly kept as their own series
 ├─ routines[]      { id, name, items[] }                      — the plan
 │   └─ items[]     { id, exerciseId, sets, repsMin, repsMax, targetRir?, weight, eitherOf? }
 ├─ workouts[]      logged sessions, newest first              — the log
@@ -455,6 +457,8 @@ sequence for older data. Startup and file/remote restore all use it:
 - **v6 → v7** — introduces the optional `eitherOf` key; no conversion needed.
 - **v7 → v8** — replaces single `reps` / `targetReps` values with equal lower
   and upper bounds. New routines can then widen the range and add `targetRir`.
+- **v8 → v9** — adds reversible historical exercise links and explicit
+  keep-separate decisions. Existing history needs no conversion.
 
 Data that cannot be read — corrupt JSON, an unrecognized shape, or a *newer*
 schema version — is never overwritten in place. It is copied to
@@ -466,7 +470,7 @@ valid backup or clearing all data re-enables writes.
 
 ## Import / export
 
-Four flows, all plain JSON (`EXPORT_SCHEMA = '1.5.0'`). Every file names itself
+Four flows, all plain JSON (`EXPORT_SCHEMA = '1.6.0'`). Every file names itself
 with `app: 'liftlog'` and a `kind`:
 
 - **`backup`** — the entire `state`; importing replaces everything. Built by
@@ -480,10 +484,16 @@ with `app: 'liftlog'` and a `kind`:
   never carries bucket credentials.
 - **`routines`** — routines plus the exercise definitions they reference, so an
   import into another browser can rebuild missing library entries. Exercises are
-  resolved by id, then by name, then created. Duplicate names are skipped.
+  resolved by id, then by name, then created. Safe source exercise, routine, and
+  item IDs are preserved so a separately transferred history file still lines up.
+  Duplicate routine names are skipped.
 - **`history`** — workouts, with an explicit `setType` (`reps` / `time` / `hold` /
   `distance`) on every set so importers never guess at field semantics.
-  Deduplicated by workout id; first write wins.
+  Deduplicated by workout id; first write wins. Identical IDs are reported as
+  already present, malformed workouts as invalid, and different content under
+  an existing ID as a conflict. History files also carry relevant
+  `exerciseLinks` and `historySeparateIds`; links are restored only when their
+  current Library target exists.
 - **`remote-config`** — the remote-storage settings, optionally without the
   secret key. See [Remote storage](#remote-storage-optional).
 
@@ -1086,6 +1096,28 @@ The v7 to v8 migration maps the former `reps` and `targetReps` values to equal
 lower and upper bounds, preserving old prescriptions exactly. Routine and
 history importers continue to accept those legacy names. The downloadable
 samples and field reference use only the canonical v8 names.
+
+### Historical exercise reconciliation (state v9, transfer schema 1.6.0)
+
+Workout exercise blocks remain snapshots of what was logged. History derives a
+catalog from those snapshots, which means Progress and muscle-group analytics
+work even when an exercise ID is absent from the current Library. A saved
+`exerciseLinks` entry maps an old source ID to a current Library target for
+analytics; it never rewrites workout names or IDs. Removing the link restores
+the original independent series.
+
+History and Settings expose **Review exercise links**. Each historical identity
+can be linked manually, accepted as an unambiguous exact name-and-unit match,
+added to the Library under its original ID, or marked **Keep as separate
+history**. Bulk exact matching accepts only unique matches. Reviewed decisions
+can be shown and changed later. The banner can be dismissed for the current set
+of unresolved IDs; importing a genuinely new identity changes the signature and
+shows it again.
+
+A history import always leaves an inline result with separate counts for new,
+already-present, invalid, and conflicting workouts. This result and the review
+entry are shown even when every imported workout already exists, which is the
+recovery path for older imports that predate reconciliation.
 
 Browser regression coverage lives in `tests/regression.cjs`. With Node and
 Playwright available, run `node tests/regression.cjs`; optionally set

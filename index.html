@@ -894,6 +894,31 @@ html.is-reordering{ user-select:none; -webkit-user-select:none; }
 .transfer-actions{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--sp-2); }
 .transfer-actions > .btn,.transfer-actions > .file-btn,.transfer-actions .file-btn span{ width:100%; min-width:0; justify-content:center; }
 @media (max-width:600px){ .transfer-grid{ grid-template-columns:1fr; } }
+.import-summary,.history-link-banner{
+  padding:var(--sp-3) var(--sp-4); border:1px solid var(--accent); border-radius:var(--radius);
+  background:var(--accent-soft);
+}
+.import-summary-head,.history-links-head,.history-links-toolbar{
+  display:flex; align-items:center; justify-content:space-between; gap:var(--sp-3); flex-wrap:wrap;
+}
+.import-summary-actions{ display:flex; gap:var(--sp-2); flex-wrap:wrap; margin-top:var(--sp-2); }
+.history-links-panel{ padding:var(--sp-4); }
+.history-links-toolbar{ margin:var(--sp-3) 0; align-items:end; }
+.history-links-toolbar .field{ flex:1; min-width:180px; }
+.history-link-list{ border-top:1px solid var(--border); }
+.history-link-row{
+  display:grid; grid-template-columns:minmax(170px,1.3fr) minmax(190px,1fr); gap:var(--sp-3);
+  padding:var(--sp-3) 0; border-bottom:1px solid var(--border); align-items:end;
+}
+.history-link-name{ font-weight:650; }
+.history-link-meta{ color:var(--muted); font-size:var(--fs-xs); margin-top:2px; }
+.history-link-controls{ display:flex; gap:var(--sp-2); align-items:end; flex-wrap:wrap; }
+.history-link-controls .field{ flex:1; min-width:170px; }
+.history-link-suggestion{ color:var(--accent); font-size:var(--fs-xs); margin-top:4px; }
+@media (max-width:600px){
+  .history-link-row{ grid-template-columns:1fr; }
+  .history-link-controls .field{ min-width:100%; }
+}
 .rest-field{ max-width:220px; }
 .radio-row{ display:flex; gap:var(--sp-2); flex-wrap:wrap; }
 .radio-pill{ position:relative; }
@@ -1614,17 +1639,19 @@ const SHORTCUTS = [
    ============================================================ */
 const LS_KEY = 'liftlog.v1';
 const LS_RESCUE_KEY = 'liftlog.v1.unreadable';  /* holds data we could not load, so nothing is lost silently */
-const SCHEMA_VERSION = 8;   /* v3: sets carry durationSeconds (time no longer overloads reps)
+const SCHEMA_VERSION = 9;   /* v3: sets carry durationSeconds (time no longer overloads reps)
                                + countForVolume / countForPR split execution from analytics
                                v4: settings carry effortMetric ('none'|'rpe'|'rir'), sets carry rir
                                v5: library exercises carry url (how to perform the movement)
                                v6: rest is settings.defaultRest alone — items[].rest and
                                    exercises[].restSeconds are gone
                                v7: routine items can share an eitherOf pair key
-                               v8: routine/workout targets carry a rep range and optional target RIR */
-const EXPORT_SCHEMA = '1.5.0'; /* version of the documented import/export contract — 1.1: sets[].rir;
+                               v8: routine/workout targets carry a rep range and optional target RIR
+                               v9: exerciseLinks connect historical IDs to current Library exercises */
+const EXPORT_SCHEMA = '1.6.0'; /* version of the documented import/export contract — 1.1: sets[].rir;
                                   1.2: exercises[].url; 1.3: per-item rest dropped; 1.4: items[].eitherOf;
-                                  1.5: lower/upper rep targets and optional target RIR */
+                                  1.5: lower/upper rep targets and optional target RIR;
+                                  1.6: reversible historical exercise links */
 
 /* Set by load() when stored data could not be used, surfaced once after init. */
 let loadWarning = '';
@@ -1837,9 +1864,11 @@ function validateBackup(s){
   if (s.app != null && s.app !== 'liftlog') fail('app', 'liftlog');
   if (s.kind != null && s.kind !== 'backup') fail('kind', 'backup');
   ['exercises', 'routines', 'workouts'].forEach(key => array(s[key], key));
+  if (s.exerciseLinks != null) array(s.exerciseLinks, 'exerciseLinks');
+  if (s.historySeparateIds != null) array(s.historySeparateIds, 'historySeparateIds');
   if (s.settings != null){
     object(s.settings, 'settings');
-    fields(s.settings, 'settings', ['theme', 'unit', 'effortMetric'], text);
+    fields(s.settings, 'settings', ['theme', 'unit', 'effortMetric', 'historyLinksDismissedKey'], text);
     fields(s.settings, 'settings', ['defaultRest', 'lastFileBackupAt', 'seededAt'], number);
     fields(s.settings, 'settings', ['autoRest', 'sound', 'vibrate'], bool);
   }
@@ -1848,6 +1877,20 @@ function validateBackup(s){
     const path = 'exercises[' + i + ']'; object(e, path);
     id(e.id, path + '.id', exercises); text(e.name, path + '.name', true);
     fields(e, path, ['category', 'unit', 'notes', 'url'], text);
+  });
+  const linkSources = new Set();
+  (s.exerciseLinks || []).forEach((link, i) => {
+    const path = 'exerciseLinks[' + i + ']'; object(link, path);
+    id(link.sourceId, path + '.sourceId'); id(link.targetId, path + '.targetId');
+    if (link.sourceId === link.targetId) fail(path, 'different source and target IDs');
+    if (linkSources.has(link.sourceId)) fail(path + '.sourceId', 'a unique source ID');
+    linkSources.add(link.sourceId);
+  });
+  const separateIds = new Set();
+  (s.historySeparateIds || []).forEach((value, i) => {
+    id(value, 'historySeparateIds[' + i + ']');
+    if (separateIds.has(value)) fail('historySeparateIds[' + i + ']', 'a unique ID');
+    separateIds.add(value);
   });
   s.routines.forEach((r, i) => {
     const path = 'routines[' + i + ']'; object(r, path);
@@ -1914,6 +1957,7 @@ function migrateState(s){
   if (s.version === 5) migrateToV6(s);
   if (s.version === 6) s.version = 7; // optional eitherOf: old routines need no conversion
   if (s.version === 7) migrateToV8(s);
+  if (s.version === 8) migrateToV9(s);
   return s;
 }
 /* v1 shipped an earlier seed library/routines. v2 refreshes both to the
@@ -1999,6 +2043,11 @@ function migrateToV8(s){
   convert(s.activeWorkout);
   s.version = 8;
 }
+function migrateToV9(s){
+  s.exerciseLinks = [];
+  s.historySeparateIds = [];
+  s.version = 9;
+}
 /* Anything reachable from disk or an import file gets clamped to a known value
    here, so the render layer never has to defend against stray strings. */
 function normalizeState(s){
@@ -2013,6 +2062,7 @@ function normalizeState(s){
   set.effortMetric = EFFORT_METRICS.includes(set.effortMetric) ? set.effortMetric : d.effortMetric;
   set.lastFileBackupAt = toNum(set.lastFileBackupAt);
   set.seededAt = toNum(set.seededAt);
+  set.historyLinksDismissedKey = typeof set.historyLinksDismissedKey === 'string' ? set.historyLinksDismissedKey : '';
   s.settings = set;
   s.exercises = (s.exercises || []).map(e => ({ ...e,
     category: typeof e.category === 'string' ? e.category : '',
@@ -2020,6 +2070,19 @@ function normalizeState(s){
     notes: typeof e.notes === 'string' ? e.notes : '',
     url: safeUrl(e.url)
   }));
+  const libraryIds = new Set(s.exercises.map(e => e.id));
+  const seenLinks = new Set();
+  s.exerciseLinks = (Array.isArray(s.exerciseLinks) ? s.exerciseLinks : []).filter(link => {
+    if (!link || !validId(link.sourceId) || !validId(link.targetId) ||
+        link.sourceId === link.targetId || libraryIds.has(link.sourceId) ||
+        !libraryIds.has(link.targetId) || seenLinks.has(link.sourceId)) return false;
+    seenLinks.add(link.sourceId); return true;
+  }).map(link => ({ sourceId:String(link.sourceId), targetId:String(link.targetId) }));
+  const separateSeen = new Set();
+  s.historySeparateIds = (Array.isArray(s.historySeparateIds) ? s.historySeparateIds : []).filter(id => {
+    if (!validId(id) || libraryIds.has(id) || seenLinks.has(id) || separateSeen.has(id)) return false;
+    separateSeen.add(id); return true;
+  }).map(String);
   s.routines  = s.routines || [];
   s.routines.forEach(r => { r.items.forEach(normalizeRoutineItem); cleanRoutinePairs(r.items); keepRoutinePairsAdjacent(r.items); });
   s.workouts  = s.workouts || [];
@@ -2049,7 +2112,7 @@ function normalizeState(s){
 const EFFORT_METRICS = ['none', 'rpe', 'rir'];
 function defaultSettings(){
   return { theme:'system', unit:'kg', defaultRest:90, autoRest:true, sound:true, vibrate:true, effortMetric:'none',
-           lastFileBackupAt:null, seededAt:null };
+           lastFileBackupAt:null, seededAt:null, historyLinksDismissedKey:'' };
 }
 /* History is kept newest-first everywhere; every mutation that can change a
    start time re-establishes that instead of sorting again at each read. */
@@ -2169,7 +2232,8 @@ function seedState(){
   /* When this install was created. The sample sessions below it are demo data,
      not something the user would miss, so the backup reminder ignores them. */
   const settings = Object.assign(defaultSettings(), { seededAt:Date.now() });
-  return { version:SCHEMA_VERSION, settings, exercises:exs, routines, workouts, activeWorkout:null };
+  return { version:SCHEMA_VERSION, settings, exercises:exs, routines, workouts,
+    exerciseLinks:[], historySeparateIds:[], activeWorkout:null };
 }
 
 /* ============================================================
@@ -2196,6 +2260,10 @@ function freshUI(){
     trendExId:null,
     trendMode:'exercise',       /* Progress panel: 'exercise' or 'muscle' */
     trendMuscle:null,           /* selected muscle group in 'muscle' mode */
+    historyLinksOpen:false,     /* reconciliation panel in History */
+    historyLinksShowAll:false,  /* unresolved-only is the useful default */
+    historyLinkFilter:'',
+    importSummary:null,         /* last history import result; survives navigation until dismissed */
     editWorkoutId:null,         /* history session currently being edited */
     focus:null,                 /* element id to focus after render */
     remoteFormOpen:false,       /* remote-storage config form expanded in Settings */
@@ -2222,6 +2290,7 @@ function navigate(view){
     ui.routineDraft = null; ui.routineError = '';
     ui.exerciseDraft = null; ui.showExerciseForm = false; ui.exerciseFormError = '';
     ui.editWorkoutId = null;
+    if (view !== 'history') ui.historyLinksOpen = false;
     ui.view = view;
   }
   render();
@@ -2229,6 +2298,97 @@ function navigate(view){
 
 const exerciseById = id => state.exercises.find(e => e.id === id);
 const routineById  = id => state.routines.find(r => r.id === id);
+
+/* Workout exercise blocks are immutable snapshots: their names and IDs record
+   what was logged at the time. A link joins analytics without rewriting that
+   record, so it is reversible and the session detail remains historically
+   honest. Link targets are always live Library entries; chains cannot form. */
+function exerciseLink(sourceId){
+  if (exerciseById(sourceId)) return null;
+  return (state.exerciseLinks || []).find(link => link.sourceId === sourceId) || null;
+}
+function canonicalExerciseId(id){
+  if (exerciseById(id)) return id;
+  const link = exerciseLink(id);
+  return link && exerciseById(link.targetId) ? link.targetId : id;
+}
+function historyExerciseIdentities(){
+  const map = new Map();
+  sortedWorkouts().forEach(w => (w.exercises || []).forEach(block => {
+    const id = block.exerciseId;
+    if (!validId(id)) return;
+    let x = map.get(id);
+    if (!x){
+      x = { id, name:block.name || 'Unknown exercise', category:block.category || '',
+        unit:isUnit(block.unit) ? block.unit : 'kg', sessions:0, sets:0,
+        first:w.startedAt, last:w.startedAt, latest:block };
+      map.set(id, x);
+    }
+    if ((block.sets || []).some(s => s.completed)) x.sessions++;
+    x.sets += (block.sets || []).filter(s => s.completed).length;
+    x.first = Math.min(x.first, w.startedAt); x.last = Math.max(x.last, w.startedAt);
+    if (w.startedAt >= x.last){
+      x.name = block.name || x.name; x.category = block.category || x.category;
+      x.unit = isUnit(block.unit) ? block.unit : x.unit; x.latest = block;
+    }
+  }));
+  return [...map.values()].sort((a,b) => b.last - a.last || a.name.localeCompare(b.name));
+}
+function historyExerciseById(id){
+  const live = exerciseById(id);
+  if (live) return live;
+  const identity = historyExerciseIdentities().find(x => canonicalExerciseId(x.id) === id);
+  return identity ? { id, name:identity.name, category:identity.category, unit:identity.unit,
+    notes:'', url:'', historical:true } : null;
+}
+const normalizedExerciseName = name => String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+function suggestedExercise(identity){
+  const matches = state.exercises.filter(ex => normalizedExerciseName(ex.name) === normalizedExerciseName(identity.name) && ex.unit === identity.unit);
+  return matches.length === 1 ? matches[0] : null;
+}
+function unresolvedHistoryExercises(){
+  const separate = new Set(state.historySeparateIds || []);
+  return historyExerciseIdentities().filter(x => !exerciseById(x.id) && !exerciseLink(x.id) && !separate.has(x.id));
+}
+function unresolvedHistorySignature(){
+  const text = unresolvedHistoryExercises().map(x => x.id).sort().join('|');
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i++){ hash ^= text.charCodeAt(i); hash = Math.imul(hash, 16777619); }
+  return text ? (hash >>> 0).toString(36) + ':' + unresolvedHistoryExercises().length : '';
+}
+function setExerciseLink(sourceId, targetId){
+  if (!validId(sourceId) || !exerciseById(targetId) || sourceId === targetId || exerciseById(sourceId) ||
+      !historyExerciseIdentities().some(x => x.id === sourceId)) return false;
+  const existing = exerciseLink(sourceId);
+  if (existing && existing.targetId === targetId) return false;
+  state.exerciseLinks = (state.exerciseLinks || []).filter(link => link.sourceId !== sourceId);
+  state.exerciseLinks.push({ sourceId, targetId });
+  state.historySeparateIds = (state.historySeparateIds || []).filter(id => id !== sourceId);
+  state.settings.historyLinksDismissedKey = '';
+  return true;
+}
+function unlinkExerciseHistory(sourceId){
+  const before = (state.exerciseLinks || []).length;
+  state.exerciseLinks = (state.exerciseLinks || []).filter(link => link.sourceId !== sourceId);
+  return state.exerciseLinks.length !== before;
+}
+function keepHistoricalExerciseSeparate(sourceId){
+  if (!validId(sourceId) || exerciseById(sourceId) || !historyExerciseIdentities().some(x => x.id === sourceId)) return false;
+  unlinkExerciseHistory(sourceId);
+  if (!(state.historySeparateIds || []).includes(sourceId)) state.historySeparateIds.push(sourceId);
+  state.settings.historyLinksDismissedKey = '';
+  return true;
+}
+function addHistoricalExerciseToLibrary(sourceId){
+  if (exerciseById(sourceId)) return false;
+  const x = historyExerciseIdentities().find(item => item.id === sourceId);
+  if (!x) return false;
+  state.exercises.push({ id:x.id, name:x.name, category:x.category || 'General', unit:x.unit, notes:'', url:'' });
+  unlinkExerciseHistory(sourceId);
+  state.historySeparateIds = (state.historySeparateIds || []).filter(id => id !== sourceId);
+  state.settings.historyLinksDismissedKey = '';
+  return true;
+}
 
 function currentTheme(){
   return THEMES.some(x => x.id === state.settings.theme) ? state.settings.theme : 'system';
@@ -2797,7 +2957,7 @@ function exerciseStats(exId){
   const out = { last:null, e1rm:0, duration:0, reps:0, volume:0 };
   for (const w of sortedWorkouts()){
     for (const ex of w.exercises){
-      if (ex.exerciseId !== exId) continue;
+      if (canonicalExerciseId(ex.exerciseId) !== exId) continue;
       const completed = ex.sets.filter(s => s.completed);
       if (!out.last && completed.length) out.last = { date:w.startedAt, sets:completed };
       out.volume = Math.max(out.volume, sumVolume(ex.sets));
@@ -3560,6 +3720,8 @@ function deleteExercise(id){
     .then(ok => {
       if (!ok) return;
       state.exercises = state.exercises.filter(e => e.id !== id);
+      state.exerciseLinks = (state.exerciseLinks || []).filter(link => link.targetId !== id);
+      state.settings.historyLinksDismissedKey = '';
       if (ui.exerciseDraft && ui.exerciseDraft.id === id) ui.exerciseDraft = null;
       save(); render(); toast('Exercise deleted');
     });
@@ -3990,19 +4152,27 @@ function importRoutines(file){
     list.forEach(r => {
       if (!r || typeof r.name !== 'string' || !r.name.trim() || !Array.isArray(r.items) ||
           state.routines.some(x => x.name.trim().toLowerCase() === String(r.name).trim().toLowerCase())){ skippedR++; return; }
+      const itemIds = new Set();
       const items = r.items.map(it => {
         if (!it) return null;
-        /* resolve the target exercise: by id first, then by name; add it if unknown */
-        let local = it.exerciseId ? state.exercises.find(e => e.id === it.exerciseId) : null;
+        /* Preserve source IDs when safe so separately transferred history keeps
+           its relationship to the Library. An ID collision with a different
+           definition falls back to name, then to a fresh local ID. */
         const src = exIn.find(e => e.id === it.exerciseId);
+        let local = it.exerciseId ? state.exercises.find(e => e.id === it.exerciseId) : null;
+        if (local && src && (normalizedExerciseName(local.name) !== normalizedExerciseName(src.name) ||
+            local.unit !== (isUnit(src.unit) ? src.unit : 'kg'))) local = null;
         if (!local && src) local = byName(src.name);
         if (!local && src){
-          state.exercises.push({ id:uid(), name:String(src.name), category:String(src.category || 'General'),
+          const sourceId = validId(src.id) && !state.exercises.some(e => e.id === src.id) ? src.id : uid();
+          state.exercises.push({ id:sourceId, name:String(src.name), category:String(src.category || 'General'),
             unit:isUnit(src.unit) ? src.unit : 'kg', notes:String(src.notes || ''), url:safeUrl(src.url) });
           local = state.exercises[state.exercises.length - 1]; addedEx++;
         }
         if (!local) return null;
-        return normalizeRoutineItem({ id:uid(), exerciseId:local.id,
+        const sourceItemId = validId(it.id) && !itemIds.has(it.id) ? it.id : uid();
+        itemIds.add(sourceItemId);
+        return normalizeRoutineItem({ id:sourceItemId, exerciseId:local.id,
           sets:it.sets == null ? 3 : it.sets,
           repsMin:it.repsMin == null ? (it.reps == null ? 8 : it.reps) : it.repsMin,
           repsMax:it.repsMax == null ? (it.reps == null ? (it.repsMin == null ? 8 : it.repsMin) : it.reps) : it.repsMax,
@@ -4011,9 +4181,15 @@ function importRoutines(file){
       cleanRoutinePairs(items);
       keepRoutinePairsAdjacent(items);
       if (!items.length){ skippedR++; return; }
-      state.routines.push({ id:uid(), name:String(r.name).trim(), items });
+      const routineId = validId(r.id) && !state.routines.some(x => x.id === r.id) ? r.id : uid();
+      state.routines.push({ id:routineId, name:String(r.name).trim(), items });
       addedR++;
     });
+    /* A routine import may promote an ID that was previously known only from
+       history. It is now its own live Library identity, so any older review
+       decision for that source is obsolete. */
+    state.exerciseLinks = (state.exerciseLinks || []).filter(link => !exerciseById(link.sourceId));
+    state.historySeparateIds = (state.historySeparateIds || []).filter(id => !exerciseById(id));
     save(); render();
     toast('Imported ' + plural(addedR, 'routine') +
       (skippedR ? ' · skipped ' + skippedR + ' duplicate or invalid' : '') +
@@ -4111,10 +4287,11 @@ function schemaHelpHTML(){
 
     '<h3 class="sh-h">History file</h3>' +
     '<p class="desc">Workouts are deduplicated by <code>id</code> \u2014 first write wins, so re-importing the same ' +
-      'file changes nothing. A workout needs an <code>id</code> and a <code>startedAt</code>; without either it is skipped.</p>' +
+      'file adds no second copy. A workout needs an <code>id</code> and a <code>startedAt</code>; without either it is invalid. ' +
+      'Historical exercise IDs that no longer exist in the Library remain visible in Progress and can be linked later.</p>' +
     rows([
       ['workouts[]', 'required', 'The list. A bare top-level array is accepted too.'],
-      ['workouts[].id', 'string, required', 'The dedupe key. Reused ids are skipped, not merged.'],
+      ['workouts[].id', 'string, required', 'The dedupe key. An identical reused id is reported as already present; different content with the same id is a conflict, and the local copy is kept.'],
       ['workouts[].startedAt', 'epoch ms | date string', 'Anything <code>Date.parse</code> understands. Required.'],
       ['workouts[].finishedAt', 'same | null', 'Pulled up to <code>startedAt</code> if it would be earlier.'],
       ['workouts[].exercises[]', 'required', 'Per-exercise blocks, each with its own <code>sets[]</code>.'],
@@ -4130,7 +4307,9 @@ function schemaHelpHTML(){
       ['sets[].rpe', 'number', 'Rate of perceived exertion, the older of the two. Clamped to 1\u201310. Both are read; both are kept.'],
       ['sets[].completed', 'boolean', 'Whether the set was performed.'],
       ['sets[].countForVolume', 'boolean', 'Default true. <code>false</code> marks a warm-up: performed, but out of the totals. <code>includeInVolume</code> is accepted as an alias.'],
-      ['sets[].countForPR', 'boolean', 'Default true. <code>false</code> keeps a set out of records.']
+      ['sets[].countForPR', 'boolean', 'Default true. <code>false</code> keeps a set out of records.'],
+      ['exerciseLinks[]', 'optional', 'Reversible analytics links from a historical <code>sourceId</code> to a current Library <code>targetId</code>. Imported only when the target exists locally. Workout records are never rewritten.'],
+      ['historySeparateIds[]', 'optional', 'Historical exercise IDs explicitly reviewed and intentionally kept as their own progression series.']
     ]) +
     code(sampleHistoryFile()) +
 
@@ -4160,20 +4339,23 @@ function downloadSample(kind){
 /* Sets go out with an explicit setType so importers never guess at field
    semantics. Shared with the sample file and the help example — see
    routinesPayload() for why. */
-function historyPayload(sourceWorkouts){
+function historyPayload(sourceWorkouts, sourceLinks, separateIds){
   const setTypeOf = s => s.distance != null ? 'distance'
     : (s.unit === 'time' || s.durationSeconds != null) ? 'time' : 'reps';
   const workouts = deepCopy(sourceWorkouts);
   workouts.forEach(w => w.exercises.forEach(ex => (ex.sets || []).forEach(s => { s.setType = setTypeOf(s); })));
+  const ids = new Set(workouts.flatMap(w => w.exercises.map(ex => ex.exerciseId)).filter(Boolean));
+  const exerciseLinks = (sourceLinks || []).filter(link => ids.has(link.sourceId)).map(link => ({ ...link }));
+  const historySeparateIds = (separateIds || []).filter(id => ids.has(id));
   return {
     app:'liftlog', kind:'history', schemaVersion:EXPORT_SCHEMA, source:'liftlog-web',
     version:SCHEMA_VERSION, exportedAt:new Date().toISOString(),
-    workouts
+    workouts, exerciseLinks, historySeparateIds
   };
 }
 function exportHistory(){
   if (!state.workouts.length){ toast('No workout history to export'); return; }
-  downloadJSON(historyPayload(state.workouts), dateStamp('liftlog-history'));
+  downloadJSON(historyPayload(state.workouts, state.exerciseLinks, state.historySeparateIds), dateStamp('liftlog-history'));
   toast('History exported');
 }
 /* ---- import normalization (schema 1.0.0 contract) ----
@@ -4253,18 +4435,36 @@ function importHistory(file){
     if (!obj) return;
     const list = Array.isArray(obj) ? obj : obj.workouts;
     if (!Array.isArray(list) || !list.length){ toast('No workout history found in that file'); return; }
-    const have = new Set(state.workouts.map(w => w.id));
-    if (state.activeWorkout) have.add(state.activeWorkout.id);
-    let added = 0, skipped = 0;
+    const existing = new Map(state.workouts.map(w => [w.id, w]));
+    if (state.activeWorkout) existing.set(state.activeWorkout.id, state.activeWorkout);
+    let added = 0, already = 0, invalid = 0, conflicts = 0;
     list.forEach(raw => {
       const w = (raw && raw.id && raw.startedAt) ? normalizeImportedWorkout(raw) : null;
-      if (!w || have.has(w.id)){ skipped++; return; }   /* dedupe by workout id: first write wins */
-      state.workouts.push(w); have.add(w.id); added++;
+      if (!w){ invalid++; return; }
+      const current = existing.get(w.id);
+      if (current){
+        const comparable = normalizeImportedWorkout(current);
+        if (comparable && JSON.stringify(comparable) === JSON.stringify(w)) already++;
+        else conflicts++;
+        return; /* first write wins; reconciliation never mutates a workout */
+      }
+      state.workouts.push(w); existing.set(w.id, w); added++;
+    });
+    let importedLinks = 0;
+    (Array.isArray(obj.exerciseLinks) ? obj.exerciseLinks : []).forEach(link => {
+      if (!link || !validId(link.sourceId) || !exerciseById(link.targetId) ||
+          exerciseById(link.sourceId) || link.sourceId === link.targetId) return;
+      if (setExerciseLink(link.sourceId, link.targetId)) importedLinks++;
+    });
+    (Array.isArray(obj.historySeparateIds) ? obj.historySeparateIds : []).forEach(id => {
+      if (validId(id) && !exerciseById(id) && !exerciseLink(id) && historyExerciseIdentities().some(x => x.id === id) &&
+          !state.historySeparateIds.includes(id)) state.historySeparateIds.push(id);
     });
     sortWorkouts();
+    ui.importSummary = { added, already, invalid, conflicts, importedLinks };
     save(); render();
-    toast('Imported ' + plural(added, 'workout') +
-      (skipped ? ' · skipped ' + skipped + ' duplicate or invalid' : ''));
+    toast('History import: ' + added + ' new · ' + already + ' already present' +
+      (invalid ? ' · ' + invalid + ' invalid' : '') + (conflicts ? ' · ' + conflicts + ' conflicts' : ''));
   });
 }
 
@@ -4276,7 +4476,8 @@ function clearAllData(){
     ]}).then(ok => {
     if (!ok) return;
     storageRecoveryBlocked = false;
-    state = { version:SCHEMA_VERSION, settings:defaultSettings(), exercises:[], routines:[], workouts:[], activeWorkout:null };
+    state = { version:SCHEMA_VERSION, settings:defaultSettings(), exercises:[], routines:[], workouts:[],
+      exerciseLinks:[], historySeparateIds:[], activeWorkout:null };
     applyTheme(); save(); loadTimer(state.settings.defaultRest);
     resetUI();
     render(); toast('All data cleared');
@@ -4380,12 +4581,16 @@ function normalizeSelections(){
   const trendable = trendCandidates();
   if (trendable.length && !trendable.some(e => e.id === ui.trendExId))
     ui.trendExId = trendable[0].id;
+  if (!trendable.length) ui.trendExId = null;
   const groups = muscleCandidates();
   if (groups.length && groups.indexOf(ui.trendMuscle) === -1) ui.trendMuscle = groups[0];
 }
 function trendCandidates(){
-  return state.exercises.filter(e =>
-    state.workouts.some(w => w.exercises.some(x => x.exerciseId === e.id && x.sets.some(s => s.completed))));
+  const ids = new Set();
+  state.workouts.forEach(w => w.exercises.forEach(block => {
+    if (block.exerciseId && block.sets.some(s => s.completed)) ids.add(canonicalExerciseId(block.exerciseId));
+  }));
+  return [...ids].map(historyExerciseById).filter(Boolean).sort((a,b) => a.name.localeCompare(b.name));
 }
 function applyFocus(){
   if (!ui.focus) return;
@@ -4970,12 +5175,87 @@ const editingWorkout = () => state.workouts.find(w => w.id === ui.editWorkoutId)
 function findHEx(d){ const w = editingWorkout(); return w ? (w.exercises[Number(d.idx)] || null) : null; }
 function findHSet(d){ const ex = findHEx(d); return ex ? (ex.sets.find(s => s.id === d.sid) || null) : null; }
 
+function historyImportSummaryHTML(){
+  const s = ui.importSummary;
+  if (!s) return '';
+  const unresolved = unresolvedHistoryExercises().length;
+  return '<div class="import-summary mt-4" role="status" aria-label="History import result">' +
+    '<div class="import-summary-head"><strong>History import complete</strong>' +
+      '<button type="button" class="btn btn-sm" data-action="history-import-dismiss">Dismiss</button></div>' +
+    '<p class="small mt-2">' + plural(s.added, 'new workout') + ' · ' + s.already + ' already present · ' +
+      s.invalid + ' invalid · ' + s.conflicts + ' conflict' + (s.conflicts === 1 ? '' : 's') +
+      (s.importedLinks ? ' · ' + plural(s.importedLinks, 'exercise link') + ' restored' : '') + '.</p>' +
+    (s.conflicts ? '<p class="hint mt-2">Existing copies were kept. No local workout was overwritten.</p>' : '') +
+    (unresolved ? '<p class="hint mt-2">' + plural(unresolved, 'historical exercise') + ' still need a linking decision for continuity with the current Library.</p>' : '') +
+    '<div class="import-summary-actions">' +
+      (unresolved ? '<button type="button" class="btn btn-primary" data-action="history-links-open">Review exercise links</button>' : '') +
+      '<button type="button" class="btn" data-action="history-import-dismiss">Done</button>' +
+    '</div></div>';
+}
+function historyLinksBannerHTML(){
+  const unresolved = unresolvedHistoryExercises();
+  const signature = unresolvedHistorySignature();
+  if (!unresolved.length || ui.importSummary || ui.historyLinksOpen || state.settings.historyLinksDismissedKey === signature) return '';
+  return '<div class="history-link-banner mt-4">' +
+    '<strong>' + plural(unresolved.length, 'historical exercise') + ' can be reconciled</strong>' +
+    '<p class="small mt-2">Their history is visible now. Link true renames to continue one progression series; keep different machines or variations separate.</p>' +
+    '<div class="import-summary-actions"><button type="button" class="btn btn-primary" data-action="history-links-open">Review links</button>' +
+      '<button type="button" class="btn" data-action="history-links-dismiss">Not now</button></div></div>';
+}
+function historyLinksPanel(){
+  const identities = historyExerciseIdentities().filter(x => !exerciseById(x.id));
+  const separate = new Set(state.historySeparateIds || []);
+  const filter = normalizedExerciseName(ui.historyLinkFilter);
+  let shown = identities.filter(x => ui.historyLinksShowAll || (!exerciseLink(x.id) && !separate.has(x.id)));
+  if (filter) shown = shown.filter(x => normalizedExerciseName(x.name + ' ' + x.category).includes(filter));
+  const library = state.exercises.slice().sort((a,b) => a.name.localeCompare(b.name));
+  const row = x => {
+    const link = exerciseLink(x.id), target = link && exerciseById(link.targetId);
+    const suggestion = !link && !separate.has(x.id) ? suggestedExercise(x) : null;
+    const status = target ? 'Linked to ' + target.name : separate.has(x.id) ? 'Kept as separate history' : 'Needs review';
+    const options = '<option value="">Choose a Library exercise…</option>' +
+      '<option value="__separate"' + (separate.has(x.id) ? ' selected' : '') + '>Keep as separate history</option>' +
+      library.map(ex => '<option value="' + esc(ex.id) + '"' + (target && target.id === ex.id ? ' selected' : '') + '>' +
+        esc(ex.name) + ' · ' + esc(ex.unit) + '</option>').join('');
+    return '<div class="history-link-row">' +
+      '<div><div class="history-link-name">' + esc(x.name) + '</div>' +
+        '<div class="history-link-meta">' + esc(x.unit) + (x.category ? ' · ' + esc(x.category) : '') + ' · ' +
+          plural(x.sessions, 'session') + ' · ' + plural(x.sets, 'completed set') + '<br>' +
+          fmtDate(x.first) + ' → ' + fmtDate(x.last) + ' · ' + esc(status) + '</div>' +
+        (suggestion ? '<div class="history-link-suggestion">Exact name and unit match: ' + esc(suggestion.name) + '</div>' : '') +
+      '</div>' +
+      '<div class="history-link-controls"><label class="field"><span class="cap">History belongs to</span>' +
+        '<select data-change="history-link" data-source="' + esc(x.id) + '">' + options + '</select></label>' +
+        (suggestion ? '<button type="button" class="btn btn-sm" data-action="history-link-suggest" data-source="' + esc(x.id) + '" data-target="' + esc(suggestion.id) + '">Use exact match</button>' : '') +
+        '<button type="button" class="btn btn-sm" data-action="history-link-add" data-source="' + esc(x.id) + '">Add to Library</button>' +
+      '</div></div>';
+  };
+  const linkedCount = identities.filter(x => exerciseLink(x.id)).length;
+  const separateCount = identities.filter(x => separate.has(x.id)).length;
+  const unresolvedCount = identities.length - linkedCount - separateCount;
+  return '<section class="panel history-links-panel mt-4" id="history-links" tabindex="-1" aria-label="Exercise history links">' +
+    '<div class="history-links-head"><div><h2 class="panel-title">Exercise history links</h2>' +
+      '<p class="muted small">Links combine analytics only. Original workout names and IDs stay unchanged.</p>' +
+      '<p class="history-link-meta">' + unresolvedCount + ' unresolved · ' + linkedCount + ' linked · ' + separateCount + ' kept separate</p></div>' +
+      '<button type="button" class="btn" data-action="history-links-close">Close</button></div>' +
+    '<div class="history-links-toolbar"><label class="field"><span class="cap">Filter historical exercises</span>' +
+      '<input type="search" id="history-link-filter" data-bind="history-link-filter" value="' + esc(ui.historyLinkFilter) + '" placeholder="Name or category"></label>' +
+      '<button type="button" class="btn" data-action="history-links-exact">Accept exact matches</button>' +
+      '<button type="button" class="btn" data-action="history-links-toggle">' + (ui.historyLinksShowAll ? 'Show unresolved only' : 'Show reviewed') + '</button></div>' +
+    '<div class="history-link-list">' + (shown.length ? shown.map(row).join('') : '<p class="muted small empty-line">No historical exercises match this view.</p>') + '</div>' +
+  '</section>';
+}
+function openHistoryLinks(){
+  ui.view = 'history'; ui.historyLinksOpen = true; ui.historyLinksShowAll = false;
+  ui.importSummary = null; ui.focus = 'history-links'; render();
+}
+
 function viewHistory(){
   const head = '<div class="view-head"><div><h1>History</h1>' +
     '<p class="view-sub">' + plural(state.workouts.length, 'logged workout') + '</p></div></div>';
   const ws = sortedWorkouts();
   if (!ws.length){
-    return head + '<div class="empty"><h3>No workouts logged yet</h3><p>Finish a session and it will show up here with volume, duration and trends.</p>' +
+    return head + historyImportSummaryHTML() + '<div class="empty"><h3>No workouts logged yet</h3><p>Finish a session and it will show up here with volume, duration and trends.</p>' +
       '<div class="form-actions"><button type="button" class="btn btn-primary" data-action="nav" data-view="today">Go to Today</button></div></div>';
   }
 
@@ -4985,7 +5265,8 @@ function viewHistory(){
   const last30 = ws.filter(w => now - w.startedAt < 30*86400000);
   const vol30  = last30.reduce((a,w) => a + workoutVolume(w), 0);
   const time30 = last30.reduce((a,w) => { const d = workoutDuration(w); return a + (isFinite(d) ? d : 0); }, 0);
-  let html = '<div class="stats">' +
+  let html = historyImportSummaryHTML() + historyLinksBannerHTML() + (ui.historyLinksOpen ? historyLinksPanel() : '') + '<div class="stats' +
+    ((ui.importSummary || unresolvedHistoryExercises().length || ui.historyLinksOpen) ? ' mt-4' : '') + '">' +
     '<div class="stat"><div class="v">' + last7.length + '</div><div class="k">Sessions · 7 days</div></div>' +
     '<div class="stat"><div class="v">' + last30.length + '</div><div class="k">Sessions · 30 days</div></div>' +
     '<div class="stat"><div class="v">' + fmtNum(Math.round(vol30)) + '</div><div class="k">Volume · 30 days (' + unitLabel() + ')</div></div>' +
@@ -5172,9 +5453,9 @@ function exSessions(ex){
   const m = exMetric(ex);
   const out = [];
   sortedWorkouts().slice().reverse().forEach(w => {
-    const b = w.exercises.find(x => x.exerciseId === ex.id);
-    if (!b) return;
-    const best = b.sets.filter(countsPR).reduce((a,s) => Math.max(a, m.of(s)), 0);
+    const blocks = w.exercises.filter(x => canonicalExerciseId(x.exerciseId) === ex.id);
+    if (!blocks.length) return;
+    const best = blocks.reduce((top,b) => b.sets.filter(countsPR).reduce((a,s) => Math.max(a, m.of(s)), top), 0);
     if (best > 0) out.push({ date:w.startedAt, best });
   });
   return out;
@@ -5215,7 +5496,7 @@ function progressionExposure(block){
 function progressionStatus(exId, workouts = state.workouts){
   let best = null, streak = 0, latest = null;
   workouts.slice().sort((a,b) => a.startedAt - b.startedAt).forEach(w => {
-    const block = w.exercises.find(ex => ex.exerciseId === exId &&
+    const block = w.exercises.find(ex => canonicalExerciseId(ex.exerciseId) === exId &&
       ex.sets.some(s => s.completed && !isWarmup(s)));
     if (!block) return;
     const exposure = progressionExposure(block);
@@ -5233,7 +5514,8 @@ function progressionStatus(exId, workouts = state.workouts){
 function progressionFlagsPanel(){
   const names = new Map();
   sortedWorkouts().forEach(w => w.exercises.forEach(ex => {
-    if (ex.exerciseId && !names.has(ex.exerciseId)) names.set(ex.exerciseId, ex.name);
+    const id = ex.exerciseId && canonicalExerciseId(ex.exerciseId);
+    if (id && !names.has(id)) names.set(id, (historyExerciseById(id) || ex).name);
   }));
   const flags = [...names].map(([id, fallback]) => ({ id, fallback, status:progressionStatus(id) }))
     .filter(x => x.status.flagged).sort((a,b) => b.status.latest.date - a.status.latest.date ||
@@ -5243,7 +5525,7 @@ function progressionFlagsPanel(){
     '<h2 class="panel-title">Progression check</h2>' +
     '<p class="muted small">Flagged after three comparable sessions in a row without more total reps or a higher working load. Warm-ups do not count; incomplete or mixed-load prescribed sets restart the check. Technique and RIR can improve without triggering this measure.</p>' +
     '<ul class="progression-list">' + flags.map(({id, fallback, status}) => {
-      const def = exerciseById(id), name = def ? def.name : fallback;
+      const def = historyExerciseById(id), name = def ? def.name : fallback;
       const last = status.latest;
       const load = last.kind === 'loaded' ? fmtNum(convertWeight(last.load, 'kg', unitLabel())) + ' ' + unitLabel() + ' · ' : '';
       const summary = fmtDate(last.date) + ' · ' + load + last.reps.map(fmtNum).join(' / ') + ' reps';
@@ -5269,7 +5551,7 @@ function progressModes(){
 function trendPanel(){
   const candidates = trendCandidates();
   if (!candidates.length) return '';
-  const ex = exerciseById(ui.trendExId);
+  const ex = historyExerciseById(ui.trendExId);
   if (!ex) return '';
   const m = exMetric(ex);
   const metric = m.of;
@@ -5342,9 +5624,10 @@ function musclePanel(){
   const groups = muscleCandidates();
   if (!groups.length) return '';
   const group = ui.trendMuscle;
-  const ids = new Set(state.exercises.filter(e => exCategory(e) === group).map(e => e.id));
+  const candidates = trendCandidates();
+  const ids = new Set(candidates.filter(e => exCategory(e) === group).map(e => e.id));
   const setsIn = w => w.exercises.reduce(
-    (a,x) => a + (ids.has(x.exerciseId) ? x.sets.filter(countsVolume).length : 0), 0);
+    (a,x) => a + (ids.has(canonicalExerciseId(x.exerciseId)) ? x.sets.filter(countsVolume).length : 0), 0);
 
   const weeks = weekBuckets(state.workouts, list => list.reduce((a,w) => a + setsIn(w), 0));
   const half = weeks.length / 2;
@@ -5352,12 +5635,12 @@ function musclePanel(){
   const recent = weeks.slice(half).reduce((a,w) => a + w.val, 0);
   const delta = recent - prev;
 
-  const rows = state.exercises.filter(e => ids.has(e.id)).map(ex => {
+  const rows = candidates.filter(e => ids.has(e.id)).map(ex => {
     const sess = exSessions(ex);
     if (!sess.length) return null;
     let sets = 0;
     state.workouts.forEach(w => w.exercises.forEach(x => {
-      if (x.exerciseId === ex.id) sets += x.sets.filter(countsVolume).length;
+      if (canonicalExerciseId(x.exerciseId) === ex.id) sets += x.sets.filter(countsVolume).length;
     }));
     const m = exMetric(ex);
     const first = sess[0].best, last = sess[sess.length - 1].best;
@@ -5734,7 +6017,7 @@ function viewSettings(){
         '<button type="button" class="icon-btn" data-action="schema-open" ' +
           'aria-label="File format and sample files" title="File format and sample files">' + IC.help + '</button>' +
       '</div>' +
-      '<p class="desc">Imports merge into this browser. Duplicates are skipped, and a routine import adds any missing exercises.</p>' +
+      '<p class="desc">Imports merge into this browser. Routine imports add missing exercises. History reports new workouts, existing copies, invalid entries and ID conflicts separately; local workouts win conflicts.</p>' +
       '<div class="transfer-grid">' +
         '<div class="transfer-group" role="group" aria-labelledby="transfer-routines-title">' +
           '<h4 id="transfer-routines-title">Routines</h4>' +
@@ -5749,8 +6032,13 @@ function viewSettings(){
             '<button type="button" class="btn" data-action="export-history" aria-label="Export workout history">' + IC.down + '<span>Export</span></button>' +
             '<label class="file-btn"><span>' + IC.up + ' Import</span><input type="file" accept=".json,application/json" data-change="import-history" aria-label="Import workout history from a JSON file"></label>' +
           '</div>' +
+          (historyExerciseIdentities().some(x => !exerciseById(x.id))
+            ? '<button type="button" class="btn btn-sm mt-2" data-action="history-links-open">Review exercise links' +
+                (unresolvedHistoryExercises().length ? ' (' + unresolvedHistoryExercises().length + ')' : '') + '</button>'
+            : '') +
         '</div>' +
       '</div>' +
+      historyImportSummaryHTML() +
     '</div>' +
     '<div class="setting-block">' +
       '<h3 class="danger-heading">Danger zone</h3>' +
@@ -5806,7 +6094,7 @@ const actions = {
   },
   'trend-mode'(d){ ui.trendMode = d.mode === 'muscle' ? 'muscle' : 'exercise'; render(); },
   'progression-select'(d){
-    if (!exerciseById(d.id)) return;
+    if (!historyExerciseById(d.id)) return;
     ui.trendMode = 'exercise'; ui.trendExId = d.id;
     ui.focus = 'progress-exercise-select'; render();
   },
@@ -5852,6 +6140,31 @@ const actions = {
   },
   'history-edit'(d){ ui.editWorkoutId = d.id; ui.expandedWorkouts.add(d.id); render(); },
   'history-edit-done'(){ ui.editWorkoutId = null; save(); render(); toast('Session updated'); },
+  'history-links-open'(){ openHistoryLinks(); },
+  'history-links-close'(){ ui.historyLinksOpen = false; render(); },
+  'history-links-dismiss'(){
+    state.settings.historyLinksDismissedKey = unresolvedHistorySignature();
+    save(); render();
+  },
+  'history-import-dismiss'(){ ui.importSummary = null; render(); },
+  'history-links-toggle'(){ ui.historyLinksShowAll = !ui.historyLinksShowAll; render(); },
+  'history-links-exact'(){
+    let linked = 0;
+    unresolvedHistoryExercises().forEach(x => {
+      const suggestion = suggestedExercise(x);
+      if (suggestion && setExerciseLink(x.id, suggestion.id)) linked++;
+    });
+    if (linked){ save(); render(); toast('Linked ' + plural(linked, 'exact match')); }
+    else toast('No unambiguous exact matches found');
+  },
+  'history-link-suggest'(d){
+    if (!setExerciseLink(d.source, d.target)) return;
+    save(); render(); toast('Exercise history linked');
+  },
+  'history-link-add'(d){
+    if (!addHistoricalExerciseToLibrary(d.source)) return;
+    save(); render(); toast('Exercise added to Library');
+  },
   'hset-toggle'(d){
     const s = findHSet(d); if (!s) return;
     s.completed = !s.completed; s.completedAt = s.completed ? Date.now() : 0;
@@ -6224,7 +6537,8 @@ const binders = {
   hwo(t){ const w = editingWorkout(); if (w){ w[t.dataset.field] = t.value; save(); } },
   hex(t){ const ex = findHEx(t.dataset); if (ex){ ex[t.dataset.field] = t.value; save(); } },
   hset(t){ const s = findHSet(t.dataset); if (s){ s[t.dataset.field] = toNum(t.value); save(); } },
-  exfilter(t){ ui.exerciseFilter = t.value; ui.focus = 'ex-search'; render(); }
+  exfilter(t){ ui.exerciseFilter = t.value; ui.focus = 'ex-search'; render(); },
+  'history-link-filter'(t){ ui.historyLinkFilter = t.value; ui.focus = 'history-link-filter'; render(); }
 };
 document.addEventListener('input', e => {
   const t = e.target;
@@ -6244,6 +6558,19 @@ const changeHandlers = {
   },
   trend(t){ ui.trendExId = t.value; render(); },
   'trend-muscle'(t){ ui.trendMuscle = t.value; render(); },
+  'history-link'(t){
+    const source = t.dataset.source;
+    if (!validId(source)) return;
+    if (t.value === '__separate') keepHistoricalExerciseSeparate(source);
+    else if (t.value) setExerciseLink(source, t.value);
+    else {
+      unlinkExerciseHistory(source);
+      state.historySeparateIds = (state.historySeparateIds || []).filter(id => id !== source);
+      state.settings.historyLinksDismissedKey = '';
+    }
+    save(); render();
+    toast(t.value === '__separate' ? 'History kept separate' : t.value ? 'Exercise history linked' : 'Link decision cleared');
+  },
   setting(t){
     const key = t.dataset.field;
     state.settings[key] = t.checked;

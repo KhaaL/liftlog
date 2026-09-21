@@ -9,7 +9,7 @@ const fs = require('node:fs');
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
     let html = fs.readFileSync('index.html', 'utf8');
-    html = html.replace('init();\n})();', `window.testAPI = { sampleRoutinesFile, sampleHistoryFile, routinesPayload, backupPayload, applyFullBackup, validateBackup, importRoutines, importHistory, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, progressionStatus, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, startRoutine, toggleSet, htmlRoutineEditor, render, get state(){return state}, get ui(){return ui} };\ninit();\n})();`);
+    html = html.replace('init();\n})();', `window.testAPI = { sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, validateBackup, importRoutines, importHistory, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, progressionStatus, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, startRoutine, toggleSet, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, render, get state(){return state}, get ui(){return ui} };\ninit();\n})();`);
     await page.route('http://liftlog.test/**', route => route.fulfill({ contentType:'text/html', body:html }));
     await page.goto('http://liftlog.test/');
     const result = await page.evaluate(async () => {
@@ -19,10 +19,12 @@ const fs = require('node:fs');
       const wait = () => new Promise(r => setTimeout(r, 60));
       t.state.exercises = []; t.state.routines = []; t.state.workouts = [];
       const sample = t.sampleRoutinesFile();
-      check(sample.version === 8 && sample.schemaVersion === '1.5.0', 'sample version markers');
+      check(sample.version === 9 && sample.schemaVersion === '1.6.0', 'sample version markers');
       t.importRoutines(file(sample)); await wait();
       check(t.state.routines.length === 1 && t.state.exercises.length === 3, 'routine sample imports all definitions');
       const r = t.state.routines[0];
+      check(r.id === 'rt-lower' && t.state.exercises.some(ex => ex.id === 'ex-squat'),
+        'routine import preserves safe source identities');
       check(t.routineGroups(r.items).length === 2, 'sample pair survives import');
       check(r.items[0].repsMin === 5 && r.items[0].repsMax === 8 && r.items[0].targetRir === 2,
         'routine sample preserves rep range and target RIR');
@@ -35,6 +37,28 @@ const fs = require('node:fs');
       check(sets[3].reps === null && sets[3].durationSeconds === 45 && sets[2].rir === 0, 'timed sets and zero RIR survive');
       t.importHistory(file(history)); await wait();
       check(t.state.workouts.length === 1, 'history import deduplicates');
+      check(t.ui.importSummary.added === 0 && t.ui.importSummary.already === 1 &&
+        t.ui.importSummary.invalid === 0 && t.ui.importSummary.conflicts === 0,
+        'duplicate-only history import reports an existing workout precisely');
+      const orphan = { workouts:[{ id:'wk-orphan', routineId:null, routineName:'Old log',
+        startedAt:Date.now() - 86400000, finishedAt:Date.now() - 86400000 + 1800000, notes:'',
+        exercises:[{ exerciseId:'old-back-squat', name:'Back Squat', category:'Legs', unit:'kg',
+          plannedSets:1, targetRepsMin:5, targetRepsMax:8, targetRir:2,
+          sets:[{id:'old-set',weight:95,reps:6,rir:2,completed:true,unit:'kg'}] }] }] };
+      t.importHistory(file(orphan)); await wait();
+      check(t.trendCandidates().some(ex => ex.id === 'old-back-squat'),
+        'historical exercises appear in Progress without a Library definition');
+      const currentSquat = t.state.exercises.find(ex => ex.id === 'ex-squat');
+      check(t.setExerciseLink('old-back-squat', currentSquat.id) &&
+        t.canonicalExerciseId('old-back-squat') === currentSquat.id && t.exSessions(currentSquat).length === 2,
+        'linking combines old and current progression series');
+      check(t.state.workouts.find(w => w.id === 'wk-orphan').exercises[0].exerciseId === 'old-back-squat',
+        'linking leaves the original workout record unchanged');
+      check(t.keepHistoricalExerciseSeparate('old-back-squat') &&
+        t.canonicalExerciseId('old-back-squat') === 'old-back-squat' &&
+        t.state.historySeparateIds.includes('old-back-squat'),
+        'a history link can be reversed and explicitly kept separate');
+      t.setExerciseLink('old-back-squat', currentSquat.id);
       const normalized = t.normalizeRoutineItem({sets:2.9,reps:0,weight:-3});
       check(normalized.sets === 2 && normalized.repsMin === 0 && normalized.repsMax === 0 &&
         !('reps' in normalized) && normalized.weight === null, 'legacy routine target normalization');
@@ -43,7 +67,8 @@ const fs = require('node:fs');
         'rep range is ordered and target RIR is clamped');
       const old = {version:3, settings:{theme:'invalid',effortMetric:'invalid'}, exercises:[], routines:[{items:[{rest:60,sets:3,reps:5}]}],workouts:[{startedAt:1,exercises:[{restSeconds:60,sets:[{rpe:8}]}]}]};
       t.normalizeState(t.migrateState(old));
-      check(old.version === 8 && old.routines[0].items[0].repsMin === 5 && old.routines[0].items[0].repsMax === 5 &&
+      check(old.version === 9 && Array.isArray(old.exerciseLinks) && Array.isArray(old.historySeparateIds) &&
+        old.routines[0].items[0].repsMin === 5 && old.routines[0].items[0].repsMax === 5 &&
         old.settings.effortMetric === 'rpe' && old.settings.theme === 'system' && !('rest' in old.routines[0].items[0]) &&
         !('restSeconds' in old.workouts[0].exercises[0]), 'complete migration chain and settings fallback');
       const roundtrip = structuredClone(t.routinesPayload(t.state.exercises, [r]));
@@ -76,6 +101,18 @@ const fs = require('node:fs');
       t.saveRoutineDraft();
       return checks;
     });
+    await page.getByRole('button', {name:'Settings'}).click();
+    await page.getByRole('button', {name:/Review exercise links/}).click();
+    await page.getByRole('button', {name:'Show reviewed'}).click();
+    const historyLinkSelect = page.locator('[data-change="history-link"][data-source="old-back-squat"]');
+    assert.equal(await historyLinkSelect.inputValue(), 'ex-squat', 'review shows the saved historical link');
+    await historyLinkSelect.selectOption('__separate');
+    assert.equal(await page.evaluate(() => window.testAPI.canonicalExerciseId('old-back-squat')), 'old-back-squat',
+      'review can undo a link and keep the series separate');
+    await page.locator('[data-change="history-link"][data-source="old-back-squat"]').selectOption('ex-squat');
+    assert.equal(await page.evaluate(() => window.testAPI.canonicalExerciseId('old-back-squat')), 'ex-squat',
+      'review can relink a previously separated series');
+    await page.getByRole('button', {name:'Routines'}).click();
     await page.getByRole('button', { name:'Edit Lower body', exact:true }).click();
     assert.equal(await page.getByLabel('Reps min').count(), 2, 'routine editor exposes lower rep targets');
     assert.equal(await page.getByLabel('Reps max').count(), 2, 'routine editor exposes upper rep targets');
@@ -194,7 +231,7 @@ const fs = require('node:fs');
     });
     await page.getByRole('button', {name:'Import & replace', exact:true}).click();
     await page.waitForFunction(() => window.testAPI.state.activeWorkout?.timer?.remaining === 37);
-    assert.equal(await page.evaluate(() => window.testAPI.state.version), 8, 'full backup restore migrates');
+    assert.equal(await page.evaluate(() => window.testAPI.state.version), 9, 'full backup restore migrates');
     assert.equal(await page.evaluate(() => window.testAPI.state.activeWorkout.timer.remaining), 37, 'backup restore retains rest timer');
     await page.reload();
     assert.equal(await page.evaluate(() => window.testAPI.state.activeWorkout.exercises[0].name), 'Leg Press', 'settled workout survives reload');
@@ -288,6 +325,18 @@ const fs = require('node:fs');
       'history summary stays a two-column grid at 320px');
     assert.equal(await touch.getByText('Workout time · 30 days').count(), 1,
       'workout-duration summary uses an accurate label');
+    await touch.evaluate(() => {
+      const w = {id:'mobile-orphan',routineId:null,routineName:'Imported',startedAt:Date.now(),finishedAt:Date.now()+60000,notes:'',
+        exercises:[{exerciseId:'mobile-old-id',name:'Old Cable Row',category:'Back',unit:'kg',plannedSets:1,
+          sets:[{id:'mobile-old-set',weight:40,reps:10,completed:true,unit:'kg'}]}]};
+      window.testAPI.importHistory(new File([JSON.stringify({workouts:[w]})],'mobile-history.json',{type:'application/json'}));
+    });
+    await touch.waitForFunction(() => window.testAPI.ui.importSummary?.added === 1);
+    await touch.getByRole('button', {name:'Review exercise links'}).click();
+    assert.equal(await touch.locator('[data-change="history-link"][data-source="mobile-old-id"]').count(), 1,
+      'duplicate-safe import can open exercise reconciliation');
+    assert.equal(await touch.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true,
+      'exercise reconciliation fits at 320px');
     assert.match(await touch.locator('#routine-pair-dlg .desc').innerText(), /Completing either one removes the other/,
       'either-of dialog describes in-session completion behavior');
     await touch.close();

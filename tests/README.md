@@ -17,9 +17,10 @@ Both scripts launch an isolated browser profile and intercept HTTP requests;
 they do not touch your real workout data or a remote backup. The security suite
 also mocks remote storage to exercise the real restore/validation path.
 
-- `regression.cjs`: samples, routine pairing, targets, migration, restore, reload,
-  and mobile layout. Screenshots are written to `/tmp/liftlog-pair-picker.png`,
-  `/tmp/liftlog-editor.png`, and `/tmp/liftlog-workout.png`.
+- `regression.cjs`: samples, routine pairing, targets, historical exercise
+  reconciliation, migration, restore, reload, and mobile layout. Screenshots
+  are written to `/tmp/liftlog-pair-picker.png`, `/tmp/liftlog-editor.png`, and
+  `/tmp/liftlog-workout.png`.
 - `security.cjs`: nested backup validation, duplicate ID scopes, legacy versions,
   cancellation, hostile IDs through imports and UI actions, remote validation,
   startup recovery, and failure to save a recovery copy.
