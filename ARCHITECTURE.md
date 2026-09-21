@@ -675,6 +675,24 @@ and the breakdown list can never disagree about what "better" means.
 `General`), charted as **working sets per week** — a completed set that is not
 a warm-up, i.e. `countsVolume()`.
 
+**Double-progression flag** — `progressionStatus()`. History compares completed
+working sets for each exercise across logged sessions. The first prescribed
+number of sets must have reps and one common working load; incomplete or
+mixed-load prescriptions restart the comparison. A session without completed
+working sets is not an exposure. At the same load, a larger total rep count
+across those sets is a gain; a higher load is a gain even if reps drop. A lower
+load (such as a deload) starts a new comparison window. After a baseline and three consecutive
+comparable sessions without either gain, History shows a progression flag with
+the latest set-by-set reps. Kilograms and pounds are converted before comparing;
+bodyweight exercises compare reps. Timed work is excluded. The flag is derived
+from history on render, so history edits and imports update it without a new
+stored field or schema version.
+
+This is an objective rep/load check, not an instruction to add weight. Routines
+store a single rep target rather than a lower and upper range, RIR is optional,
+and technique is not recorded. The app therefore cannot verify that every set
+reached the top of a range with 1–2 RIR and good technique.
+
 Sets, not tonnage, and deliberately so. Load is a property of the machine, not
 of the muscle: a dip on an outdoor bar, a plate-loaded press and a cable fly all
 train the chest at numbers that cannot be summed or compared, and bodyweight

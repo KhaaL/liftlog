@@ -9,7 +9,7 @@ const fs = require('node:fs');
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
     let html = fs.readFileSync('index.html', 'utf8');
-    html = html.replace('init();\n})();', `window.testAPI = { sampleRoutinesFile, sampleHistoryFile, routinesPayload, backupPayload, applyFullBackup, validateBackup, importRoutines, importHistory, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, startRoutine, toggleSet, htmlRoutineEditor, get state(){return state}, get ui(){return ui} };\ninit();\n})();`);
+    html = html.replace('init();\n})();', `window.testAPI = { sampleRoutinesFile, sampleHistoryFile, routinesPayload, backupPayload, applyFullBackup, validateBackup, importRoutines, importHistory, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, progressionStatus, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, startRoutine, toggleSet, htmlRoutineEditor, render, get state(){return state}, get ui(){return ui} };\ninit();\n})();`);
     await page.route('http://liftlog.test/**', route => route.fulfill({ contentType:'text/html', body:html }));
     await page.goto('http://liftlog.test/');
     const result = await page.evaluate(async () => {
@@ -178,11 +178,75 @@ const fs = require('node:fs');
       window.testAPI.applyFullBackup(payload);
     });
     await page.getByRole('button', {name:'Import & replace', exact:true}).click();
+    await page.waitForFunction(() => window.testAPI.state.activeWorkout?.timer?.remaining === 37);
     assert.equal(await page.evaluate(() => window.testAPI.state.version), 7, 'full backup restore migrates');
     assert.equal(await page.evaluate(() => window.testAPI.state.activeWorkout.timer.remaining), 37, 'backup restore retains rest timer');
     await page.reload();
     assert.equal(await page.evaluate(() => window.testAPI.state.activeWorkout.exercises[0].name), 'Leg Press', 'settled workout survives reload');
+    const progressionChecks = await page.evaluate(() => {
+      const t = window.testAPI, check = (ok, label) => { if (!ok) throw Error(label); return label; };
+      const make = (day, reps, weight = 100, opts = {}) => ({
+        startedAt:day, exercises:[{ exerciseId:'lift', unit:opts.kind || 'kg', plannedSets:3,
+          sets:[...(opts.warmup ? [{completed:true, countForVolume:false, countForPR:false, unit:'kg', weight:50, reps:10}] : []),
+            ...reps.map(r => ({completed:true, unit:opts.unit || 'kg', weight, reps:r}))] }]
+      });
+      const a = [make(1,[8,8,8]),make(2,[8,8,8]),make(3,[8,8,8]),make(4,[8,8,8])];
+      const labels = [];
+      labels.push(check(!t.progressionStatus('lift',a.slice(0,3)).flagged &&
+        t.progressionStatus('lift',a).streak === 3, 'flag requires three misses after a baseline'));
+      labels.push(check(t.progressionStatus('lift',[...a,make(5,[8,8,9])]).streak === 0,
+        'more total reps at the same load clear the flag'));
+      labels.push(check(t.progressionStatus('lift',[...a,make(5,[6,6,6],102.5)]).streak === 0,
+        'higher load clears the flag even when reps drop'));
+      labels.push(check(t.progressionStatus('lift',[...a,make(5,[8,8,8],95)]).streak === 0,
+        'a lower-load deload begins a new comparison window'));
+      labels.push(check(t.progressionStatus('lift',[make(1,[8,8,8],100,{warmup:true}),
+        make(2,[8,8,8]),make(3,[8,8,8]),make(4,[8,8,8])]).flagged,
+        'warm-ups do not affect comparable working sets'));
+      labels.push(check(t.progressionStatus('lift',[...a.slice(0,3),make(4,[8,8]),make(5,[8,8,8])]).streak === 0,
+        'partial exposures break the miss streak'));
+      const mixed = make(4,[8,8,8]); mixed.exercises[0].sets[1].weight = 90;
+      labels.push(check(t.progressionStatus('lift',[...a.slice(0,3),mixed,make(5,[8,8,8])]).streak === 0,
+        'mixed working loads break the miss streak'));
+      const skipped = {startedAt:3.5,exercises:[{exerciseId:'lift',unit:'kg',plannedSets:3,sets:[]}]};
+      labels.push(check(t.progressionStatus('lift',[...a.slice(0,3),skipped,a[3]]).flagged,
+        'an unperformed exercise is not an exposure'));
+      labels.push(check(t.progressionStatus('lift',[make(1,[8,8,8]),
+        make(2,[8,8,8],220.46226218,{unit:'lb'}),make(3,[8,8,8]),make(4,[8,8,8])]).flagged,
+        'kg and lb loads compare consistently'));
+      labels.push(check(t.progressionStatus('lift',[make(1,[8,8,8],null,{kind:'bw'}),
+        make(2,[8,8,8],null,{kind:'bw'}),make(3,[8,8,8],null,{kind:'bw'}),
+        make(4,[8,8,8],null,{kind:'bw'})]).flagged,
+        'bodyweight rep exposures can flag'));
+      labels.push(check(!t.progressionStatus('lift',a.map(w => ({...w,exercises:w.exercises.map(ex => ({...ex,unit:'time'}))}))).flagged,
+        'timed work does not receive a double-progression flag'));
+      const squat = t.state.exercises.find(ex => ex.name === 'Back Squat');
+      t.state.workouts = a.map((w,i) => ({...w,id:'plateau-'+i,routineName:'Lower body',
+        startedAt:Date.now() - (4-i)*86400000,finishedAt:Date.now() - (4-i)*86400000 + 1800000,
+        exercises:w.exercises.map(ex => ({...ex,exerciseId:squat.id,name:squat.name,category:'Legs'}))})).reverse();
+      t.ui.view = 'history'; t.render();
+      return labels;
+    });
+    assert.equal(await page.locator('#progression-flags .progression-list li').count(), 1,
+      'History shows one progression flag');
+    assert.match(await page.locator('#progression-flags').innerText(), /Last: .*100 kg · 8 \/ 8 \/ 8 reps/,
+      'flag shows the latest working-set load and reps');
+    assert.match(await page.locator('.trend-foot').first().innerText(), /No change/,
+      'flat strength trend is neutral rather than a green gain');
+    await page.getByRole('button', {name:'Show progress for Back Squat'}).click();
+    assert.equal(await page.locator('#progress-exercise-select').inputValue(),
+      await page.evaluate(() => window.testAPI.state.exercises.find(ex => ex.name === 'Back Squat').id),
+      'flag opens the matching exercise trend');
+    await page.screenshot({path:'/tmp/liftlog-history-progression.png',fullPage:true});
+    await page.evaluate(() => {
+      const t = window.testAPI;
+      t.state.workouts[0].exercises[0].sets[0].reps = 9;
+      t.render();
+    });
+    assert.equal(await page.locator('#progression-flags').count(), 0,
+      'correcting a logged set clears a stale flag without stored flag state');
     assert.deepEqual(errors, []);
-    console.log([...result, 'mobile editor pairing and in-session alternative completion', 'no browser errors'].map(s => 'PASS ' + s).join('\n'));
+    console.log([...result, ...progressionChecks, 'mobile editor pairing and in-session alternative completion',
+      'History progression flag and navigation', 'no browser errors'].map(s => 'PASS ' + s).join('\n'));
   } finally { await browser.close(); }
 })().catch(e => { console.error(e); process.exit(1); });

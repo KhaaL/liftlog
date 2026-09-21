@@ -24,6 +24,27 @@ not an exhaustive security or cross-browser audit.
    this repository. Keep the app dependency-free while adding a documented CI
    test environment if ongoing maintenance warrants it.
 
+## History progression audit — 2026-09-21
+
+- **Fit for double progression:** finished workouts retain each set's load,
+  reps, completion, and optional RIR; warm-ups can be excluded. History editing
+  and import allow corrections. That is enough to detect repeatable rep/load
+  stalls without changing the file schema.
+- **Current limits:** the per-exercise chart shows the best set's estimated 1RM,
+  while the weekly charts show volume or set counts. Neither shows whether reps
+  rose across *all* prescribed sets at one load. Routines have one rep target,
+  not a rep range; there is no technique marker; effort logging defaults off.
+  Added load on bodyweight movements is not recorded, so those flags use reps
+  alone. The app cannot certify when a load increase is appropriate under the
+  stated 1–2 RIR and technique rule. The existing green upward `+0` trend cue was
+  misleading and is now neutral.
+- **Flag added:** History shows an amber progression check after a baseline and
+  three consecutive comparable exposures without more total reps at the same
+  working load or a higher load. It excludes warm-ups and timed exercises,
+  converts kg/lb, treats lower-load work as a new window, and restarts after
+  incomplete or mixed-load prescribed sets. The latest load and set-by-set reps
+  appear beside each flag. This is a review cue, not a prescription to add load.
+
 ## High-priority follow-up fixes — completed
 
 - **Imported ID injection:** all library, routine, workout, and set IDs are
@@ -76,12 +97,12 @@ State version is **7**; transfer contract version is **1.4.0**. Exactly two
 routine items with different exercise IDs share an optional `eitherOf` string.
 Invalid/incomplete groups become independent items. Each item keeps its own
 sets, reps/seconds, and weight. Pairing, unlinking, deletion, duplication, and
-reordering are supported. Start asks for one exercise per pair; Cancel creates
-nothing. Only chosen exercises enter the workout, at each pair's first position.
+reordering are supported. Both alternatives enter a started workout; completing
+one removes the other from that workout while preserving the saved routine.
 The routine summary counts each pair once and shows a range for differing sets.
 
 The downloadable routine sample now contains Back Squat or Leg Press, followed
-by Plank. The history sample demonstrates a valid choice of Back Squat followed
+by Plank. The history sample demonstrates a logged Back Squat session followed
 by Plank, timed duration, RIR including zero, and warm-up exclusion flags.
 Both samples use the real payload builders and were imported through the real
 file-reader handlers in the browser. Export/reimport preserves pair keys.
@@ -92,8 +113,8 @@ Unpaired legacy routines require no field conversion.
 `tests/regression.cjs` exercises generated sample imports and deduplication,
 export/reimport, migration/default handling, target normalization, invalid pair
 cleanup, pair summaries, duplication, unlinking, deletion and reordering.
-Browser interactions cover pairing through the editor at 390px width, cancel,
-choosing an alternative, per-exercise targets, full-backup restore and reload.
+Browser interactions cover pairing through the editor at 390px width, completing
+either alternative, per-exercise targets, full-backup restore and reload.
 The test checks page errors and horizontal overflow; editor/workout screenshots
 were inspected. Tests use an isolated profile and synthetic origin.
 

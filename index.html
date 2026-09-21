@@ -788,6 +788,13 @@ kbd{
 .trend-delta{ font-weight:650; }
 .trend-delta.up{ color:var(--success); }
 .trend-delta.down{ color:var(--danger); }
+.progression-panel{ padding:var(--sp-4); border-left:3px solid var(--warning); }
+.progression-list{ list-style:none; margin:var(--sp-3) 0 0; padding:0; }
+.progression-list li{ display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:var(--sp-1) var(--sp-3); padding:var(--sp-2) 0; border-top:1px solid var(--border); }
+.progression-list button{ appearance:none; border:0; background:none; padding:0; color:var(--text); font:inherit; font-weight:650; text-align:left; text-decoration:underline; text-decoration-color:var(--warning); cursor:pointer; }
+.progression-list strong{ font-weight:650; }
+.progression-name{ display:grid; gap:2px; }
+.progression-count{ color:var(--warning); font-size:var(--fs-xs); font-weight:650; }
 .mb-2{ margin-bottom:var(--sp-2); }
 /* Progress panel: Exercise / Muscle group switch and the movement breakdown */
 .progress-modes{ display:inline-flex; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; }
@@ -4889,6 +4896,7 @@ function viewHistory(){
   html += weeklyChart(ws);
 
   /* per-exercise trend */
+  html += progressionFlagsPanel();
   html += progressPanel();
 
   /* workout list */
@@ -5069,6 +5077,81 @@ function exSessions(ex){
   });
   return out;
 }
+/* Double-progression check. An exposure is a logged session with enough
+   completed working sets to fill its prescription. Compare the first planned
+   sets only, so adding extra sets cannot manufacture a rep gain. Mixed loads,
+   missing reps, and partial sessions break a streak rather than being called
+   failures. Timed movements use a different progression method. */
+function progressionExposure(block){
+  const working = block.sets.filter(s => s.completed && !isWarmup(s));
+  if (!working.length) return null;
+  if (block.unit !== 'kg' && block.unit !== 'lb' && block.unit !== 'bw') return { comparable:false };
+  const count = Number.isInteger(block.plannedSets) && block.plannedSets > 0
+    ? block.plannedSets : working.length;
+  if (working.length < count) return { comparable:false };
+  const sets = working.slice(0, count);
+  const reps = sets.map(s => toNum(s.reps));
+  if (reps.some(n => n == null || n <= 0)) return { comparable:false };
+  let load = 0;
+  if (block.unit !== 'bw'){
+    const loads = sets.map(s => {
+      const n = toNum(s.weight);
+      const unit = s.unit === 'lb' || s.unit === 'kg' ? s.unit : block.unit;
+      return n != null && n > 0 ? convertWeight(n, unit, 'kg') : null;
+    });
+    if (loads.some(n => n == null || Math.abs(n - loads[0]) > 0.05)) return { comparable:false };
+    load = loads[0];
+  }
+  return { comparable:true, kind:block.unit === 'bw' ? 'bw' : 'loaded',
+    count, load, reps, totalReps:reps.reduce((a,n) => a + n, 0) };
+}
+/* The baseline is the best total at the current working load. Returning to an
+   older rep count is not a new gain; a higher load resets the rep climb even
+   when reps drop. A lower load or changed prescription starts a new comparison
+   window (for example, after a deload). Three misses require a baseline plus
+   three subsequent comparable exposures. */
+function progressionStatus(exId, workouts = state.workouts){
+  let best = null, streak = 0, latest = null;
+  workouts.slice().sort((a,b) => a.startedAt - b.startedAt).forEach(w => {
+    const block = w.exercises.find(ex => ex.exerciseId === exId &&
+      ex.sets.some(s => s.completed && !isWarmup(s)));
+    if (!block) return;
+    const exposure = progressionExposure(block);
+    if (!exposure) return;
+    if (!exposure.comparable){ best = null; streak = 0; latest = null; return; }
+    latest = { ...exposure, date:w.startedAt };
+    if (!best || exposure.kind !== best.kind || exposure.count !== best.count ||
+        exposure.load < best.load - 0.05){ best = exposure; streak = 0; return; }
+    if (exposure.load > best.load + 0.05 || exposure.totalReps > best.totalReps){
+      best = exposure; streak = 0;
+    } else streak++;
+  });
+  return { streak, flagged:streak >= 3, latest };
+}
+function progressionFlagsPanel(){
+  const names = new Map();
+  sortedWorkouts().forEach(w => w.exercises.forEach(ex => {
+    if (ex.exerciseId && !names.has(ex.exerciseId)) names.set(ex.exerciseId, ex.name);
+  }));
+  const flags = [...names].map(([id, fallback]) => ({ id, fallback, status:progressionStatus(id) }))
+    .filter(x => x.status.flagged).sort((a,b) => b.status.latest.date - a.status.latest.date ||
+      b.status.streak - a.status.streak || a.fallback.localeCompare(b.fallback));
+  if (!flags.length) return '';
+  return '<section class="panel progression-panel mt-4" id="progression-flags" aria-label="Progression flags">' +
+    '<h2 class="panel-title">Progression check</h2>' +
+    '<p class="muted small">Flagged after three comparable sessions in a row without more total reps or a higher working load. Warm-ups do not count; incomplete or mixed-load prescribed sets restart the check. Technique and RIR can improve without triggering this measure.</p>' +
+    '<ul class="progression-list">' + flags.map(({id, fallback, status}) => {
+      const def = exerciseById(id), name = def ? def.name : fallback;
+      const last = status.latest;
+      const load = last.kind === 'loaded' ? fmtNum(convertWeight(last.load, 'kg', unitLabel())) + ' ' + unitLabel() + ' · ' : '';
+      const summary = fmtDate(last.date) + ' · ' + load + last.reps.map(fmtNum).join(' / ') + ' reps';
+      return '<li><span class="progression-name">' + (def
+        ? '<button type="button" data-action="progression-select" data-id="' + esc(id) + '" aria-label="Show progress for ' + esc(name) + '">' + esc(name) + '</button>'
+        : '<strong>' + esc(name) + '</strong>') +
+        '<span class="muted xs">Last: ' + esc(summary) + '</span></span>' +
+        '<span class="progression-count">' + plural(status.streak, 'exposure') + ' without rep/load gain</span></li>';
+    }).join('') + '</ul></section>';
+}
 /* The Progress panel has two readings of the same log: one movement over time,
    or one muscle group across every movement that trains it. */
 function progressPanel(){
@@ -5106,13 +5189,15 @@ function trendPanel(){
     const pts = vals.map((v,i) => r1(x(i)) + ',' + r1(y(v))).join(' ');
     const dots = vals.map((v,i) =>
       '<circle cx="' + r1(x(i)) + '" cy="' + r1(y(v)) + '" r="' + (i === vals.length-1 ? 4 : 2.5) + '" fill="' + (i === vals.length-1 ? 'var(--accent)' : 'var(--surface)') + '" stroke="var(--accent)" stroke-width="1.6"><title>' + fmtDate(sessions[i].date) + ' — ' + fmtNum(roundHalf(v)) + ' ' + esc(unit) + '</title></circle>').join('');
-    const delta = vals[vals.length-1] - vals[0];
+    const delta = roundHalf(vals[vals.length-1] - vals[0]);
     body = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Trend of ' + metricName + ' for ' + esc(ex.name) + ' across ' + vals.length + ' sessions">' +
       '<polyline points="' + pts + '" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>' + dots + '</svg>' +
       '<div class="trend-foot">' +
         '<span class="muted xs">' + fmtDate(sessions[0].date) + ' → ' + fmtDate(sessions[sessions.length-1].date) + ' · ' + plural(sessions.length, 'session') + '</span>' +
-        '<span class="xs trend-delta ' + (delta >= 0 ? 'up' : 'down') + '">' +
-          (delta >= 0 ? '▲ +' : '▼ ') + fmtNum(roundHalf(delta)) + ' ' + esc(unit) + '</span>' +
+        (delta === 0
+          ? '<span class="muted xs">No change</span>'
+          : '<span class="xs trend-delta ' + (delta > 0 ? 'up' : 'down') + '">' +
+              (delta > 0 ? '▲ +' : '▼ ') + fmtNum(Math.abs(delta)) + ' ' + esc(unit) + '</span>') +
       '</div>' +
       '<p class="sr-only">' + metricName + ' went from ' + fmtNum(roundHalf(vals[0])) + ' to ' + fmtNum(roundHalf(vals[vals.length-1])) + ' ' + esc(unit) + '.</p>';
   }
@@ -5122,7 +5207,7 @@ function trendPanel(){
       '<h2 class="panel-title">Progress</h2>' +
       progressModes() +
       '<label class="field trend-picker"><span class="cap">Exercise</span>' +
-      '<select data-change="trend">' +
+      '<select id="progress-exercise-select" data-change="trend">' +
       candidates.map(e => '<option value="' + esc(e.id) + '"' + (e.id === ui.trendExId ? ' selected' : '') + '>' + esc(e.name) + '</option>').join('') +
       '</select></label>' +
     '</div>' +
@@ -5618,6 +5703,11 @@ const actions = {
     else toast('Clipboard unavailable here');
   },
   'trend-mode'(d){ ui.trendMode = d.mode === 'muscle' ? 'muscle' : 'exercise'; render(); },
+  'progression-select'(d){
+    if (!exerciseById(d.id)) return;
+    ui.trendMode = 'exercise'; ui.trendExId = d.id;
+    ui.focus = 'progress-exercise-select'; render();
+  },
   'overview-up'(d){ overviewStep(Number(d.idx), -1); },
   'overview-down'(d){ overviewStep(Number(d.idx), 1); },
   /* same underlying jump as "Reopen exercise" — the drawer just also closes,
