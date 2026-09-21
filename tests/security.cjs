@@ -5,10 +5,10 @@ const fs = require('node:fs');
 const html = fs.readFileSync('index.html', 'utf8').replace('init();\n})();', `window.testAPI = { prepareBackup, validateBackup, backupPayload, applyFullBackup, importData, importHistory, readJSONFile, remoteRestore, navigate, render, save, get state(){return state}, get ui(){return ui} };\ninit();\n})();`);
 const origin = 'https://liftlog.test/';
 const fixture = () => ({
-  app:'liftlog', kind:'backup', version:7,
+  app:'liftlog', kind:'backup', version:8,
   settings:{ theme:'system', unit:'kg', defaultRest:90, autoRest:false, sound:false, vibrate:false, effortMetric:'rir' },
   exercises:[{id:'ex', name:'Squat', unit:'kg'}, {id:'time', name:'Plank', unit:'time'}],
-  routines:[{id:'routine', name:'Routine', items:[{id:'item',exerciseId:'ex',sets:3,reps:5,weight:20}]}],
+  routines:[{id:'routine', name:'Routine', items:[{id:'item',exerciseId:'ex',sets:3,repsMin:5,repsMax:8,targetRir:2,weight:20}]}],
   workouts:[{id:'history', routineId:'routine', routineName:'History', startedAt:1700000000000, finishedAt:1700000300000,
     exercises:[{exerciseId:'ex',name:'Squat',unit:'kg',sets:[{id:'set',weight:20,reps:5,rpe:8,completed:true}]},
       {exerciseId:'time',name:'Plank',unit:'time',sets:[{id:'timed-set',durationSeconds:45,reps:null,completed:true}]}]}],
@@ -58,7 +58,7 @@ const fixture = () => ({
       ['control character ID', s => s.routines[0].id = 'a\u0000b'],
       ['string version', s => s.version = '3'],
       ['fractional version', s => s.version = 3.5],
-      ['future version', s => s.version = 8],
+      ['future version', s => s.version = 9],
       ['wrong app', s => s.app = 'other'],
       ['wrong kind', s => s.kind = 'remote-config'],
       ['missing timestamp', s => delete s.workouts[0].startedAt],
@@ -104,20 +104,23 @@ const fixture = () => ({
     await page.waitForFunction(() => document.getElementById('toast-region').textContent.includes('Could not import'));
     assert.equal(await page.locator('#toast-region').textContent().then(x => x.includes('not valid JSON')),false);
     console.log('PASS JSON parsing errors and import errors are distinct');
-    for (let version=1;version<=7;version++){
+    for (let version=1;version<=8;version++){
       const legacy=fixture(); legacy.version=version; delete legacy.app; delete legacy.kind;
+      if(version<=7){const item=legacy.routines[0].items[0];item.reps=item.repsMin;delete item.repsMin;delete item.repsMax;delete item.targetRir;}
       if(version<=2){const set=legacy.workouts[0].exercises[1].sets[0];set.reps=set.durationSeconds;delete set.durationSeconds;}
       if(version<=3) delete legacy.settings.effortMetric;
       if(version<=5){legacy.routines[0].items[0].rest=60;legacy.workouts[0].exercises[0].restSeconds=60;}
       const prepared=await page.evaluate(s => window.testAPI.prepareBackup(s),legacy);
-      assert.equal(prepared.version,7);
+      assert.equal(prepared.version,8);
+      assert.equal(prepared.routines[0].items[0].repsMin,version===1 ? 10 : 5);
+      assert.equal(prepared.routines[0].items[0].repsMax,version===1 ? 15 : (version<=7 ? 5 : 8));
       assert.equal(prepared.workouts[0].exercises[1].sets[0].durationSeconds,45);
       assert.equal(prepared.workouts[0].exercises[1].sets[0].reps,null);
       assert.equal(prepared.workouts[0].exercises[0].sets[0].rpe,8);
       if(version<=3) assert.equal(prepared.settings.effortMetric,'rpe');
       if(version<=5) assert.equal('restSeconds' in prepared.workouts[0].exercises[0],false);
     }
-    console.log('PASS v1–v7 backups migrate and preserve history');
+    console.log('PASS v1–v8 backups migrate and preserve history');
     const beforeCancel=await page.evaluate(() => JSON.stringify(window.testAPI.state));
     await page.evaluate(s => {window.testAPI.applyFullBackup(s);},good);
     await page.getByRole('button',{name:'Cancel',exact:true}).click();
@@ -216,7 +219,7 @@ const fixture = () => ({
     for (const raw of ['{broken',JSON.stringify(cases[1].value),JSON.stringify({...good,version:99})]){
       const recovery=await newPage({raw});
       assert.equal(await recovery.evaluate(()=>localStorage.getItem('liftlog.v1.unreadable')),raw);
-      assert.equal(await recovery.evaluate(()=>window.testAPI.state.version),7);
+      assert.equal(await recovery.evaluate(()=>window.testAPI.state.version),8);
       await recovery.context().close();
     }
     for (const options of [{failRescue:true},{rescue:'previous recovery copy'}]){

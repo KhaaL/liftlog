@@ -5,6 +5,114 @@ and workout construction, transfer payloads and samples, service worker, and
 architecture notes. This is a targeted code review and browser regression pass,
 not an exhaustive security or cross-browser audit.
 
+## Mobile UX/UI audit — 2026-09-21
+
+Implementation status: findings 1, 3, 4, 6, and the planning fields from 7
+were addressed on 2026-09-21. The notes below retain the measured before-state
+and the rationale for the changes.
+
+Tested the seeded application at 320×568 and 390×844 portrait, and 844×390
+landscape, with the real UI in a touch-enabled Chromium context. Every main
+view, the routine editor, either-of dialog, and active workout were inspected.
+There was no page-level horizontal overflow or browser error at any tested
+size. The either-of dialog fit the viewport, and the active workout kept its
+top pager and bottom timer anchored at all three sizes.
+
+### High priority
+
+1. **Primary navigation is partly hidden on common phone widths.** The five
+   text tabs overflow by 90px at 320px and 20px at 390px. At 320px, Settings is
+   absent from the initial viewport; at 390px it sits under the permanent edge
+   fade. Horizontal swiping works, but the only visible cue is the fade and the
+   selected page can be off-screen. Keep all five destinations visible: use
+   equal-width tabs with tighter horizontal padding and shorter labels (for
+   example, Library instead of Exercises), or four primary tabs plus a visible
+   overflow/settings control. A bottom bar would conflict with the workout
+   timer and is therefore a poorer fit here.
+
+2. **Frequent and destructive row actions are below the app's own 44px touch
+   standard.** Routine and exercise cards use 30–36px-high action buttons; the
+   routine editor's move and remove controls are 30×30px. At 320px, duplicate
+   and delete are approximately 41×30px and sit beside each other. Increase
+   tap areas to 44×44px. On cards, keep Start/Edit visible and put duplicate and
+   delete in one overflow menu; this reduces both clutter and accidental taps.
+
+3. **Two user-facing descriptions contradict current behavior.** The either-of
+   dialog says, “You will pick one when starting a workout,” although both now
+   enter the workout and completing one removes the other. History's “Time
+   under the bar” statistic is the sum of whole workout durations, not time
+   under tension. Update the dialog explanation and rename the statistic to
+   “Workout time · 30 days.”
+
+4. **The History hierarchy delays the useful information at 320px.** Its four
+   summary cards collapse to a single column because each requires 140px plus
+   the grid gap. Progress is therefore more than four cards and a chart below
+   the heading. Use an explicit two-column compact grid at narrow widths
+   (`minmax(0,1fr)`), place progression flags before aggregate charts, and keep
+   Workouts reachable without a long analytics preamble.
+
+### Medium priority
+
+5. **Settings is comprehensive but behaves like a reference page.** At 320px
+   the seeded screen is about 3,150px tall. Backup, storage, remote storage,
+   transfer, danger-zone, and keyboard material appear at once. When storage is
+   non-persistent, Download backup appears twice in adjacent sections. Keep
+   everyday settings open; collapse Remote storage, Transfer, Diagnostics, and
+   Keyboard shortcuts under Advanced/Data sections. Merge the storage warning
+   into Backup & restore so it has one status and one primary backup action.
+
+6. **Desktop affordances consume mobile space.** Today shows “press S,” the
+   footer advertises keyboard help, and Settings renders a full shortcut table
+   on touch devices. Hide these under `pointer:coarse`, or move them to a single
+   Help dialog. This reinforces the mobile-first product instead of merely
+   making the desktop UI responsive.
+
+7. **Double progression is detected but not fully represented in planning.**
+   History now identifies rep/load stalls, but routine items store a single rep
+   target rather than a range, and technique is not recorded. RIR is optional
+   and off by default. Add lower/upper rep targets and an optional target RIR
+   per routine item. Show the range in Today and offer a load-increase cue only
+   when all prescribed sets reach the upper bound and logged RIR is within the
+   target. Keep it advisory because technique still requires human judgment.
+
+8. **Warm-up classification is too hidden for progression-sensitive data.** A
+   user must tap the set number or long-press Done; the resting set row gives no
+   visible indication that the number is interactive. Since warm-ups affect
+   volume, records, and plateau flags, add a discoverable Set type action (for
+   example, Working/Warm-up in a row menu) while retaining long-press as the
+   shortcut.
+
+9. **Phone landscape is usable but cramped around the logging task.** At
+   844×390 the sticky pager and timer work, but tags and the previous-performance
+   strip leave roughly one set row visible; the next row sits behind the timer
+   until scrolling. In the existing short-height media query, also collapse the
+   previous-performance strip and secondary tags into one disclosure.
+
+10. **Charts need a non-visual value view.** Line charts have a useful summary,
+    but weekly bars expose individual values mainly through SVG titles, which
+    are weak on touch and inconsistent for assistive technology. Add a compact
+    text summary or accessible data list for weekly values. Keep arrows and
+    words alongside trend colors, as the current trend footer already does.
+
+### Lower priority
+
+- Make Exercise search sticky once the library grows, and add a muscle-group
+  filter rather than relying on one free-text field.
+- Consider a row-level action menu in History editing as well; it currently
+  exposes several compact controls per set.
+- Preserve the quiet visual system. The restrained borders, limited semantic
+  colors, tabular numbers, and clear empty states are well suited to a gym app.
+  The active logging screen is the strongest part of the product and should
+  remain the density benchmark for the rest of the application.
+
+### Recommended order
+
+Fix the stale labels and navigation first, then touch targets and the 320px
+History grid. Next simplify Settings and improve warm-up discoverability.
+Rep ranges/RIR targets are the larger product change; add them after the core
+mobile interaction fixes so progression advice rests on data the app can
+actually capture.
+
 ## Remaining findings
 
 1. **Medium: the history contract accepts measurements the editor cannot fully manage.**
@@ -69,14 +177,14 @@ not an exhaustive security or cross-browser audit.
   IDs and reject active-workout ID collisions to keep their own backups valid.
 
 Verified with both browser suites. The security suite includes 27 invalid
-backup cases, migrations for versions 1–7, hostile file/transfer IDs, UI editing,
+backup cases, migrations for versions 1–8, hostile file/transfer IDs, UI editing,
 remote restore rejection, cancelled restore, startup recovery, and rescue-write
 failure. See `tests/README.md` for commands.
 
 ## Fixed in the earlier routine-pairing change
 
 - Full backup restore previously migrated only through v3, unlike startup.
-  Both now share the complete migration chain through v7.
+  Both now share the complete migration chain through v8.
 - Full backup restore reset an active rest timer. It now restores that timer
   and cancels any beep scheduled for the previous session.
 - Settings normalization overwrote its own fallback object, allowing an invalid
@@ -93,10 +201,11 @@ failure. See `tests/README.md` for commands.
 
 ## Either-of feature and sample JSON
 
-State version is **7**; transfer contract version is **1.4.0**. Exactly two
+State version is **8**; transfer contract version is **1.5.0**. Exactly two
 routine items with different exercise IDs share an optional `eitherOf` string.
 Invalid/incomplete groups become independent items. Each item keeps its own
-sets, reps/seconds, and weight. Pairing, unlinking, deletion, duplication, and
+sets, lower/upper reps or seconds, optional target RIR, and weight. Pairing,
+unlinking, deletion, duplication, and
 reordering are supported. Both alternatives enter a started workout; completing
 one removes the other from that workout while preserving the saved routine.
 The routine summary counts each pair once and shows a range for differing sets.
@@ -106,7 +215,8 @@ by Plank. The history sample demonstrates a logged Back Squat session followed
 by Plank, timed duration, RIR including zero, and warm-up exclusion flags.
 Both samples use the real payload builders and were imported through the real
 file-reader handlers in the browser. Export/reimport preserves pair keys.
-Unpaired legacy routines require no field conversion.
+Legacy single-target routines migrate that value into equal lower and upper
+bounds. Unpaired routines otherwise require no field conversion.
 
 ## Verification
 
@@ -114,9 +224,11 @@ Unpaired legacy routines require no field conversion.
 export/reimport, migration/default handling, target normalization, invalid pair
 cleanup, pair summaries, duplication, unlinking, deletion and reordering.
 Browser interactions cover pairing through the editor at 390px width, completing
-either alternative, per-exercise targets, full-backup restore and reload.
-The test checks page errors and horizontal overflow; editor/workout screenshots
-were inspected. Tests use an isolated profile and synthetic origin.
+either alternative, per-exercise targets, full-backup restore and reload. A
+touch-enabled 320px pass checks equal-width navigation, the compact History
+grid, accurate copy, and removal of keyboard-only material. The test checks
+page errors and horizontal overflow; editor/workout screenshots were inspected.
+Tests use an isolated profile and synthetic origin.
 
 Run with Node and Playwright installed: `node tests/regression.cjs`.
 Set `BROWSER_PATH` to use an existing Chromium executable if needed.

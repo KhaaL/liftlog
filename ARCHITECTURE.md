@@ -331,9 +331,10 @@ state
 │                    lastFileBackupAt, seededAt }
 ├─ exercises[]     { id, name, category, unit, notes, url }   — the library
 ├─ routines[]      { id, name, items[] }                      — the plan
-│   └─ items[]     { id, exerciseId, sets, reps, weight, eitherOf? }
+│   └─ items[]     { id, exerciseId, sets, repsMin, repsMax, targetRir?, weight, eitherOf? }
 ├─ workouts[]      logged sessions, newest first              — the log
-│   └─ exercises[] { exerciseId, name, unit, targetReps, skipped, eitherOf?, sets[] }
+│   └─ exercises[] { exerciseId, name, unit, targetRepsMin, targetRepsMax,
+│                    targetRir?, skipped, eitherOf?, sets[] }
 │       └─ sets[]  { id, weight, reps, durationSeconds, rpe, rir, unit, completed, completedAt,
 │                    countForVolume?, countForPR? }   — absent means "counts"
 └─ activeWorkout   a workout in progress, or null
@@ -418,10 +419,9 @@ neither guaranteed nor permanent:
   immediately and a running or paused one on its next rest, because cutting a
   rest already under way is not what editing a preference should mean.
 - **`rpe` and `rir` are independent fields on a set, but only one shows as an
-  input at a time.** `settings.effortMetric` (`'none' | 'rpe' | 'rir'`) is a
-  single global choice, not per-exercise — logging one style of set at a time
-  is the common case, and a per-exercise setting would need its own UI and
-  migration for one column's worth of value. Both fields still round-trip
+  input at a time.** `settings.effortMetric` (`'none' | 'rpe' | 'rir'`) is the
+  global default. A routine item's optional `targetRir` overrides that default
+  for its exercise so the prescribed value can be logged. Both fields still round-trip
   through import/export and history editing regardless of the current
   setting, so switching the setting later doesn't lose whichever one a set
   already carries; only the active-workout input for the *other* one is
@@ -452,6 +452,9 @@ sequence for older data. Startup and file/remote restore all use it:
   drop the links on its next save.
 - **v5 → v6** — removes `items[].rest` and `exercises[].restSeconds`. One-way:
   hand-tuned rest lengths survive only in a backup taken before the upgrade.
+- **v6 → v7** — introduces the optional `eitherOf` key; no conversion needed.
+- **v7 → v8** — replaces single `reps` / `targetReps` values with equal lower
+  and upper bounds. New routines can then widen the range and add `targetRir`.
 
 Data that cannot be read — corrupt JSON, an unrecognized shape, or a *newer*
 schema version — is never overwritten in place. It is copied to
@@ -463,7 +466,7 @@ valid backup or clearing all data re-enables writes.
 
 ## Import / export
 
-Four flows, all plain JSON (`EXPORT_SCHEMA = '1.4.0'`). Every file names itself
+Four flows, all plain JSON (`EXPORT_SCHEMA = '1.5.0'`). Every file names itself
 with `app: 'liftlog'` and a `kind`:
 
 - **`backup`** — the entire `state`; importing replaces everything. Built by
@@ -1070,6 +1073,19 @@ on load, import, and save. Routine export and backup retain keys. The sample
 routines JSON demonstrates Back Squat or Leg Press followed by Plank. Old
 state migrates through the shared `migrateState` chain; v6 to v7 only advances
 the version because the new field is optional.
+
+### Double-progression targets (state v8, transfer schema 1.5.0)
+
+Routine items store `repsMin`, `repsMax`, and an optional `targetRir`. Starting
+a workout copies those values to `targetRepsMin`, `targetRepsMax`, and
+`targetRir` on the workout-local exercise block. Set inputs start at the lower
+bound; Today displays the full range, and a prescribed RIR makes the RIR input
+visible for that exercise even when global effort tracking is off.
+
+The v7 to v8 migration maps the former `reps` and `targetReps` values to equal
+lower and upper bounds, preserving old prescriptions exactly. Routine and
+history importers continue to accept those legacy names. The downloadable
+samples and field reference use only the canonical v8 names.
 
 Browser regression coverage lives in `tests/regression.cjs`. With Node and
 Playwright available, run `node tests/regression.cjs`; optionally set

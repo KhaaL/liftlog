@@ -19,11 +19,13 @@ const fs = require('node:fs');
       const wait = () => new Promise(r => setTimeout(r, 60));
       t.state.exercises = []; t.state.routines = []; t.state.workouts = [];
       const sample = t.sampleRoutinesFile();
-      check(sample.version === 7 && sample.schemaVersion === '1.4.0', 'sample version markers');
+      check(sample.version === 8 && sample.schemaVersion === '1.5.0', 'sample version markers');
       t.importRoutines(file(sample)); await wait();
       check(t.state.routines.length === 1 && t.state.exercises.length === 3, 'routine sample imports all definitions');
       const r = t.state.routines[0];
       check(t.routineGroups(r.items).length === 2, 'sample pair survives import');
+      check(r.items[0].repsMin === 5 && r.items[0].repsMax === 8 && r.items[0].targetRir === 2,
+        'routine sample preserves rep range and target RIR');
       t.importRoutines(file(sample)); await wait();
       check(t.state.routines.length === 1, 'routine import deduplicates');
       const history = t.sampleHistoryFile();
@@ -34,10 +36,16 @@ const fs = require('node:fs');
       t.importHistory(file(history)); await wait();
       check(t.state.workouts.length === 1, 'history import deduplicates');
       const normalized = t.normalizeRoutineItem({sets:2.9,reps:0,weight:-3});
-      check(normalized.sets === 2 && normalized.reps === 0 && normalized.weight === null, 'routine target normalization');
+      check(normalized.sets === 2 && normalized.repsMin === 0 && normalized.repsMax === 0 &&
+        !('reps' in normalized) && normalized.weight === null, 'legacy routine target normalization');
+      const ordered = t.normalizeRoutineItem({sets:3,repsMin:12,repsMax:8,targetRir:12});
+      check(ordered.repsMin === 8 && ordered.repsMax === 12 && ordered.targetRir === 10,
+        'rep range is ordered and target RIR is clamped');
       const old = {version:3, settings:{theme:'invalid',effortMetric:'invalid'}, exercises:[], routines:[{items:[{rest:60,sets:3,reps:5}]}],workouts:[{startedAt:1,exercises:[{restSeconds:60,sets:[{rpe:8}]}]}]};
       t.normalizeState(t.migrateState(old));
-      check(old.version === 7 && old.settings.effortMetric === 'rpe' && old.settings.theme === 'system' && !('rest' in old.routines[0].items[0]) && !('restSeconds' in old.workouts[0].exercises[0]), 'complete migration chain and settings fallback');
+      check(old.version === 8 && old.routines[0].items[0].repsMin === 5 && old.routines[0].items[0].repsMax === 5 &&
+        old.settings.effortMetric === 'rpe' && old.settings.theme === 'system' && !('rest' in old.routines[0].items[0]) &&
+        !('restSeconds' in old.workouts[0].exercises[0]), 'complete migration chain and settings fallback');
       const roundtrip = structuredClone(t.routinesPayload(t.state.exercises, [r]));
       roundtrip.routines[0].name = 'Round trip';
       t.importRoutines(file(roundtrip)); await wait();
@@ -69,6 +77,9 @@ const fs = require('node:fs');
       return checks;
     });
     await page.getByRole('button', { name:'Edit Lower body', exact:true }).click();
+    assert.equal(await page.getByLabel('Reps min').count(), 2, 'routine editor exposes lower rep targets');
+    assert.equal(await page.getByLabel('Reps max').count(), 2, 'routine editor exposes upper rep targets');
+    assert.equal(await page.getByLabel('Target RIR').count(), 3, 'routine editor exposes optional target RIR');
     assert.equal(await page.locator('.item-name select').count(), 0, 'editor has no per-row partner selectors');
     await page.getByRole('button', {name:'Pair exercises…'}).click();
     const pairDialog = page.getByRole('dialog', {name:'Either of'});
@@ -115,6 +126,10 @@ const fs = require('node:fs');
     await page.locator('[data-action="routine-start"]').first().click();
     let workout = await page.evaluate(() => window.testAPI.state.activeWorkout);
     assert.deepEqual(workout.exercises.map(e => e.name), ['Back Squat', 'Leg Press', 'Plank'], 'both alternatives start in session');
+    assert.match(await page.locator('.ex-tags').innerText(), /target 3 × 5–8 @ 100 kg · RIR 2/,
+      'active workout shows the full double-progression prescription');
+    assert.equal(await page.getByLabel('Set 1 RIR').count(), 1,
+      'a target RIR exposes the logging field even when global effort tracking is off');
     await page.locator('#overview-toggle-btn').click();
     assert.equal(await page.evaluate(() => {
       const rows = [...document.querySelectorAll('#overview-dlg-body .overview-row')];
@@ -179,7 +194,7 @@ const fs = require('node:fs');
     });
     await page.getByRole('button', {name:'Import & replace', exact:true}).click();
     await page.waitForFunction(() => window.testAPI.state.activeWorkout?.timer?.remaining === 37);
-    assert.equal(await page.evaluate(() => window.testAPI.state.version), 7, 'full backup restore migrates');
+    assert.equal(await page.evaluate(() => window.testAPI.state.version), 8, 'full backup restore migrates');
     assert.equal(await page.evaluate(() => window.testAPI.state.activeWorkout.timer.remaining), 37, 'backup restore retains rest timer');
     await page.reload();
     assert.equal(await page.evaluate(() => window.testAPI.state.activeWorkout.exercises[0].name), 'Leg Press', 'settled workout survives reload');
@@ -229,6 +244,11 @@ const fs = require('node:fs');
     });
     assert.equal(await page.locator('#progression-flags .progression-list li').count(), 1,
       'History shows one progression flag');
+    assert.equal(await page.evaluate(() => {
+      const flags = document.querySelector('#progression-flags');
+      const chart = document.querySelector('[aria-label="Weekly volume, last 8 weeks"]');
+      return !!(flags.compareDocumentPosition(chart) & Node.DOCUMENT_POSITION_FOLLOWING);
+    }), true, 'progression warnings precede the aggregate chart');
     assert.match(await page.locator('#progression-flags').innerText(), /Last: .*100 kg · 8 \/ 8 \/ 8 reps/,
       'flag shows the latest working-set load and reps');
     assert.match(await page.locator('.trend-foot').first().innerText(), /No change/,
@@ -245,6 +265,32 @@ const fs = require('node:fs');
     });
     assert.equal(await page.locator('#progression-flags').count(), 0,
       'correcting a logged set clears a stale flag without stored flag state');
+
+    const touch = await browser.newPage({ viewport:{width:320,height:568}, isMobile:true, hasTouch:true });
+    touch.on('pageerror', e => errors.push(e.message));
+    await touch.route('http://liftlog.test/**', route => route.fulfill({contentType:'text/html',body:html}));
+    await touch.goto('http://liftlog.test/');
+    assert.equal(await touch.evaluate(() => {
+      const nav = document.querySelector('#nav-list');
+      const settings = document.querySelector('[data-view="settings"]');
+      const r = settings.getBoundingClientRect();
+      return nav.scrollWidth <= nav.clientWidth && r.left >= 0 && r.right <= innerWidth;
+    }), true, 'all five primary tabs fit at 320px');
+    assert.equal(await touch.getByText('Tip: press').evaluate(el => getComputedStyle(el).display), 'none',
+      'keyboard tip is hidden on touch');
+    assert.equal(await touch.locator('.app-footer').evaluate(el => getComputedStyle(el).display), 'none',
+      'keyboard-help footer is hidden on touch');
+    await touch.getByRole('button', {name:'Settings'}).click();
+    assert.equal(await touch.locator('[aria-label="Keyboard shortcuts"]').evaluate(el => getComputedStyle(el).display), 'none',
+      'shortcut table is hidden on touch');
+    await touch.getByRole('button', {name:'History', exact:true}).click();
+    assert.equal(await touch.locator('.stats').evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length), 2,
+      'history summary stays a two-column grid at 320px');
+    assert.equal(await touch.getByText('Workout time · 30 days').count(), 1,
+      'workout-duration summary uses an accurate label');
+    assert.match(await touch.locator('#routine-pair-dlg .desc').innerText(), /Completing either one removes the other/,
+      'either-of dialog describes in-session completion behavior');
+    await touch.close();
     assert.deepEqual(errors, []);
     console.log([...result, ...progressionChecks, 'mobile editor pairing and in-session alternative completion',
       'History progression flag and navigation', 'no browser errors'].map(s => 'PASS ' + s).join('\n'));
