@@ -19,7 +19,8 @@ also mocks remote storage to exercise the real restore/validation path.
 
 - `regression.cjs`: samples, routine pairing, targets, historical exercise
   reconciliation, measurement semantics, bodyweight/added-load analytics,
-  progression stalls/load-increase cues, debounced persistence, automatic
+  archive/merge behavior, progression-series compatibility and movement-family
+  metadata, progression stalls/load-increase cues, debounced persistence, automatic
   remote backup/startup restore, migration, restore, reload, and mobile layout.
   Screenshots are written under `/tmp`, including the routine editor, workout,
   history progression, and mobile Settings views.

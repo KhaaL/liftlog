@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const html = fs.readFileSync('index.html', 'utf8').replace('init();\n})();', `window.testAPI = { prepareBackup, validateBackup, backupPayload, applyFullBackup, importData, importHistory, readJSONFile, remoteRestore, navigate, render, save, get state(){return state}, get ui(){return ui} };\ninit();\n})();`);
 const origin = 'https://liftlog.test/';
 const fixture = () => ({
-  app:'liftlog', kind:'backup', version:10,
+  app:'liftlog', kind:'backup', version:11,
   settings:{ theme:'system', unit:'kg', defaultRest:90, autoRest:false, sound:false, vibrate:false, effortMetric:'rir' },
   exercises:[{id:'ex', name:'Squat', unit:'kg'}, {id:'time', name:'Plank', unit:'time'}],
   routines:[{id:'routine', name:'Routine', items:[{id:'item',exerciseId:'ex',sets:3,repsMin:5,repsMax:8,targetRir:2,weight:20}]}],
@@ -59,7 +59,10 @@ const fixture = () => ({
       ['control character ID', s => s.routines[0].id = 'a\u0000b'],
       ['string version', s => s.version = '3'],
       ['fractional version', s => s.version = 3.5],
-      ['future version', s => s.version = 11],
+      ['future version', s => s.version = 12],
+      ['non-boolean archive flag', s => s.exercises[0].archived = 'yes'],
+      ['non-string load mode', s => s.exercises[0].loadMode = 7],
+      ['non-string workout equipment key', s => s.workouts[0].exercises[0].equipmentKey = {}],
       ['malformed history link', s => s.exerciseLinks = [{sourceId:'old',targetId:7}]],
       ['self history link', s => s.exerciseLinks = [{sourceId:'ex',targetId:'ex'}]],
       ['duplicate history link source', s => s.exerciseLinks = [{sourceId:'old',targetId:'ex'},{sourceId:'old',targetId:'time'}]],
@@ -114,7 +117,7 @@ const fixture = () => ({
     await page.waitForFunction(() => document.getElementById('toast-region').textContent.includes('Could not import'));
     assert.equal(await page.locator('#toast-region').textContent().then(x => x.includes('not valid JSON')),false);
     console.log('PASS JSON parsing errors and import errors are distinct');
-    for (let version=1;version<=10;version++){
+    for (let version=1;version<=11;version++){
       const legacy=fixture(); legacy.version=version; delete legacy.app; delete legacy.kind;
       if(version<=9) delete legacy.bodyweights;
       if(version<=8){delete legacy.exerciseLinks;delete legacy.historySeparateIds;}
@@ -123,7 +126,7 @@ const fixture = () => ({
       if(version<=3) delete legacy.settings.effortMetric;
       if(version<=5){legacy.routines[0].items[0].rest=60;legacy.workouts[0].exercises[0].restSeconds=60;}
       const prepared=await page.evaluate(s => window.testAPI.prepareBackup(s),legacy);
-      assert.equal(prepared.version,10);
+      assert.equal(prepared.version,11);
       assert.equal(prepared.routines[0].items[0].repsMin,version===1 ? 10 : 5);
       assert.equal(prepared.routines[0].items[0].repsMax,version===1 ? 15 : (version<=7 ? 5 : 8));
       assert.equal(prepared.workouts[0].exercises[1].sets[0].durationSeconds,45);
@@ -132,7 +135,7 @@ const fixture = () => ({
       if(version<=3) assert.equal(prepared.settings.effortMetric,'rpe');
       if(version<=5) assert.equal('restSeconds' in prepared.workouts[0].exercises[0],false);
     }
-    console.log('PASS v1–v10 backups migrate and preserve history');
+    console.log('PASS v1–v11 backups migrate and preserve history');
     const beforeCancel=await page.evaluate(() => JSON.stringify(window.testAPI.state));
     await page.evaluate(s => {window.testAPI.applyFullBackup(s);},good);
     await page.getByRole('button',{name:'Cancel',exact:true}).click();
@@ -242,7 +245,7 @@ const fixture = () => ({
     for (const raw of ['{broken',JSON.stringify(cases[1].value),JSON.stringify({...good,version:99})]){
       const recovery=await newPage({raw});
       assert.equal(await recovery.evaluate(()=>localStorage.getItem('liftlog.v1.unreadable')),raw);
-      assert.equal(await recovery.evaluate(()=>window.testAPI.state.version),10);
+      assert.equal(await recovery.evaluate(()=>window.testAPI.state.version),11);
       await recovery.context().close();
     }
     const rescued=await newPage({raw:'{broken'});

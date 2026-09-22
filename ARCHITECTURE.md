@@ -329,14 +329,16 @@ state
 ├─ version         schema version (SCHEMA_VERSION)
 ├─ settings        { theme, unit, defaultRest, autoRest, sound, vibrate, effortMetric,
 │                    lastFileBackupAt, lastModifiedAt, seededAt, historyLinksDismissedKey }
-├─ exercises[]     { id, name, category, unit, notes, url }   — the library; kg/lb means weighted
-├─ exerciseLinks[] { sourceId, targetId } — historical ID → current Library ID
+├─ exercises[]     { id, name, category, movementFamily, unit, loadMode,
+│                    equipmentKey, archived, notes, url }
+├─ exerciseLinks[] { sourceId, targetId } — persisted “same progression series” join
 ├─ historySeparateIds[] historical IDs explicitly kept as their own series
 ├─ bodyweights[]   { id, loggedAt, weight, unit } — dated bodyweight log, newest first
 ├─ routines[]      { id, name, items[] }                      — the plan
 │   └─ items[]     { id, exerciseId, sets, repsMin, repsMax, targetRir?, weight, eitherOf? }
 ├─ workouts[]      logged sessions, newest first              — the log
-│   └─ exercises[] { exerciseId, name, unit, targetRepsMin, targetRepsMax,
+│   └─ exercises[] { exerciseId, name, category, movementFamily, unit, loadMode,
+│                    equipmentKey, targetRepsMin, targetRepsMax,
 │                    targetRir?, skipped, eitherOf?, sets[] }
 │       └─ sets[]  { id, weight, addedWeight?, addedWeightUnit?, reps, durationSeconds, rpe, rir,
 │                    unit, completed, completedAt,
@@ -346,8 +348,8 @@ state
 
 Workout exercise blocks copy their exercise definition when a session starts.
 Finished blocks remain immutable history. While a workout is active,
-`saveExerciseDraft()` refreshes the matching block's name, category, notes, and
-compatible unit so corrections appear immediately. A change between weighted,
+`saveExerciseDraft()` refreshes the matching block's name, category, movement
+family, load convention, equipment key, notes, and compatible unit so corrections appear immediately. A change between weighted,
 bodyweight, and timed measurement is deferred until the next workout because
 reinterpreting existing set fields would corrupt work already entered. The
 how-to URL is always read from the current exercise definition.
@@ -356,6 +358,12 @@ For a Library exercise, `unit` chooses the measurement kind: weighted (`kg` or
 `lb`), bodyweight, or time. Weighted definitions are always normalized to
 `settings.unit`; kg/lb is one global display and planning preference rather than
 a competing per-exercise choice. A logged set keeps its own kg/lb unit forever.
+`loadMode` states whether that number is total, per hand, a machine stack, or
+added bodyweight load; `equipmentKey` distinguishes otherwise similar machines.
+`category` is a broad Push/Pull/Legs/Hinge/Core/Cardio reporting bucket, while
+`movementFamily` groups related work such as `horizontal_push` without joining
+their load progression. Archived definitions stay available to History and
+Progress, but are hidden from the normal library and add-exercise pickers.
 
 A bodyweight set keeps external load in `addedWeight` / `addedWeightUnit`; its
 `weight` is null. `bodyweightAt()` chooses the newest bodyweight entry on or
@@ -490,6 +498,10 @@ sequence for older data. Startup and file/remote restore all use it:
 - **v9 → v10** — adds the dated bodyweight log and distinct added-load fields
   for bodyweight sets. Any older bodyweight set carrying `weight` moves that
   value to `addedWeight`; unsupported distance fields are removed.
+- **v10 → v11** — adds archive state, load convention, equipment identity, and
+  movement family to library definitions and workout snapshots; legacy library
+  categories are mapped into the broad category vocabulary while finished
+  workout category snapshots remain unchanged.
 
 Data that cannot be read — corrupt JSON, an unrecognized shape, or a *newer*
 schema version — is never overwritten in place. It is copied to
@@ -502,7 +514,7 @@ save banner and startup message explain this state; explicitly restoring a
 
 ## Import / export
 
-Four flows, all plain JSON (`EXPORT_SCHEMA = '1.8.0'`). Every file names itself
+Four flows, all plain JSON (`EXPORT_SCHEMA = '1.9.0'`). Every file names itself
 with `app: 'liftlog'` and a `kind`:
 
 - **`backup`** — the entire `state`; importing replaces everything. Built by
@@ -532,7 +544,8 @@ with `app: 'liftlog'` and a `kind`:
   already present, malformed workouts as invalid, and different content under
   an existing ID as a conflict. History files also carry relevant
   `exerciseLinks` and `historySeparateIds`; links are restored only when their
-  current Library target exists and has the same measurement kind.
+  current Library target exists and has the same measurement, load convention,
+  and equipment identity.
 - **`remote-config`** — the remote-storage settings, optionally without the
   secret key. See [Remote storage](#remote-storage-optional).
 
@@ -721,7 +734,7 @@ but clicking the link is a visit to a third party, which is worth knowing.
 ## Progress metrics
 
 The History screen reads the same log two ways, switched by the Exercise /
-Muscle group tabs in the Progress panel.
+Movement family tabs in the Progress panel.
 
 **Per exercise** — `trendPanel()`. One movement over time, judged by
 `exMetric()`: estimated 1RM for loaded work, longest hold for `time`, and
@@ -729,9 +742,8 @@ estimated total 1RM for bodyweight work once a dated bodyweight is available
 (otherwise best set in reps). Both modes call `exMetric()` and `exSessions()`, so the chart
 and the breakdown list can never disagree about what "better" means.
 
-**Per muscle group** — `musclePanel()`. Every movement carrying the same
-`category` (the field the UI labels "Muscle group"; blank collapses to
-`General`), charted as **working sets per week** — a completed set that is not
+**Per movement family** — `musclePanel()`. Every movement carrying the same
+`movementFamily`, charted as **working sets per week** — a completed set that is not
 a warm-up, i.e. `countsVolume()`.
 
 **Double-progression flag** — `progressionStatus()`. History compares completed
@@ -1159,18 +1171,20 @@ work even when an exercise ID is absent from the current Library. A saved
 analytics; it never rewrites workout names or IDs. Removing the link restores
 the original independent series.
 
-History and Settings expose **Review exercise links**. Each historical identity
-can be linked manually, accepted as an unambiguous exact name-and-measurement match
-(kg and lb are the same weighted kind),
+History and Settings expose **Same progression series**. Each historical identity
+can be linked manually, accepted as an unambiguous exact compatible match,
 added to the Library under its original ID, or marked **Keep as separate
 history**. Bulk exact matching accepts only unique matches. Reviewed decisions
 can be shown and changed later. The banner can be dismissed for the current set
 of unresolved IDs; importing a genuinely new identity changes the signature and
 shows it again.
 
-Manual choices, imported links, and restored links all enforce the same
-measurement-kind check. Timed, bodyweight, and weighted series cannot be joined
-to each other; the selector only offers compatible Library exercises.
+Manual choices, merge operations, imported links, and restored links all
+enforce the same measurement, load-mode, and equipment-key contract. Movement
+family remains an independent volume grouping. Machine stacks require the same nonempty equipment key. The selector
+only offers compatible Library exercises. A merge rewrites routine and active
+workout references, removes the obsolete library definition, and creates this
+analytics join; finished workout snapshots remain unchanged.
 
 A history import always leaves an inline result with separate counts for new,
 already-present, invalid, and conflicting workouts. This result and the review

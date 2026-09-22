@@ -439,6 +439,7 @@ kbd{
   transition:border-color .12s ease, background .12s ease;
 }
 .routine-pick-row.is-selected{ border-color:var(--accent); box-shadow:inset 3px 0 0 var(--accent); }
+.ex-row.is-archived{ opacity:.72; }
 /* the label fills the row so the whole card is a selection target */
 .rp-select{
   flex:1; min-width:0; text-align:left; background:none; border:0; cursor:pointer;
@@ -798,7 +799,7 @@ kbd{
 .progression-name{ display:grid; gap:2px; }
 .progression-count{ color:var(--warning); font-size:var(--fs-xs); font-weight:650; }
 .mb-2{ margin-bottom:var(--sp-2); }
-/* Progress panel: Exercise / Muscle group switch and the movement breakdown */
+/* Progress panel: Exercise / movement-family switch and the movement breakdown */
 .progress-modes{ display:inline-flex; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; }
 .progress-modes button{
   appearance:none; background:var(--surface); color:var(--muted); border:0;
@@ -1662,6 +1663,63 @@ const UNIT_OPTION_TEXT = {                /* long form, used in <select> */
   kg:'kg', lb:'lb', bw:'bodyweight', time:'time (seconds)'
 };
 const exerciseMeasureKind = unit => unit === 'time' ? 'time' : unit === 'bw' ? 'bodyweight' : 'weighted';
+const EXERCISE_CATEGORIES = ['Push','Pull','Legs','Hinge','Core','Cardio','Other'];
+const MOVEMENT_FAMILIES = ['horizontal_push','vertical_push','horizontal_pull','vertical_pull','squat','hinge','core','cardio','other'];
+const LOAD_MODES = ['total','per_hand','machine_stack','bodyweight_added','duration'];
+const LOAD_MODE_TEXT = {
+  total:'Total load', per_hand:'Per hand', machine_stack:'Machine stack',
+  bodyweight_added:'Bodyweight + added load', duration:'Duration'
+};
+function normalizeCategory(value, name){
+  const raw = String(value || '').trim().toLowerCase();
+  const n = String(name || '').toLowerCase();
+  if (['push','chest','shoulders','triceps'].includes(raw)) return 'Push';
+  if (['pull','back','biceps'].includes(raw)) return 'Pull';
+  if (['legs','leg','quads','quadriceps','calves','glutes'].includes(raw)) return 'Legs';
+  if (['hinge','posterior','hamstrings'].includes(raw)) return 'Hinge';
+  if (raw === 'core' || /plank|crunch|ab /.test(n)) return 'Core';
+  if (raw === 'cardio') return 'Cardio';
+  const exact = EXERCISE_CATEGORIES.find(x => x.toLowerCase() === raw);
+  return exact || 'Other';
+}
+function inferMovementFamily(name, category){
+  const n = String(name || '').toLowerCase(), c = normalizeCategory(category, name);
+  if (c === 'Push') return /shoulder|overhead|military/.test(n) ? 'vertical_push' : 'horizontal_push';
+  if (c === 'Pull') return /pull.?up|chin.?up|pulldown|lat pull/.test(n) ? 'vertical_pull' : /row/.test(n) ? 'horizontal_pull' : 'other';
+  if (c === 'Hinge') return 'hinge';
+  if (c === 'Legs') return /deadlift|romanian|hip hinge|hip thrust|glute bridge|good morning/.test(n) ? 'hinge' : 'squat';
+  if (c === 'Core') return 'core';
+  if (c === 'Cardio') return 'cardio';
+  return 'other';
+}
+function normalizeLoadMode(mode, unit){
+  const kind = exerciseMeasureKind(unit);
+  if (kind === 'time') return 'duration';
+  if (kind === 'bodyweight') return 'bodyweight_added';
+  return ['total','per_hand','machine_stack'].includes(mode) ? mode : 'total';
+}
+function exerciseLoadLabel(ex, displayUnit = unitLabel()){
+  if (!ex || ex.unit === 'time') return 'seconds';
+  const base = displayUnit;
+  if (ex.loadMode === 'per_hand') return base + '/hand';
+  if (ex.loadMode === 'machine_stack') return base + ' stack';
+  return base;
+}
+function progressionContract(ex){
+  if (!ex) return null;
+  return {
+    kind:exerciseMeasureKind(ex.unit),
+    loadMode:normalizeLoadMode(ex.loadMode, ex.unit),
+    equipmentKey:String(ex.equipmentKey || '').trim().toLowerCase(),
+    movementFamily:String(ex.movementFamily || inferMovementFamily(ex.name, ex.category))
+  };
+}
+function sameProgressionContract(a, b){
+  const x = progressionContract(a), y = progressionContract(b);
+  if (!x || !y || x.kind !== y.kind || x.loadMode !== y.loadMode) return false;
+  if (x.loadMode === 'machine_stack') return !!x.equipmentKey && x.equipmentKey === y.equipmentKey;
+  return x.equipmentKey === y.equipmentKey;
+}
 /* kg/lb is a display preference, not a property of one movement. Exercise
    definitions store the active display unit only as the legacy representation
    of "weighted"; logged sets remain the source of truth for their actual unit. */
@@ -1732,7 +1790,7 @@ const SHORTCUTS = [
 const LS_KEY = 'liftlog.v1';
 const LS_RESCUE_KEY = 'liftlog.v1.unreadable';  /* holds data we could not load, so nothing is lost silently */
 const LS_REMOTE_RESTORE_KEY = 'liftlog.v1.before-remote-restore';
-const SCHEMA_VERSION = 10;  /* v3: sets carry durationSeconds (time no longer overloads reps)
+const SCHEMA_VERSION = 11;  /* v3: sets carry durationSeconds (time no longer overloads reps)
                                + countForVolume / countForPR split execution from analytics
                                v4: settings carry effortMetric ('none'|'rpe'|'rir'), sets carry rir
                                v5: library exercises carry url (how to perform the movement)
@@ -1741,13 +1799,15 @@ const SCHEMA_VERSION = 10;  /* v3: sets carry durationSeconds (time no longer ov
                                v7: routine items can share an eitherOf pair key
                                v8: routine/workout targets carry a rep range and optional target RIR
                                v9: exerciseLinks connect historical IDs to current Library exercises
-                               v10: dated bodyweights and added load on bodyweight sets */
-const EXPORT_SCHEMA = '1.8.0'; /* version of the documented import/export contract — 1.1: sets[].rir;
+                               v10: dated bodyweights and added load on bodyweight sets
+                               v11: archive, load convention, equipment and movement family */
+const EXPORT_SCHEMA = '1.9.0'; /* version of the documented import/export contract — 1.1: sets[].rir;
                                   1.2: exercises[].url; 1.3: per-item rest dropped; 1.4: items[].eitherOf;
                                   1.5: lower/upper rep targets and optional target RIR;
                                   1.6: reversible historical exercise links;
                                   1.7: bodyweights plus sets[].addedWeight/unit, distance removed;
-                                  1.8: settings.lastModifiedAt for automatic remote backup/restore */
+                                  1.8: settings.lastModifiedAt for automatic remote backup/restore;
+                                  1.9: archived/loadMode/equipmentKey/movementFamily exercise metadata */
 
 /* Set by load() when stored data could not be used, surfaced once after init. */
 let loadWarning = '';
@@ -2007,7 +2067,8 @@ function validateBackup(s){
   s.exercises.forEach((e, i) => {
     const path = 'exercises[' + i + ']'; object(e, path);
     id(e.id, path + '.id', exercises); text(e.name, path + '.name', true);
-    fields(e, path, ['category', 'unit', 'notes', 'url'], text);
+    fields(e, path, ['category', 'unit', 'notes', 'url', 'loadMode', 'equipmentKey', 'movementFamily'], text);
+    bool(e.archived, path + '.archived');
   });
   const linkSources = new Set();
   (s.exerciseLinks || []).forEach((link, i) => {
@@ -2054,7 +2115,7 @@ function validateBackup(s){
     w.exercises.forEach((ex, i) => {
       const at = path + '.exercises[' + i + ']'; object(ex, at);
       if (ex.exerciseId != null) id(ex.exerciseId, at + '.exerciseId');
-      fields(ex, at, ['name', 'category', 'unit', 'notes', 'eitherOf'], text);
+      fields(ex, at, ['name', 'category', 'unit', 'notes', 'eitherOf', 'loadMode', 'equipmentKey', 'movementFamily'], text);
       fields(ex, at, ['plannedSets', 'targetReps', 'targetRepsMin', 'targetRepsMax', 'targetRir', 'targetWeight', 'restSeconds'], number);
       bool(ex.skipped, at + '.skipped');
       array(ex.sets, at + '.sets');
@@ -2094,6 +2155,7 @@ function migrateState(s){
   if (s.version === 7) migrateToV8(s);
   if (s.version === 8) migrateToV9(s);
   if (s.version === 9) migrateToV10(s);
+  if (s.version === 10) migrateToV11(s);
   return s;
 }
 /* v1 shipped an earlier seed library/routines. v2 refreshes both to the
@@ -2201,6 +2263,25 @@ function migrateToV10(s){
   migrateWorkout(s.activeWorkout);
   s.version = 10;
 }
+function migrateToV11(s){
+  const normalizeDefinition = ex => {
+    if (!ex) return;
+    ex.category = normalizeCategory(ex.category, ex.name);
+    ex.movementFamily = String(ex.movementFamily || inferMovementFamily(ex.name, ex.category));
+    ex.loadMode = normalizeLoadMode(ex.loadMode, ex.unit);
+    ex.equipmentKey = String(ex.equipmentKey || '');
+    ex.archived = !!ex.archived;
+  };
+  (s.exercises || []).forEach(normalizeDefinition);
+  const workout = w => (w && w.exercises || []).forEach(ex => {
+    ex.movementFamily = String(ex.movementFamily || inferMovementFamily(ex.name, ex.category));
+    ex.loadMode = normalizeLoadMode(ex.loadMode, ex.unit);
+    ex.equipmentKey = String(ex.equipmentKey || '');
+  });
+  (s.workouts || []).forEach(workout);
+  workout(s.activeWorkout);
+  s.version = 11;
+}
 /* Anything reachable from disk or an import file gets clamped to a known value
    here, so the render layer never has to defend against stray strings. */
 function normalizeState(s){
@@ -2226,8 +2307,12 @@ function normalizeState(s){
       bodyweightIds.add(entry.id); bodyweightDates.add(entry.loggedAt); return true;
     });
   s.exercises = (s.exercises || []).map(e => ({ ...e,
-    category: typeof e.category === 'string' ? e.category : '',
+    category: normalizeCategory(e.category, e.name),
     unit: normalizedExerciseUnit(isUnit(e.unit) ? e.unit : set.unit, set.unit),
+    loadMode: normalizeLoadMode(e.loadMode, isUnit(e.unit) ? e.unit : set.unit),
+    equipmentKey: typeof e.equipmentKey === 'string' ? e.equipmentKey.trim() : '',
+    movementFamily: typeof e.movementFamily === 'string' && e.movementFamily.trim() ? e.movementFamily.trim() : inferMovementFamily(e.name, e.category),
+    archived: !!e.archived,
     notes: typeof e.notes === 'string' ? e.notes : '',
     url: safeUrl(e.url)
   }));
@@ -2258,6 +2343,10 @@ function normalizeState(s){
     w.exercises.forEach(ex => {
       ex.name = ex.name == null ? 'Unknown exercise' : ex.name;
       ex.unit = isUnit(ex.unit) ? ex.unit : 'kg';
+      ex.category = typeof ex.category === 'string' ? ex.category : '';
+      ex.loadMode = normalizeLoadMode(ex.loadMode, ex.unit);
+      ex.equipmentKey = typeof ex.equipmentKey === 'string' ? ex.equipmentKey.trim() : '';
+      ex.movementFamily = typeof ex.movementFamily === 'string' && ex.movementFamily.trim() ? ex.movementFamily.trim() : inferMovementFamily(ex.name, ex.category);
       normalizeWorkoutTargets(ex);
       ex.sets.forEach(set => {
         set.unit = isUnit(set.unit) ? set.unit : ex.unit;
@@ -2267,19 +2356,18 @@ function normalizeState(s){
   };
   s.workouts.forEach(w => normalizeWorkout(w, false));
   if (s.activeWorkout) normalizeWorkout(s.activeWorkout, true);
-  /* Links are analytics joins, so both ends must describe the same measurement
-     kind. This catches restored links as well as choices made in the UI. */
-  const historyKinds = sourceId => {
-    const kinds = new Set();
+  /* Same-series links need one unambiguous load/equipment contract. */
+  const historyContracts = sourceId => {
+    const contracts = [];
     s.workouts.forEach(w => (w.exercises || []).forEach(ex => {
-      if (ex.exerciseId === sourceId) kinds.add(exerciseMeasureKind(ex.unit));
+      if (ex.exerciseId === sourceId) contracts.push(ex);
     }));
-    return kinds;
+    return contracts;
   };
   s.exerciseLinks = s.exerciseLinks.filter(link => {
     const target = s.exercises.find(ex => ex.id === link.targetId);
-    const kinds = historyKinds(link.sourceId);
-    return target && kinds.size === 1 && kinds.has(exerciseMeasureKind(target.unit));
+    const sources = historyContracts(link.sourceId);
+    return target && sources.length && sources.every(source => sameProgressionContract(source, target));
   });
   sortWorkouts(s.workouts);
   return s;
@@ -2309,7 +2397,12 @@ function sampleExercises(){
   /* No how-to links in the seed: they would be links to sites this project
      does not control, shipped to every first run and rotting there. The field
      is yours to fill in on the movements you actually want a reminder for. */
-  const mk = (name, category, unit, notes) => ({ id:uid(), name, category, unit, notes: notes || '', url:'' });
+  const mk = (name, category, unit, notes) => ({ id:uid(), name,
+    category:normalizeCategory(category, name), unit,
+    movementFamily:inferMovementFamily(name, category),
+    loadMode:normalizeLoadMode(unit === 'kg' && /machine/i.test(name) ? 'machine_stack' : null, unit),
+    equipmentKey:unit === 'kg' && /machine/i.test(name) ? String(name).trim().toLowerCase().replace(/\s+/g, '-') : '',
+    archived:false, notes:notes || '', url:'' });
   return [
     mk('Chest Press Machine','Chest','kg','Gym machine. Use controlled reps, focus on form.'),
     mk('Pec Fly Machine','Chest','kg','Light load works well. Focus on a smooth contraction.'),
@@ -2373,7 +2466,10 @@ function seedState(){
     const plan = routines.flatMap(r => r.items).find(it => it.exerciseId === exId(name));
     return {
       exerciseId:exId(name), name, category:(exs.find(e=>e.name===name)||{}).category || '',
-      unit:(exs.find(e=>e.name===name)||{}).unit || 'kg', plannedSets:sets.length,
+      unit:(exs.find(e=>e.name===name)||{}).unit || 'kg',
+      loadMode:(exs.find(e=>e.name===name)||{}).loadMode || 'total',
+      equipmentKey:(exs.find(e=>e.name===name)||{}).equipmentKey || '',
+      movementFamily:(exs.find(e=>e.name===name)||{}).movementFamily || 'other', plannedSets:sets.length,
       targetRepsMin:plan ? plan.repsMin : (sets[0].reps != null ? sets[0].reps : sets[0].durationSeconds),
       targetRepsMax:plan ? plan.repsMax : (sets[0].reps != null ? sets[0].reps : sets[0].durationSeconds),
       targetRir:plan ? plan.targetRir : null,
@@ -2433,6 +2529,9 @@ function freshUI(){
     routineDraft:null,          /* object while editing a routine */
     routineError:'',
     exerciseDraft:null,         /* object while editing one exercise row */
+    showArchivedExercises:false,
+    mergeExerciseId:null,
+    mergeExerciseError:'',
     showExerciseForm:false,
     exerciseFormError:'',
     exerciseFilter:'',          /* Exercises search box, kept so re-renders don't drop it */
@@ -2470,6 +2569,7 @@ function navigate(view){
   if (ui.view !== view){
     ui.routineDraft = null; ui.routineError = '';
     ui.exerciseDraft = null; ui.showExerciseForm = false; ui.exerciseFormError = '';
+    ui.mergeExerciseId = null; ui.mergeExerciseError = '';
     ui.editWorkoutId = null;
     if (view !== 'history') ui.historyLinksOpen = false;
     ui.view = view;
@@ -2502,8 +2602,9 @@ function historyExerciseIdentities(){
     if (!validId(id)) return;
     let x = map.get(id);
     if (!x){
-      x = { id, name:block.name || 'Unknown exercise', category:block.category || '',
-        unit:isUnit(block.unit) ? block.unit : 'kg', sessions:0, sets:0,
+      x = { id, name:block.name || 'Unknown exercise', category:normalizeCategory(block.category, block.name),
+        unit:isUnit(block.unit) ? block.unit : 'kg', loadMode:normalizeLoadMode(block.loadMode, block.unit),
+        equipmentKey:String(block.equipmentKey || ''), movementFamily:String(block.movementFamily || inferMovementFamily(block.name, block.category)), sessions:0, sets:0,
         first:w.startedAt, last:w.startedAt, latest:block };
       map.set(id, x);
     }
@@ -2512,7 +2613,9 @@ function historyExerciseIdentities(){
     x.first = Math.min(x.first, w.startedAt); x.last = Math.max(x.last, w.startedAt);
     if (w.startedAt >= x.last){
       x.name = block.name || x.name; x.category = block.category || x.category;
-      x.unit = isUnit(block.unit) ? block.unit : x.unit; x.latest = block;
+      x.unit = isUnit(block.unit) ? block.unit : x.unit;
+      x.loadMode = normalizeLoadMode(block.loadMode, block.unit); x.equipmentKey = String(block.equipmentKey || '');
+      x.movementFamily = String(block.movementFamily || inferMovementFamily(block.name, block.category)); x.latest = block;
     }
   }));
   return [...map.values()].sort((a,b) => b.last - a.last || a.name.localeCompare(b.name));
@@ -2522,6 +2625,7 @@ function historyExerciseById(id){
   if (live) return live;
   const identity = historyExerciseIdentities().find(x => canonicalExerciseId(x.id) === id);
   return identity ? { id, name:identity.name, category:identity.category, unit:identity.unit,
+    loadMode:identity.loadMode, equipmentKey:identity.equipmentKey, movementFamily:identity.movementFamily,
     notes:'', url:'', historical:true } : null;
 }
 const normalizedExerciseName = name => String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
@@ -2530,17 +2634,17 @@ function suggestedExercise(identity){
     compatibleHistoryLink(identity.id, ex.id));
   return matches.length === 1 ? matches[0] : null;
 }
-function historyMeasurementKinds(sourceId){
-  const kinds = new Set();
+function historyProgressionContracts(sourceId){
+  const matches = [];
   state.workouts.forEach(w => (w.exercises || []).forEach(ex => {
-    if (ex.exerciseId === sourceId) kinds.add(exerciseMeasureKind(ex.unit));
+    if (ex.exerciseId === sourceId) matches.push(ex);
   }));
-  return kinds;
+  return matches;
 }
 function compatibleHistoryLink(sourceId, targetId){
   const target = exerciseById(targetId);
-  const kinds = historyMeasurementKinds(sourceId);
-  return !!(target && kinds.size === 1 && kinds.has(exerciseMeasureKind(target.unit)));
+  const sources = historyProgressionContracts(sourceId);
+  return !!(target && sources.length && sources.every(source => sameProgressionContract(source, target)));
 }
 function unresolvedHistoryExercises(){
   const separate = new Set(state.historySeparateIds || []);
@@ -2579,8 +2683,10 @@ function addHistoricalExerciseToLibrary(sourceId){
   if (exerciseById(sourceId)) return false;
   const x = historyExerciseIdentities().find(item => item.id === sourceId);
   if (!x) return false;
-  state.exercises.push({ id:x.id, name:x.name, category:x.category || 'General',
-    unit:normalizedExerciseUnit(x.unit, state.settings.unit), notes:'', url:'' });
+  state.exercises.push({ id:x.id, name:x.name, category:normalizeCategory(x.category, x.name),
+    unit:normalizedExerciseUnit(x.unit, state.settings.unit), loadMode:normalizeLoadMode(x.loadMode, x.unit),
+    equipmentKey:x.equipmentKey || '', movementFamily:x.movementFamily || inferMovementFamily(x.name, x.category),
+    archived:false, notes:'', url:'' });
   unlinkExerciseHistory(sourceId);
   state.historySeparateIds = (state.historySeparateIds || []).filter(id => id !== sourceId);
   state.settings.historyLinksDismissedKey = '';
@@ -3174,12 +3280,12 @@ function exerciseStats(exId){
 const lastPerformance = exId => exerciseStats(exId).last;
 
 const setDuration = s => s.durationSeconds != null ? s.durationSeconds : (s.unit === 'time' ? s.reps : null); /* reps fallback: pre-v3 data */
-function setSummary(s){
+function setSummary(s, ex){
   const dur = setDuration(s);
   if (s.unit === 'time' || dur != null) return (dur != null ? dur + ' s' : '–');
   if (s.unit === 'bw') return (s.reps != null ? s.reps + ' reps' : '–') + ' BW' +
-    (toNum(s.addedWeight) > 0 ? ' + ' + fmtNum(s.addedWeight) + ' ' + esc(s.addedWeightUnit || 'kg') : '');
-  return fmtNum(s.weight) + ' ' + esc(s.unit || 'kg') + ' × ' + (s.reps != null ? s.reps : '–');
+    (toNum(s.addedWeight) > 0 ? ' + ' + fmtNum(s.addedWeight) + ' ' + esc(exerciseLoadLabel(ex || {unit:'bw'}, s.addedWeightUnit || 'kg')) : '');
+  return fmtNum(s.weight) + ' ' + esc(ex ? exerciseLoadLabel(ex, s.unit || 'kg') : (s.unit || 'kg')) + ' × ' + (s.reps != null ? s.reps : '–');
 }
 function workoutVolume(w){ return w.exercises.reduce((a,ex) => a + sumVolume(ex.sets, w.startedAt), 0); }
 function workoutSets(w){
@@ -3245,7 +3351,9 @@ function buildWorkoutExercise(item){
   const prev = lastPerformance(item.exerciseId);
   const ex = {
     exerciseId:item.exerciseId, name:exDef.name, category:exDef.category || '',
-    unit:exDef.unit || 'kg', plannedSets:item.sets || 3,
+    unit:exDef.unit || 'kg', loadMode:normalizeLoadMode(exDef.loadMode, exDef.unit),
+    equipmentKey:exDef.equipmentKey || '', movementFamily:exDef.movementFamily || inferMovementFamily(exDef.name, exDef.category),
+    plannedSets:item.sets || 3,
     targetRepsMin:item.repsMin != null ? item.repsMin : 8,
     targetRepsMax:item.repsMax != null ? item.repsMax : (item.repsMin != null ? item.repsMin : 8),
     targetRir:item.targetRir != null ? item.targetRir : null,
@@ -3900,8 +4008,12 @@ function saveNewExercise(form){
   const badUrl = !url && String(form.url || '').trim() !== '';
   state.exercises.push({
     id:uid(), name,
-    category: form.category.trim() || 'General',
+    category: normalizeCategory(form.category, name),
     unit: normalizedExerciseUnit(form.unit, state.settings.unit),
+    loadMode: normalizeLoadMode(form.loadMode, form.unit),
+    equipmentKey: String(form.equipmentKey || '').trim(),
+    movementFamily: String(form.movementFamily || '').trim() || inferMovementFamily(name, form.category),
+    archived:false,
     notes: form.notes.trim(),
     url
   });
@@ -3917,19 +4029,25 @@ function saveNewExercise(form){
    kg/lb remain the same weighted measurement kind and are safe to refresh. */
 function syncExerciseDefinitionToActiveWorkout(previous, updated){
   const w = state.activeWorkout;
-  if (!w) return { updated:0, unitDeferred:false };
+  if (!w) return { updated:0, unitDeferred:false, loadDeferred:false };
   const sameMeasure = exerciseMeasureKind(previous.unit) === exerciseMeasureKind(updated.unit);
-  let count = 0, unitDeferred = false;
+  const sameLoadIdentity = normalizeLoadMode(previous.loadMode, previous.unit) === normalizeLoadMode(updated.loadMode, updated.unit) &&
+    String(previous.equipmentKey || '').trim().toLowerCase() === String(updated.equipmentKey || '').trim().toLowerCase();
+  let count = 0, unitDeferred = false, loadDeferred = false;
   w.exercises.forEach(ex => {
     if (ex.exerciseId !== updated.id) return;
     ex.name = updated.name;
     ex.category = updated.category;
     ex.notes = updated.notes;
+    ex.movementFamily = updated.movementFamily;
     if (sameMeasure) ex.unit = updated.unit;
     else unitDeferred = true;
+    const hasEnteredLoad = ex.sets.some(set => set.completed || toNum(set.weight) != null || toNum(set.addedWeight) != null);
+    if (sameLoadIdentity || !hasEnteredLoad){ ex.loadMode = updated.loadMode; ex.equipmentKey = updated.equipmentKey; }
+    else loadDeferred = true;
     count++;
   });
-  return { updated:count, unitDeferred };
+  return { updated:count, unitDeferred, loadDeferred };
 }
 function saveExerciseDraft(){
   const d = ui.exerciseDraft; if (!d) return;
@@ -3939,8 +4057,11 @@ function saveExerciseDraft(){
   const previous = state.exercises[i];
   const url = safeUrl(d.url);
   const badUrl = !url && String(d.url || '').trim() !== '';
-  const updated = { id:d.id, name:d.name.trim(), category:d.category.trim() || 'General',
-                    unit:normalizedExerciseUnit(d.unit, state.settings.unit), notes:d.notes.trim(), url };
+  const updated = { id:d.id, name:d.name.trim(), category:normalizeCategory(d.category, d.name),
+                    unit:normalizedExerciseUnit(d.unit, state.settings.unit),
+                    loadMode:normalizeLoadMode(d.loadMode, d.unit), equipmentKey:String(d.equipmentKey || '').trim(),
+                    movementFamily:String(d.movementFamily || '').trim() || inferMovementFamily(d.name, d.category),
+                    archived:!!d.archived, notes:d.notes.trim(), url };
   state.exercises[i] = updated;
   const activeSync = syncExerciseDefinitionToActiveWorkout(previous, updated);
   ui.exerciseDraft = null;
@@ -3948,7 +4069,42 @@ function saveExerciseDraft(){
   const notes = [];
   if (badUrl) notes.push('the link was not a valid web address');
   if (activeSync.unitDeferred) notes.push('the new unit starts next workout');
+  if (activeSync.loadDeferred) notes.push('the new load convention starts next workout');
   toast('Exercise updated' + (notes.length ? ' — ' + notes.join('; ') : ''));
+}
+function setExerciseArchived(id, archived){
+  const ex = exerciseById(id); if (!ex) return;
+  ex.archived = !!archived;
+  if (ui.exerciseDraft && ui.exerciseDraft.id === id) ui.exerciseDraft = null;
+  save(); render(); toast(ex.archived ? 'Exercise archived' : 'Exercise restored');
+}
+function mergeExercises(sourceId, targetId){
+  const source = exerciseById(sourceId), target = exerciseById(targetId);
+  if (!source || !target || sourceId === targetId) return 'Choose a different surviving exercise.';
+  if (!sameProgressionContract(source, target)) return 'These exercises do not share the same load convention, equipment, and movement family.';
+  const collision = state.routines.find(r => r.items.some(it => it.exerciseId === sourceId) && r.items.some(it => it.exerciseId === targetId));
+  if (collision) return '“' + collision.name + '” contains both exercises. Remove or reconcile one routine item first.';
+  if (state.activeWorkout && state.activeWorkout.exercises.some(ex => ex.exerciseId === sourceId) &&
+      state.activeWorkout.exercises.some(ex => ex.exerciseId === targetId))
+    return 'The ongoing workout contains both exercises. Finish it or remove one exercise before merging.';
+  state.routines.forEach(r => r.items.forEach(it => { if (it.exerciseId === sourceId) it.exerciseId = targetId; }));
+  if (state.activeWorkout) state.activeWorkout.exercises.forEach(ex => {
+    if (ex.exerciseId !== sourceId) return;
+    ex.exerciseId = targetId; ex.name = target.name; ex.category = target.category; ex.unit = target.unit;
+    ex.loadMode = target.loadMode; ex.equipmentKey = target.equipmentKey; ex.movementFamily = target.movementFamily;
+    ex.notes = target.notes;
+  });
+  const links = (state.exerciseLinks || []).filter(link => link.sourceId !== sourceId && link.sourceId !== targetId)
+    .map(link => link.targetId === sourceId ? { sourceId:link.sourceId, targetId } : link);
+  links.push({ sourceId, targetId });
+  const seen = new Set();
+  state.exerciseLinks = links.filter(link => !seen.has(link.sourceId) && seen.add(link.sourceId));
+  state.historySeparateIds = (state.historySeparateIds || []).filter(id => id !== sourceId);
+  state.exercises = state.exercises.filter(ex => ex.id !== sourceId);
+  state.settings.historyLinksDismissedKey = '';
+  ui.mergeExerciseId = null; ui.mergeExerciseError = ''; ui.exerciseDraft = null;
+  save(); render(); toast('Merged “' + source.name + '” into “' + target.name + '”');
+  return '';
 }
 function deleteExercise(id){
   const ex = exerciseById(id); if (!ex) return;
@@ -4524,17 +4680,22 @@ function importRoutines(file){
            definition falls back to name, then to a fresh local ID. */
         const src = exIn.find(e => e.id === it.exerciseId);
         let local = it.exerciseId ? state.exercises.find(e => e.id === it.exerciseId) : null;
+        const sourceDef = src && { ...src, unit:isUnit(src.unit) ? src.unit : 'kg',
+          loadMode:normalizeLoadMode(src.loadMode, src.unit), equipmentKey:String(src.equipmentKey || ''),
+          movementFamily:String(src.movementFamily || inferMovementFamily(src.name, src.category)) };
         if (local && src && (normalizedExerciseName(local.name) !== normalizedExerciseName(src.name) ||
-            exerciseMeasureKind(local.unit) !== exerciseMeasureKind(isUnit(src.unit) ? src.unit : 'kg'))) local = null;
+            !sameProgressionContract(local, sourceDef))) local = null;
         if (!local && src){
           const named = byName(src.name);
-          if (named && exerciseMeasureKind(named.unit) === exerciseMeasureKind(isUnit(src.unit) ? src.unit : 'kg')) local = named;
+          if (named && sameProgressionContract(named, sourceDef)) local = named;
         }
         if (!local && src){
           const sourceId = validId(src.id) && !state.exercises.some(e => e.id === src.id) ? src.id : uid();
-          state.exercises.push({ id:sourceId, name:String(src.name), category:String(src.category || 'General'),
+          state.exercises.push({ id:sourceId, name:String(src.name), category:normalizeCategory(src.category, src.name),
             unit:normalizedExerciseUnit(isUnit(src.unit) ? src.unit : 'kg', state.settings.unit),
-            notes:String(src.notes || ''), url:safeUrl(src.url) });
+            loadMode:normalizeLoadMode(src.loadMode, src.unit), equipmentKey:String(src.equipmentKey || '').trim(),
+            movementFamily:String(src.movementFamily || inferMovementFamily(src.name, src.category)),
+            archived:!!src.archived, notes:String(src.notes || ''), url:safeUrl(src.url) });
           local = state.exercises[state.exercises.length - 1]; addedEx++;
         }
         if (!local) return null;
@@ -4574,10 +4735,10 @@ function importRoutines(file){
    see how items reference exercises. */
 function importFixture(){
   const exercises = [
-    { id:'ex-squat', name:'Back Squat', category:'Legs', unit:'kg', notes:'Belt above 100kg',
+    { id:'ex-squat', name:'Back Squat', category:'Legs', movementFamily:'squat', unit:'kg', loadMode:'total', equipmentKey:'olympic-bar', archived:false, notes:'Belt above 100kg',
       url:'https://en.wikipedia.org/wiki/Squat_(exercise)' },
-    { id:'ex-leg-press', name:'Leg Press', category:'Legs', unit:'kg', notes:'', url:'' },
-    { id:'ex-plank', name:'Plank', category:'Core', unit:'time', notes:'', url:'' }
+    { id:'ex-leg-press', name:'Leg Press', category:'Legs', movementFamily:'squat', unit:'kg', loadMode:'machine_stack', equipmentKey:'gym-a-leg-press', archived:false, notes:'', url:'' },
+    { id:'ex-plank', name:'Plank', category:'Core', movementFamily:'core', unit:'time', loadMode:'duration', equipmentKey:'', archived:false, notes:'', url:'' }
   ];
   const routines = [{
     id:'rt-lower', name:'Lower body',
@@ -4595,7 +4756,7 @@ function importFixture(){
     notes:'Example session — safe to delete after importing.',
     currentExerciseIndex:2,
     exercises:[
-      { exerciseId:'ex-squat', name:'Back Squat', category:'Legs', unit:'kg',
+      { exerciseId:'ex-squat', name:'Back Squat', category:'Legs', movementFamily:'squat', unit:'kg', loadMode:'total', equipmentKey:'olympic-bar',
         plannedSets:3, targetRepsMin:5, targetRepsMax:8, targetRir:2, targetWeight:100, notes:'', skipped:false,
         sets:[
           /* a warm-up: performed, but excluded from volume and from records */
@@ -4604,7 +4765,7 @@ function importFixture(){
           { id:'st-2', weight:100, reps:5, rir:2,    completed:true, completedAt:started + 600000, unit:'kg' },
           { id:'st-3', weight:100, reps:4, rir:0,    completed:true, completedAt:started + 1200000, unit:'kg' }
         ] },
-      { exerciseId:'ex-plank', name:'Plank', category:'Core', unit:'time',
+      { exerciseId:'ex-plank', name:'Plank', category:'Core', movementFamily:'core', unit:'time', loadMode:'duration', equipmentKey:'',
         plannedSets:2, targetRepsMin:45, targetRepsMax:60, targetRir:null, targetWeight:null, notes:'', skipped:false,
         sets:[
           /* timed work: seconds live in durationSeconds, never in reps */
@@ -4647,8 +4808,10 @@ function schemaHelpHTML(){
       ['items[].targetRir', 'integer | null', 'Optional target reps in reserve, clamped to 0\u201310. When set, RIR is shown while logging this exercise.'],
       ['items[].eitherOf', 'optional string', 'Exactly two different exercises in a routine share a key to form an either-of pair. They are placed together; completing one removes the other from that workout only. Invalid or incomplete pairs become independent exercises.'],
       ['items[].weight', 'number | null', 'Planned load, or added load for a bodyweight exercise. <code>null</code> uses last time\u2019s figure.'],
-      ['exercises[]', 'optional', 'Definitions for the ids above: <code>id</code>, <code>name</code>, <code>category</code>, <code>unit</code>, <code>notes</code>, <code>url</code>.'],
+      ['exercises[]', 'optional', 'Definitions for the ids above, including broad <code>category</code>, <code>movementFamily</code>, <code>loadMode</code>, optional <code>equipmentKey</code>, <code>archived</code>, notes and URL.'],
       ['exercises[].unit', 'enum', 'One of ' + units + '. <code>kg</code> and <code>lb</code> both mean weighted; a created Library exercise follows this browser’s global weight unit.'],
+      ['exercises[].loadMode', 'enum', '<code>total</code>, <code>per_hand</code>, <code>machine_stack</code>, <code>bodyweight_added</code>, or <code>duration</code>. Same-series analytics require matching load mode and equipment identity.'],
+      ['exercises[].movementFamily', 'string', 'A volume grouping such as <code>horizontal_push</code> or <code>vertical_pull</code>. It does not join load progression.'],
       ['exercises[].url', 'string', 'A link showing how to perform the movement. Only <code>http</code> and <code>https</code> survive; anything else is dropped.']
     ]) +
     code(sampleRoutinesFile()) +
@@ -4678,7 +4841,7 @@ function schemaHelpHTML(){
       ['sets[].countForVolume', 'boolean', 'Default true. <code>false</code> marks a warm-up: performed, but out of the totals. <code>includeInVolume</code> is accepted as an alias.'],
       ['sets[].countForPR', 'boolean', 'Default true. <code>false</code> keeps a set out of records.'],
       ['bodyweights[]', 'optional', 'Dated entries with <code>id</code>, <code>loggedAt</code>, <code>weight</code>, and <code>unit</code>. Used for bodyweight volume and progression.'],
-      ['exerciseLinks[]', 'optional', 'Reversible analytics links from a historical <code>sourceId</code> to a current exercise <code>targetId</code>. Imported only when the target exists locally. Workout records are never rewritten.'],
+      ['exerciseLinks[]', 'optional', 'Same progression series links from a historical <code>sourceId</code> to a current <code>targetId</code>. Load mode, equipment key and measurement must be compatible; movement family remains independent. Workout records are never rewritten.'],
       ['historySeparateIds[]', 'optional', 'Historical exercise IDs explicitly reviewed and intentionally kept as their own progression series.']
     ]) +
     code(sampleHistoryFile()) +
@@ -4791,6 +4954,8 @@ function normalizeImportedWorkout(w){
       name:typeof ex.name === 'string' && ex.name ? ex.name : 'Unknown exercise',
       category:typeof ex.category === 'string' ? ex.category : '',
       unit:isUnit(ex.unit) ? ex.unit : 'kg',
+      loadMode:normalizeLoadMode(ex.loadMode, ex.unit), equipmentKey:String(ex.equipmentKey || ''),
+      movementFamily:String(ex.movementFamily || inferMovementFamily(ex.name, ex.category)),
       plannedSets:Number(ex.plannedSets) > 0 ? Math.round(ex.plannedSets) : null,
       targetRepsMin:toNum(ex.targetRepsMin == null ? ex.targetReps : ex.targetRepsMin),
       targetRepsMax:toNum(ex.targetRepsMax == null ? ex.targetReps : ex.targetRepsMax),
@@ -5194,12 +5359,12 @@ function htmlCurrentExercise(w, ex){
   const showWeight = ex.unit !== 'time';
   const bodyweight = ex.unit === 'bw';
   const repsLabel = ex.unit === 'time' ? 'sec' : 'reps';
-  const wLabel = unitLabel();
+  const wLabel = exerciseLoadLabel(ex);
 
   let prevHTML = '';
   const bits = [];
   const bit = (k, v) => bits.push('<span class="pp-item"><span class="pp-k">' + k + '</span><strong>' + v + '</strong></span>');
-  if (prev) bit('Last · ' + esc(relDays(prev.date)), prev.sets.slice(0,4).map(setSummary).join(', '));
+  if (prev) bit('Last · ' + esc(relDays(prev.date)), prev.sets.slice(0,4).map(s => setSummary(s, ex)).join(', '));
   if (stats.e1rm > 0) bit(bodyweight ? 'Best total e1RM' : 'Best e1RM', fmtNum(roundHalf(stats.e1rm)) + ' ' + unitLabel());
   if (stats.volume > 0) bit('Best volume', fmtNum(stats.volume) + ' ' + unitLabel());
   if (bodyweight && stats.e1rm <= 0 && stats.reps > 0) bit('Best set', stats.reps + ' reps');
@@ -5226,7 +5391,7 @@ function htmlCurrentExercise(w, ex){
 
   ex.sets.forEach((s, i) => {
     const isCur = i === currentIdx;
-    const prevSet = prev && prev.sets[i] ? setSummary(prev.sets[i]) : '';
+    const prevSet = prev && prev.sets[i] ? setSummary(prev.sets[i], ex) : '';
     const n = i + 1;
     /* The set number doubles as the warm-up toggle: the row is already five or
        six columns wide and has no room for another one, and "is this a warm-up"
@@ -5290,7 +5455,7 @@ function htmlCurrentExercise(w, ex){
       '<span class="ex-tags">' +
         (ex.category ? '<span class="tag">' + esc(ex.category) + '</span>' : '') +
         '<span class="tag">target ' + ex.sets.length + ' × ' + esc(targetRangeLabel(ex)) +
-          (ex.targetWeight != null ? ' @ ' + (bodyweight ? '+' : '') + fmtNum(ex.targetWeight) + ' ' + unitLabel() : '') +
+          (ex.targetWeight != null ? ' @ ' + (bodyweight ? '+' : '') + fmtNum(ex.targetWeight) + ' ' + exerciseLoadLabel(ex) : '') +
           (ex.targetRir != null ? ' · RIR ' + fmtNum(ex.targetRir) : '') + '</span>' +
         '<span class="tag">' + icon('timer','ic-inline') + ' rest ' + fmtClock(currentRestSeconds()) + '</span>' +
       '</span>' +
@@ -5320,11 +5485,11 @@ function htmlDoneRow(ex, i, showEither){
       completed.length + '/' + ex.sets.length + '</span>';
   let html = '<button type="button" class="done-ex-row" data-action="toggle-done-ex" data-idx="' + i + '" aria-expanded="' + open + '">' +
     status + (showEither ? '<span class="either-inline">OR</span>' : '') + '<strong>' + esc(ex.name) + '</strong>' +
-    '<span class="muted small">' + completed.map(setSummary).join(', ') + '</span>' +
+    '<span class="muted small">' + completed.map(s => setSummary(s, ex)).join(', ') + '</span>' +
     IC.chev + '</button>';
   if (open){
     html += '<div class="done-ex-detail">' +
-      (ex.sets.map((s, j) => '<div class="dset"><span class="muted">Set ' + (j+1) + '</span><span>' + setSummary(s) +
+      (ex.sets.map((s, j) => '<div class="dset"><span class="muted">Set ' + (j+1) + '</span><span>' + setSummary(s, ex) +
         (s.rpe != null ? ' <span class="muted">@ RPE ' + esc(s.rpe) + '</span>' : '') +
         (s.rir != null ? ' <span class="muted">@ RIR ' + esc(s.rir) + '</span>' : '') +
         (s.completed ? '' : ' <span class="status-chip skip">open</span>') + '</span></div>').join('')) +
@@ -5436,7 +5601,7 @@ function htmlActionBar(){
    occasional, and it used to cost ~90px of permanent height right where the
    timer needed to be. */
 function htmlAddExercise(){
-  if (!state.activeWorkout || state.exercises.length === 0) return '';
+  if (!state.activeWorkout || !state.exercises.some(e => !e.archived)) return '';
   /* What is already in the session is dropped from the list rather than
      offered and then refused. */
   const inSession = new Set(state.activeWorkout.exercises.map(ex => ex.exerciseId));
@@ -5457,7 +5622,7 @@ const compareExerciseNames = (a,b) => String(a.name).localeCompare(String(b.name
   { numeric:true, sensitivity:'base' });
 function exerciseOptions(selected, skip){
   return state.exercises
-    .filter(e => !(skip && skip.has(e.id)))
+    .filter(e => !e.archived && !(skip && skip.has(e.id)))
     .sort(compareExerciseNames)
     .map(e => '<option value="' + esc(e.id) + '"' + (e.id === selected ? ' selected' : '') + '>' + esc(e.name) + '</option>')
     .join('');
@@ -5535,7 +5700,7 @@ function htmlRoutineEditor(){
       numberField(countLabel + ' min', 'repsMin', it.repsMin, 'max="999" step="1" inputmode="numeric"') +
       numberField(countLabel + ' max', 'repsMax', it.repsMax, 'max="999" step="1" inputmode="numeric"') +
       numberField('Target RIR', 'targetRir', it.targetRir, 'max="10" step="1" inputmode="numeric"') +
-      (loaded ? numberField((bodyweight ? 'Added ' : '') + unitLabel(), 'weight', it.weight, 'step="0.5" inputmode="decimal"') : '');
+      (loaded ? numberField((bodyweight ? 'Added ' : '') + exerciseLoadLabel(e), 'weight', it.weight, 'step="0.5" inputmode="decimal"') : '');
     const pairClass = partner ? ' either-pair ' + (groups[groupIndex][0] === it ? 'either-first' : 'either-last') : '';
     html += '<div class="item-row' + pairClass + '">' +
       '<button type="button" class="grip" id="ri-grip-' + i + '" data-drag="routine-items" ' +
@@ -5552,7 +5717,7 @@ function htmlRoutineEditor(){
     '</div>';
   });
 
-  const hasLibrary = state.exercises.length > 0;
+  const hasLibrary = state.exercises.some(e => !e.archived);
   html += '<div class="form-row mt-4">' +
     '<label class="field flex-2"><span class="cap">Add exercise</span>' +
     '<select id="routine-add-select"' + (hasLibrary ? '' : ' disabled') + '>' +
@@ -5589,11 +5754,11 @@ function historyImportSummaryHTML(){
     '<p class="small mt-2">' + plural(s.added, 'new workout') + ' · ' + s.already + ' already present · ' +
       s.invalid + ' invalid · ' + s.conflicts + ' conflict' + (s.conflicts === 1 ? '' : 's') +
       (s.bodyweightsAdded ? ' · ' + plural(s.bodyweightsAdded, 'bodyweight entry') + ' added' : '') +
-      (s.importedLinks ? ' · ' + plural(s.importedLinks, 'exercise link') + ' restored' : '') + '.</p>' +
+      (s.importedLinks ? ' · ' + plural(s.importedLinks, 'progression-series link') + ' restored' : '') + '.</p>' +
     (s.conflicts ? '<p class="hint mt-2">Existing copies were kept. No local workout was overwritten.</p>' : '') +
     (unresolved ? '<p class="hint mt-2">' + plural(unresolved, 'historical exercise') + ' still need a linking decision for continuity with your current exercises.</p>' : '') +
     '<div class="import-summary-actions">' +
-      (unresolved ? '<button type="button" class="btn btn-primary" data-action="history-links-open">Review exercise links</button>' : '') +
+      (unresolved ? '<button type="button" class="btn btn-primary" data-action="history-links-open">Review progression series</button>' : '') +
       '<button type="button" class="btn" data-action="history-import-dismiss">Done</button>' +
     '</div></div>';
 }
@@ -5602,9 +5767,9 @@ function historyLinksBannerHTML(){
   const signature = unresolvedHistorySignature();
   if (!unresolved.length || ui.importSummary || ui.historyLinksOpen || state.settings.historyLinksDismissedKey === signature) return '';
   return '<div class="history-link-banner mt-4">' +
-    '<strong>' + plural(unresolved.length, 'historical exercise') + ' can be reconciled</strong>' +
+    '<strong>' + plural(unresolved.length, 'historical exercise') + ' need a progression-series decision</strong>' +
     '<p class="small mt-2">Their history is visible now. Link true renames to continue one progression series; keep different machines or variations separate.</p>' +
-    '<div class="import-summary-actions"><button type="button" class="btn btn-primary" data-action="history-links-open">Review links</button>' +
+    '<div class="import-summary-actions"><button type="button" class="btn btn-primary" data-action="history-links-open">Review series</button>' +
       '<button type="button" class="btn" data-action="history-links-dismiss">Not now</button></div></div>';
 }
 function historyLinksPanel(){
@@ -5621,15 +5786,16 @@ function historyLinksPanel(){
     const options = '<option value="">Choose an exercise…</option>' +
       '<option value="__separate"' + (separate.has(x.id) ? ' selected' : '') + '>Keep as separate history</option>' +
       library.map(ex => '<option value="' + esc(ex.id) + '"' + (target && target.id === ex.id ? ' selected' : '') + '>' +
-        esc(ex.name) + ' · ' + esc(ex.unit) + '</option>').join('');
+        esc(ex.name) + ' · ' + esc(exerciseLoadLabel(ex)) + (ex.equipmentKey ? ' · ' + esc(ex.equipmentKey) : '') + '</option>').join('');
     return '<div class="history-link-row">' +
       '<div><div class="history-link-name">' + esc(x.name) + '</div>' +
-        '<div class="history-link-meta">' + esc(x.unit) + (x.category ? ' · ' + esc(x.category) : '') + ' · ' +
+        '<div class="history-link-meta">' + esc(exerciseLoadLabel(x)) + (x.equipmentKey ? ' · ' + esc(x.equipmentKey) : '') +
+          (x.movementFamily ? ' · ' + esc(x.movementFamily.replace(/_/g,' ')) : '') + ' · ' +
           plural(x.sessions, 'session') + ' · ' + plural(x.sets, 'completed set') + '<br>' +
           fmtDate(x.first) + ' → ' + fmtDate(x.last) + ' · ' + esc(status) + '</div>' +
-        (suggestion ? '<div class="history-link-suggestion">Exact name and unit match: ' + esc(suggestion.name) + '</div>' : '') +
+        (suggestion ? '<div class="history-link-suggestion">Exact compatible match: ' + esc(suggestion.name) + '</div>' : '') +
       '</div>' +
-      '<div class="history-link-controls"><label class="field"><span class="cap">History belongs to</span>' +
+      '<div class="history-link-controls"><label class="field"><span class="cap">Same progression series as</span>' +
         '<select data-change="history-link" data-source="' + esc(x.id) + '">' + options + '</select></label>' +
         (suggestion ? '<button type="button" class="btn btn-sm" data-action="history-link-suggest" data-source="' + esc(x.id) + '" data-target="' + esc(suggestion.id) + '">Use exact match</button>' : '') +
         '<button type="button" class="btn btn-sm" data-action="history-link-add" data-source="' + esc(x.id) + '">Create exercise</button>' +
@@ -5638,9 +5804,9 @@ function historyLinksPanel(){
   const linkedCount = identities.filter(x => exerciseLink(x.id)).length;
   const separateCount = identities.filter(x => separate.has(x.id)).length;
   const unresolvedCount = identities.length - linkedCount - separateCount;
-  return '<section class="panel history-links-panel mt-4" id="history-links" tabindex="-1" aria-label="Exercise history links">' +
-    '<div class="history-links-head"><div><h2 class="panel-title">Exercise history links</h2>' +
-      '<p class="muted small">Links combine analytics only. Original workout names and IDs stay unchanged.</p>' +
+  return '<section class="panel history-links-panel mt-4" id="history-links" tabindex="-1" aria-label="Same progression series">' +
+    '<div class="history-links-head"><div><h2 class="panel-title">Same progression series</h2>' +
+      '<p class="muted small">Same-series links combine load analytics only. Original workout names and IDs stay unchanged.</p>' +
       '<p class="history-link-meta">' + unresolvedCount + ' unresolved · ' + linkedCount + ' linked · ' + separateCount + ' kept separate</p></div>' +
       '<button type="button" class="btn" data-action="history-links-close">Close</button></div>' +
     '<div class="history-links-toolbar"><label class="field"><span class="cap">Filter historical exercises</span>' +
@@ -5733,7 +5899,7 @@ function htmlWorkoutDetail(w){
       '</h4>' +
       '<p class="hist-sets">' +
       (done.length
-        ? done.map(s => setSummary(s) + (s.rpe != null ? ' @RPE' + s.rpe : '') + (s.rir != null ? ' @RIR' + s.rir : '') +
+        ? done.map(s => setSummary(s, ex) + (s.rpe != null ? ' @RPE' + s.rpe : '') + (s.rir != null ? ' @RIR' + s.rir : '') +
             (countsVolume(s) ? '' : ' <span class="status-chip skip">warm-up</span>')).join(' · ')
         : 'No completed sets') +
       '</p></div>';
@@ -5858,7 +6024,7 @@ function exMetric(ex){
           : (Number(s.reps) || 0))),
     name: isWeighted ? 'estimated 1RM' : (ex.unit === 'time' ? 'longest hold (s)'
       : (bodyweightHasLoad ? 'estimated total 1RM' : 'best set (reps)')),
-    unit: isWeighted || bodyweightHasLoad ? unitLabel() : (ex.unit === 'time' ? 's' : 'reps')
+    unit: isWeighted ? exerciseLoadLabel(ex) : (bodyweightHasLoad ? unitLabel() : (ex.unit === 'time' ? 's' : 'reps'))
   };
 }
 /* Per-session bests for one exercise, oldest first. */
@@ -5950,7 +6116,7 @@ function progressionFlagsPanel(){
   const rows = (list, kind) => '<ul class="progression-list">' + list.map(({id, fallback, status}) => {
       const def = historyExerciseById(id), name = def ? def.name : fallback;
       const last = status.latest;
-      const load = last.load > 0 ? fmtNum(convertWeight(last.load, 'kg', unitLabel())) + ' ' + unitLabel() +
+      const load = last.load > 0 ? fmtNum(convertWeight(last.load, 'kg', unitLabel())) + ' ' + exerciseLoadLabel(def || last) +
         (last.kind === 'bw' ? ' total' : '') + ' · ' : '';
       const summary = fmtDate(last.date) + ' · ' + load + last.reps.map(fmtNum).join(' / ') + ' reps';
       return '<li><span class="progression-name">' + (def
@@ -5972,8 +6138,7 @@ function progressionFlagsPanel(){
     rows(flags, 'flag') + '</section>';
   return html;
 }
-/* The Progress panel has two readings of the same log: one movement over time,
-   or one muscle group across every movement that trains it. */
+/* Progress separates comparable load series from broader movement-family volume. */
 function progressPanel(){
   return ui.trendMode === 'muscle' ? musclePanel() : trendPanel();
 }
@@ -5982,7 +6147,7 @@ function progressModes(){
     '<button type="button" data-action="trend-mode" data-mode="' + mode + '" ' +
     'aria-pressed="' + (ui.trendMode === mode) + '">' + label + '</button>';
   return '<div class="progress-modes" role="group" aria-label="Progress view">' +
-    tab('exercise','Exercise') + tab('muscle','Muscle group') + '</div>';
+    tab('exercise','Exercise') + tab('muscle','Movement family') + '</div>';
 }
 function trendPanel(){
   const candidates = trendCandidates();
@@ -6036,10 +6201,8 @@ function trendPanel(){
   '</section>';
 }
 
-/* The muscle group a movement belongs to. Blank collapses into the same
-   "General" bucket the Exercises list already displays, so a group never
-   silently splits in two. */
-function exCategory(e){ return ((e && e.category) || '').trim() || 'General'; }
+/* Movement-family volume is deliberately separate from progression identity. */
+function exCategory(e){ return ((e && e.movementFamily) || inferMovementFamily(e && e.name, e && e.category)).trim() || 'other'; }
 /* Only groups with at least one completed set behind them are offered. */
 function muscleCandidates(){
   const names = new Set();
@@ -6047,7 +6210,7 @@ function muscleCandidates(){
   return Array.from(names).sort((a,b) => a.localeCompare(b));
 }
 
-/* One muscle group across every movement that trains it.
+/* One movement family across every movement that trains it.
 
    The metric is deliberately WORKING SETS, not tonnage or e1RM. Load is a
    property of the machine, not of the muscle: a dip on an outdoor bar, a
@@ -6099,11 +6262,11 @@ function musclePanel(){
         '</span></li>').join('') + '</ul>'
     : '<p class="muted small">Nothing logged for this group yet.</p>';
 
-  return '<section class="panel chart-panel mt-4" aria-label="Muscle group progress">' +
+  return '<section class="panel chart-panel mt-4" aria-label="Movement family progress">' +
     '<div class="chart-head">' +
       '<h2 class="panel-title">Progress</h2>' +
       progressModes() +
-      '<label class="field trend-picker"><span class="cap">Muscle group</span>' +
+      '<label class="field trend-picker"><span class="cap">Movement family</span>' +
       '<select data-change="trend-muscle">' +
       groups.map(g => '<option value="' + esc(g) + '"' + (g === group ? ' selected' : '') + '>' +
         esc(g) + '</option>').join('') +
@@ -6128,57 +6291,67 @@ function musclePanel(){
 
 /* ---------- EXERCISES ---------- */
 function viewExercises(){
+  const active = state.exercises.filter(e => !e.archived), archived = state.exercises.filter(e => e.archived);
   const head = '<div class="view-head"><div><h1>Exercises</h1>' +
-    '<p class="view-sub">Your exercises · ' + plural(state.exercises.length, 'movement') + '</p></div>' +
+    '<p class="view-sub">' + plural(active.length, 'active movement') + (archived.length ? ' · ' + archived.length + ' archived' : '') + '</p></div>' +
     '<button type="button" class="btn btn-primary" data-action="ex-form-toggle">' + IC.plus + '<span>New exercise</span></button></div>';
-
-  let html = '<div class="mb-4">' +
-    '<label class="field"><span class="cap">Search</span>' +
+  let html = '<div class="form-row mb-4"><label class="field flex-2"><span class="cap">Search</span>' +
     '<input type="search" id="ex-search" data-bind="exfilter" value="' + esc(ui.exerciseFilter) + '" ' +
-    'placeholder="Filter by name or category…  ( / )" autocomplete="off"></label></div>';
-
+    'placeholder="Filter by name, category or movement family…  ( / )" autocomplete="off"></label>' +
+    (archived.length ? '<button type="button" class="btn" data-action="ex-archived-toggle" aria-pressed="' + ui.showArchivedExercises + '">' +
+      (ui.showArchivedExercises ? 'Hide archived' : 'Show archived (' + archived.length + ')') + '</button>' : '') + '</div>';
   if (ui.showExerciseForm) html += htmlExerciseForm();
-
   if (!state.exercises.length){
     html += '<div class="empty"><h3>No exercises yet</h3><p>Add your first movement. Importing a routines file also creates any exercises it needs.</p>' +
       '<div class="form-actions"><button type="button" class="btn btn-primary" data-action="ex-form-toggle">' + IC.plus + '<span>New exercise</span></button>' +
       '<button type="button" class="btn" data-action="nav" data-view="settings">Import routines</button></div></div>';
     return head + html;
   }
-
   const q = ui.exerciseFilter.trim().toLowerCase();
-  const matches = e => !q ||
-    e.name.toLowerCase().includes(q) || (e.category || '').toLowerCase().includes(q);
-  const shown = state.exercises.filter(matches).sort(compareExerciseNames);
-
+  const matches = e => !q || [e.name,e.category,e.movementFamily,e.equipmentKey].some(v => String(v || '').toLowerCase().includes(q));
+  const shown = (ui.showArchivedExercises ? state.exercises : active).filter(matches).sort(compareExerciseNames);
   html += '<ul class="list" id="ex-list">';
   shown.forEach(e => {
-    if (ui.exerciseDraft && ui.exerciseDraft.id === e.id){
-      html += htmlExerciseEditRow(e);
-      return;
-    }
+    if (ui.exerciseDraft && ui.exerciseDraft.id === e.id){ html += htmlExerciseEditRow(e); return; }
+    if (ui.mergeExerciseId === e.id){ html += htmlExerciseMergeRow(e); return; }
     const usedBy = state.routines.filter(r => r.items.some(it => it.exerciseId === e.id)).length;
     const last = lastPerformance(e.id);
-    html += '<li class="list-row ex-row">' +
-      '<div class="list-main">' +
-        '<p class="list-name">' + esc(e.name) + '</p>' +
-        '<p class="list-meta">' +
-          '<span class="tag tag-plain">' + esc(e.category || 'General') + '</span> ' +
-          esc(UNIT_TEXT[e.unit] || e.unit) +
-          (usedBy ? ' · in ' + plural(usedBy, 'routine') : '') +
-          (last ? ' · last ' + relDays(last.date) : '') +
-        '</p>' +
-        (e.notes ? '<p class="list-meta quote">“' + esc(e.notes) + '”</p>' : '') +
-        htmlHowTo(e.url, e.name) +
-      '</div>' +
-      '<span class="list-actions">' +
-        '<button type="button" class="btn btn-sm" data-action="ex-edit" data-id="' + esc(e.id) + '" aria-label="Edit ' + esc(e.name) + '">Edit</button>' +
-        '<button type="button" class="btn btn-sm btn-danger" data-action="ex-del" data-id="' + esc(e.id) + '" aria-label="Delete ' + esc(e.name) + '">' + IC.trash + '<span class="sr-only">Delete</span></button>' +
-      '</span></li>';
+    html += '<li class="list-row ex-row' + (e.archived ? ' is-archived' : '') + '"><div class="list-main">' +
+      '<p class="list-name">' + esc(e.name) + (e.archived ? ' <span class="tag tag-plain">Archived</span>' : '') + '</p>' +
+      '<p class="list-meta"><span class="tag tag-plain">' + esc(e.category) + '</span> ' +
+        esc(e.unit === 'bw' ? 'bodyweight + ' + exerciseLoadLabel(e) : exerciseLoadLabel(e)) + ' · ' + esc(e.movementFamily.replace(/_/g,' ')) +
+        (e.equipmentKey ? ' · ' + esc(e.equipmentKey) : '') + (usedBy ? ' · in ' + plural(usedBy, 'routine') : '') +
+        (last ? ' · last ' + relDays(last.date) : '') + '</p>' +
+      (e.notes ? '<p class="list-meta quote">“' + esc(e.notes) + '”</p>' : '') + htmlHowTo(e.url, e.name) + '</div>' +
+      '<span class="list-actions"><button type="button" class="btn btn-sm" data-action="ex-edit" data-id="' + esc(e.id) + '" aria-label="Edit ' + esc(e.name) + '">Edit</button>' +
+      '<button type="button" class="btn btn-sm" data-action="ex-merge" data-id="' + esc(e.id) + '" aria-label="Merge ' + esc(e.name) + '">Merge…</button>' +
+      '<button type="button" class="btn btn-sm" data-action="ex-archive" data-id="' + esc(e.id) + '" data-archived="' + (!e.archived) + '" aria-label="' + (e.archived ? 'Restore ' : 'Archive ') + esc(e.name) + '">' + (e.archived ? 'Restore' : 'Archive') + '</button>' +
+      '<button type="button" class="btn btn-sm btn-danger" data-action="ex-del" data-id="' + esc(e.id) + '" aria-label="Delete ' + esc(e.name) + '">' + IC.trash + '<span class="sr-only">Delete</span></button></span></li>';
   });
   html += '</ul>';
-  if (!shown.length) html += '<p class="hint">No exercises match your filter.</p>';
+  if (!shown.length) html += '<p class="hint">No exercises match this view.</p>';
   return head + html;
+}
+function categoryOptions(selected){
+  return EXERCISE_CATEGORIES.map(c => '<option value="' + c + '"' + (c === normalizeCategory(selected) ? ' selected' : '') + '>' + c + '</option>').join('');
+}
+function movementFamilyDatalist(id){
+  const values = Array.from(new Set(MOVEMENT_FAMILIES.concat(state.exercises.map(e => e.movementFamily).filter(Boolean))));
+  return '<datalist id="' + id + '">' + values.map(v => '<option value="' + esc(v) + '">').join('') + '</datalist>';
+}
+function loadModeOptions(selected){
+  return ['total','per_hand','machine_stack'].map(x => '<option value="' + x + '"' + (x === selected ? ' selected' : '') + '>' + LOAD_MODE_TEXT[x] + '</option>').join('');
+}
+function htmlExerciseMergeRow(source){
+  const compatible = state.exercises.filter(e => e.id !== source.id && !e.archived && sameProgressionContract(source,e)).sort(compareExerciseNames);
+  return '<li class="list-row is-editing"><form data-form="ex-merge" data-source="' + esc(source.id) + '">' +
+    '<h3 class="panel-title">Merge “' + esc(source.name) + '”</h3>' +
+    '<p class="hint mt-2">Routine and active-workout references move to the survivor. Finished workouts keep their original snapshots and join the same progression series for analytics.</p>' +
+    '<label class="field mt-3"><span class="cap">Surviving exercise</span><select name="merge-target"' + (compatible.length ? '' : ' disabled') + '>' +
+      (compatible.length ? compatible.map(e => '<option value="' + esc(e.id) + '">' + esc(e.name) + '</option>').join('') : '<option>No compatible active exercise</option>') + '</select></label>' +
+    (ui.mergeExerciseError ? '<p class="error-text mt-2">' + esc(ui.mergeExerciseError) + '</p>' : '') +
+    '<div class="form-actions mt-3"><button class="btn btn-primary btn-sm" type="submit"' + (compatible.length ? '' : ' disabled') + '>Merge exercises</button>' +
+      '<button class="btn btn-sm" type="button" data-action="ex-merge-cancel">Cancel</button></div></form></li>';
 }
 /* the muscle-group values already in the library, offered as autocomplete */
 function categoryDatalist(id){
@@ -6191,13 +6364,21 @@ function htmlExerciseForm(){
       '<h3 class="panel-title mb-3">New exercise</h3>' +
       '<div class="ex-edit-grid">' +
         '<label class="field"><span class="cap">Name</span><input type="text" name="exname" required placeholder="e.g. Incline Press"></label>' +
-        '<label class="field"><span class="cap">Muscle group</span><input type="text" name="excat" list="ex-cats" placeholder="Chest, Back…">' +
-          categoryDatalist('ex-cats') + '</label>' +
+        '<label class="field"><span class="cap">Category</span><select name="excat">' + categoryOptions('Other') + '</select>' +
+          '<span class="hint">Broad reporting bucket: Push, Pull, Legs, Hinge, Core or Cardio.</span></label>' +
         '<label class="field"><span class="cap">Measurement</span>' +
           '<select name="exunit">' + exerciseUnitOptions(state.settings.unit) + '</select></label>' +
       '</div>' +
+      '<div class="ex-edit-grid mt-3">' +
+        '<label class="field"><span class="cap">Movement family</span><input name="exfamily" list="ex-families" placeholder="horizontal_push">' + movementFamilyDatalist('ex-families') +
+          '<span class="hint">Groups training volume across related movements; load progress stays separate.</span></label>' +
+        '<label class="field"><span class="cap">Load convention</span><select name="exloadmode">' + loadModeOptions('total') + '</select></label>' +
+        '<label class="field"><span class="cap">Equipment key (optional)</span><input name="exequipment" placeholder="gym-a-leg-press">' +
+          '<span class="hint">Use the same stable key only for the same implement or machine.</span></label>' +
+      '</div>' +
       '<label class="field mt-3"><span class="cap">Notes (optional)</span>' +
-        '<input type="text" name="exnotes" placeholder="Cues, tempo, grip…"></label>' +
+        '<input type="text" name="exnotes" placeholder="Machine setting, grip, load convention, technique cue…">' +
+        '<span class="hint">Keep stable facts here. Sets, rep ranges, RIR and starting load belong in the routine.</span></label>' +
       /* type="text" with inputmode="url", not type="url": the native validator
          refuses a bare "example.com" and blocks the whole submit over an
          optional field, where safeUrl() simply gives it https://. The keyboard
@@ -6230,13 +6411,21 @@ function htmlExerciseEditRow(e){
     '<form data-form="ex-save">' +
       '<div class="ex-edit-grid">' +
         '<label class="field"><span class="cap">Name</span><input type="text" data-bind="edraft" data-field="name" value="' + esc(d.name) + '" required></label>' +
-        '<label class="field"><span class="cap">Muscle group</span><input type="text" data-bind="edraft" data-field="category" value="' + esc(d.category) + '" list="ex-cats-edit">' +
-          categoryDatalist('ex-cats-edit') + '</label>' +
+        '<label class="field"><span class="cap">Category</span><select data-bind="edraft" data-field="category">' + categoryOptions(d.category) + '</select>' +
+          '<span class="hint">Broad reporting bucket: Push, Pull, Legs, Hinge, Core or Cardio.</span></label>' +
         '<label class="field"><span class="cap">Measurement</span>' +
           '<select data-bind="edraft" data-field="unit">' + exerciseUnitOptions(d.unit) + '</select></label>' +
       '</div>' +
+      '<div class="ex-edit-grid mt-3">' +
+        '<label class="field"><span class="cap">Movement family</span><input data-bind="edraft" data-field="movementFamily" value="' + esc(d.movementFamily || '') + '" list="ex-families-edit">' + movementFamilyDatalist('ex-families-edit') +
+          '<span class="hint">Groups training volume across related movements; load progress stays separate.</span></label>' +
+        '<label class="field"><span class="cap">Load convention</span><select data-bind="edraft" data-field="loadMode">' + loadModeOptions(normalizeLoadMode(d.loadMode,d.unit)) + '</select></label>' +
+        '<label class="field"><span class="cap">Equipment key (optional)</span><input data-bind="edraft" data-field="equipmentKey" value="' + esc(d.equipmentKey || '') + '" placeholder="gym-a-leg-press">' +
+          '<span class="hint">Same key means the same implement or machine.</span></label>' +
+      '</div>' +
       '<label class="field mt-3"><span class="cap">Notes</span>' +
-        '<input type="text" data-bind="edraft" data-field="notes" value="' + esc(d.notes) + '"></label>' +
+        '<input type="text" data-bind="edraft" data-field="notes" value="' + esc(d.notes) + '">' +
+        '<span class="hint">Stable facts only; prescription belongs in the routine.</span></label>' +
       '<label class="field mt-3"><span class="cap">How-to link</span>' +
         '<input type="text" inputmode="url" autocomplete="url" spellcheck="false" ' +
         'data-bind="edraft" data-field="url" value="' + esc(d.url || '') + '" ' +
@@ -6546,7 +6735,7 @@ function viewSettings(){
             '<label class="file-btn"><span>' + IC.up + ' Import</span><input type="file" accept=".json,application/json" data-change="import-history" aria-label="Import workout history from a JSON file"></label>' +
           '</div>' +
           (historyExerciseIdentities().some(x => !exerciseById(x.id))
-            ? '<button type="button" class="btn btn-sm mt-2" data-action="history-links-open">Review exercise links' +
+            ? '<button type="button" class="btn btn-sm mt-2" data-action="history-links-open">Review progression series' +
                 (unresolvedHistoryExercises().length ? ' (' + unresolvedHistoryExercises().length + ')' : '') + '</button>'
             : '') +
         '</div>' +
@@ -6644,8 +6833,12 @@ const actions = {
   'ex-form-toggle'(){ ui.showExerciseForm = !ui.showExerciseForm; ui.exerciseFormError=''; render();
     if (ui.showExerciseForm){ const f = $('[data-form="ex-new"] input[name="exname"]'); if (f) f.focus(); } },
   'ex-form-close'(){ ui.showExerciseForm = false; ui.exerciseFormError=''; render(); },
-  'ex-edit'(d){ const e = exerciseById(d.id); if (e){ ui.exerciseDraft = Object.assign({ url:'' }, deepCopy(e)); render(); } },
+  'ex-edit'(d){ const e = exerciseById(d.id); if (e){ ui.mergeExerciseId=null; ui.exerciseDraft = Object.assign({ url:'' }, deepCopy(e)); render(); } },
   'ex-edit-cancel'(){ ui.exerciseDraft = null; render(); },
+  'ex-archived-toggle'(){ ui.showArchivedExercises = !ui.showArchivedExercises; render(); },
+  'ex-archive'(d){ setExerciseArchived(d.id, d.archived === 'true'); },
+  'ex-merge'(d){ ui.exerciseDraft=null; ui.mergeExerciseId=d.id; ui.mergeExerciseError=''; render(); },
+  'ex-merge-cancel'(){ ui.mergeExerciseId=null; ui.mergeExerciseError=''; render(); },
   'ex-del'(d){ deleteExercise(d.id); },
 
   'history-toggle'(d){
@@ -6672,8 +6865,8 @@ const actions = {
     else toast('No unambiguous exact matches found');
   },
   'history-link-suggest'(d){
-    if (!setExerciseLink(d.source, d.target)){ toast('That exercise uses a different measurement type'); return; }
-    save(); render(); toast('Exercise history linked');
+    if (!setExerciseLink(d.source, d.target)){ toast('That exercise uses a different load convention or equipment identity'); return; }
+    save(); render(); toast('Progression series linked');
   },
   'history-link-add'(d){
     if (!addHistoricalExerciseToLibrary(d.source)) return;
@@ -7127,7 +7320,7 @@ const changeHandlers = {
     if (t.value === '__separate') keepHistoricalExerciseSeparate(source);
     else if (t.value){
       if (!setExerciseLink(source, t.value)){
-        toast('That exercise uses a different measurement type'); render(); return;
+        toast('That exercise uses a different load convention or equipment identity'); render(); return;
       }
     }
     else {
@@ -7136,7 +7329,7 @@ const changeHandlers = {
       state.settings.historyLinksDismissedKey = '';
     }
     save(); render();
-    toast(t.value === '__separate' ? 'History kept separate' : t.value ? 'Exercise history linked' : 'Link decision cleared');
+    toast(t.value === '__separate' ? 'History kept separate' : t.value ? 'Progression series linked' : 'Link decision cleared');
   },
   setting(t){
     const key = t.dataset.field;
@@ -7214,9 +7407,15 @@ document.addEventListener('submit', e => {
   }
   else if (kind === 'ex-new'){
     const g = n => { const el = form.elements.namedItem(n); return el ? el.value : ''; };
-    saveNewExercise({ name:g('exname'), category:g('excat'), unit:g('exunit'), notes:g('exnotes'), url:g('exurl') });
+    saveNewExercise({ name:g('exname'), category:g('excat'), unit:g('exunit'), loadMode:g('exloadmode'),
+      equipmentKey:g('exequipment'), movementFamily:g('exfamily'), notes:g('exnotes'), url:g('exurl') });
   }
   else if (kind === 'ex-save'){ saveExerciseDraft(); }
+  else if (kind === 'ex-merge'){
+    const target = form.elements.namedItem('merge-target');
+    const error = mergeExercises(form.dataset.source, target && target.value);
+    if (error){ ui.mergeExerciseError = error; render(); }
+  }
   else if (kind === 'bodyweight-add'){ addBodyweightEntry(form); }
   else if (kind === 'remote-config'){ saveRemoteConfigForm(form); }
 });
@@ -7235,6 +7434,7 @@ document.addEventListener('keydown', e => {
     if (dlgOpen) return; /* native dialog handles it */
     if (ui.routineDraft){ ui.routineDraft = null; ui.routineError=''; render(); }
     else if (ui.exerciseDraft){ ui.exerciseDraft = null; render(); }
+    else if (ui.mergeExerciseId){ ui.mergeExerciseId = null; ui.mergeExerciseError=''; render(); }
     else if (ui.showExerciseForm){ ui.showExerciseForm = false; render(); }
     return;
   }
