@@ -9,7 +9,7 @@ const fs = require('node:fs');
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
     let html = fs.readFileSync('index.html', 'utf8');
-    html = html.replace('init();\n})();', `window.testAPI = { sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, importHistory, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, progressionStatus, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, render, get state(){return state}, get ui(){return ui} };\ninit();\n})();`);
+    html = html.replace('init();\n})();', `window.testAPI = { sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, importHistory, normalizeImportedSet, normalizeImportedWorkout, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, workoutVolume, progressionStatus, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, compatibleHistoryLink, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, render, get state(){return state}, get ui(){return ui} };\ninit();\n})();`);
     await page.route('http://liftlog.test/**', route => route.fulfill({ contentType:'text/html', body:html }));
     await page.goto('http://liftlog.test/');
     const result = await page.evaluate(async () => {
@@ -19,7 +19,7 @@ const fs = require('node:fs');
       const wait = () => new Promise(r => setTimeout(r, 60));
       t.state.exercises = []; t.state.routines = []; t.state.workouts = [];
       const sample = t.sampleRoutinesFile();
-      check(sample.version === 9 && sample.schemaVersion === '1.6.0', 'sample version markers');
+      check(sample.version === 10 && sample.schemaVersion === '1.7.0', 'sample version markers');
       t.importRoutines(file(sample)); await wait();
       check(t.state.routines.length === 1 && t.state.exercises.length === 3, 'routine sample imports all definitions');
       const r = t.state.routines[0];
@@ -54,6 +54,44 @@ const fs = require('node:fs');
         'linking combines old and current progression series');
       check(t.state.workouts.find(w => w.id === 'wk-orphan').exercises[0].exerciseId === 'old-back-squat',
         'linking leaves the original workout record unchanged');
+      const timedOrphan = { workouts:[{ id:'wk-old-hold', routineId:null, routineName:'Old hold', startedAt:Date.now()-50000,
+        finishedAt:Date.now()-40000, notes:'', exercises:[{exerciseId:'old-plank',name:'Old Plank',category:'Core',unit:'time',
+          plannedSets:1,sets:[{id:'old-hold-set',setType:'time',durationSeconds:30,completed:true,unit:'time'}]}] }] };
+      t.importHistory(file(timedOrphan)); await wait();
+      check(!t.compatibleHistoryLink('old-plank', currentSquat.id) && !t.setExerciseLink('old-plank', currentSquat.id),
+        'history links reject a different measurement kind');
+      const plank = t.state.exercises.find(ex => ex.id === 'ex-plank');
+      check(t.compatibleHistoryLink('old-plank', plank.id) && t.setExerciseLink('old-plank', plank.id),
+        'history links accept the same measurement kind');
+      t.keepHistoricalExerciseSeparate('old-plank');
+      t.state.workouts.push({id:'mixed-identity',startedAt:Date.now(),finishedAt:Date.now(),routineName:'Mixed',notes:'',
+        exercises:[{exerciseId:'old-plank',name:'Old Plank',unit:'kg',sets:[]}]});
+      check(!t.compatibleHistoryLink('old-plank', plank.id) && !t.compatibleHistoryLink('old-plank', currentSquat.id),
+        'a historical ID reused across measurement kinds cannot be linked');
+      t.state.workouts.pop();
+      const explicitReps = t.normalizeImportedWorkout({id:'explicit-reps',startedAt:1000,exercises:[{
+        exerciseId:'mixed',name:'Explicit reps',unit:'time',sets:[{id:'mixed-set',setType:'reps',unit:'time',reps:7,durationSeconds:55,completed:true}]
+      }]});
+      check(explicitReps.exercises[0].unit === 'kg' && explicitReps.exercises[0].sets[0].unit === 'kg' &&
+        explicitReps.exercises[0].sets[0].reps === 7 && explicitReps.exercises[0].sets[0].durationSeconds === null,
+        'explicit reps setType overrides a contradictory time unit');
+      check(t.normalizeImportedSet({id:'distance-set',setType:'distance',distance:100,completed:true},'kg') === null,
+        'unsupported distance sets are dropped instead of becoming uneditable data');
+      t.state.bodyweights = [{id:'bw-entry',loggedAt:1,weight:80,unit:'kg'}];
+      const bwWorkout = {id:'bw-workout',routineId:null,routineName:'Pull-ups',startedAt:1000,finishedAt:2000,notes:'',
+        exercises:[{exerciseId:'bw-lift',name:'Pull-up',unit:'bw',plannedSets:1,sets:[
+          {id:'bw-set',unit:'bw',addedWeight:20,addedWeightUnit:'kg',reps:5,completed:true}
+        ]}]};
+      check(t.workoutVolume(bwWorkout) === 500, 'bodyweight plus added load contributes accurate volume');
+      const bwPayload = t.historyPayload([bwWorkout],[],[],t.state.bodyweights);
+      check(bwPayload.bodyweights.length === 1 && bwPayload.workouts[0].exercises[0].sets[0].setType === 'reps' &&
+        bwPayload.workouts[0].exercises[0].sets[0].addedWeight === 20,
+        'history transfer preserves dated bodyweight and added load');
+      t.state.bodyweights = [];
+      t.importHistory(file(bwPayload)); await wait();
+      check(t.state.bodyweights.length === 1 && t.state.workouts.some(w => w.id === 'bw-workout') &&
+        t.workoutVolume(t.state.workouts.find(w => w.id === 'bw-workout')) === 500,
+        'history import restores bodyweight context and added-load analytics');
       check(t.keepHistoricalExerciseSeparate('old-back-squat') &&
         t.canonicalExerciseId('old-back-squat') === 'old-back-squat' &&
         t.state.historySeparateIds.includes('old-back-squat'),
@@ -67,7 +105,7 @@ const fs = require('node:fs');
         'rep range is ordered and target RIR is clamped');
       const old = {version:3, settings:{theme:'invalid',effortMetric:'invalid'}, exercises:[], routines:[{items:[{rest:60,sets:3,reps:5}]}],workouts:[{startedAt:1,exercises:[{restSeconds:60,sets:[{rpe:8}]}]}]};
       t.normalizeState(t.migrateState(old));
-      check(old.version === 9 && Array.isArray(old.exerciseLinks) && Array.isArray(old.historySeparateIds) &&
+      check(old.version === 10 && Array.isArray(old.exerciseLinks) && Array.isArray(old.historySeparateIds) && Array.isArray(old.bodyweights) &&
         old.routines[0].items[0].repsMin === 5 && old.routines[0].items[0].repsMax === 5 &&
         old.settings.effortMetric === 'rpe' && old.settings.theme === 'system' && !('rest' in old.routines[0].items[0]) &&
         !('restSeconds' in old.workouts[0].exercises[0]), 'complete migration chain and settings fallback');
@@ -86,12 +124,12 @@ const fs = require('node:fs');
         'restore aligns weighted exercise definitions with the global unit');
       check(dirtyWorkout.finishedAt < dirtyWorkout.startedAt && prepared.workouts[0].finishedAt === prepared.workouts[0].startedAt &&
         cleanSet.weight === null && cleanSet.reps === 0 && cleanSet.rpe === 10 && cleanSet.rir === 0 &&
-        cleanSet.durationSeconds === null && cleanSet.distance === null && !('distanceUnit' in cleanSet),
+        cleanSet.durationSeconds === null && !('distance' in cleanSet) && !('distanceUnit' in cleanSet),
         'full restore enforces the same workout and set bounds as transfer import');
       t.state.schemaVersion = 'stale'; t.state.source = 'stale'; t.state.exportedAt = 'stale';
       const freshEnvelope = t.backupPayload();
       delete t.state.schemaVersion; delete t.state.source; delete t.state.exportedAt;
-      check(freshEnvelope.schemaVersion === '1.6.0' && freshEnvelope.source === 'liftlog-web' && freshEnvelope.exportedAt !== 'stale',
+      check(freshEnvelope.schemaVersion === '1.7.0' && freshEnvelope.source === 'liftlog-web' && freshEnvelope.exportedAt !== 'stale',
         'fresh export metadata wins over stale state fields');
       t.setUnit('lb');
       check(t.state.exercises.filter(ex => ex.unit === 'kg' || ex.unit === 'lb').every(ex => ex.unit === 'lb'),
@@ -128,10 +166,12 @@ const fs = require('node:fs');
       return checks;
     });
     await page.getByRole('button', {name:'Settings'}).click();
-    await page.getByRole('button', {name:/Review exercise links/}).click();
+    await page.getByRole('button', {name:'Review exercise links', exact:true}).click();
     await page.getByRole('button', {name:'Show reviewed'}).click();
     const historyLinkSelect = page.locator('[data-change="history-link"][data-source="old-back-squat"]');
     assert.equal(await historyLinkSelect.inputValue(), 'ex-squat', 'review shows the saved historical link');
+    assert.equal(await historyLinkSelect.locator('option[value="ex-plank"]').count(), 0,
+      'manual history linking hides incompatible measurement kinds');
     await historyLinkSelect.selectOption('__separate');
     assert.equal(await page.evaluate(() => window.testAPI.canonicalExerciseId('old-back-squat')), 'old-back-squat',
       'review can undo a link and keep the series separate');
@@ -291,7 +331,7 @@ const fs = require('node:fs');
     });
     await page.getByRole('button', {name:'Import & replace', exact:true}).click();
     await page.waitForFunction(() => window.testAPI.state.activeWorkout?.timer?.remaining === 37);
-    assert.equal(await page.evaluate(() => window.testAPI.state.version), 9, 'full backup restore migrates');
+    assert.equal(await page.evaluate(() => window.testAPI.state.version), 10, 'full backup restore migrates');
     assert.equal(await page.evaluate(() => window.testAPI.state.activeWorkout.timer.remaining), 37, 'backup restore retains rest timer');
     await page.reload();
     assert.equal(await page.evaluate(() => window.testAPI.state.activeWorkout.exercises[0].name), 'Leg Press', 'settled workout survives reload');
@@ -364,10 +404,31 @@ const fs = require('node:fs');
       'correcting a logged set clears a stale flag without stored flag state');
 
     await page.getByRole('button', {name:'Settings'}).click();
+    const bodyweightsBefore = await page.evaluate(() => window.testAPI.state.bodyweights.length);
+    await page.getByLabel('Bodyweight (kg)').fill('82.5');
+    await page.getByRole('button', {name:'Add entry'}).click();
+    assert.equal(await page.evaluate(() => window.testAPI.state.bodyweights.length), bodyweightsBefore + 1,
+      'Settings adds a dated bodyweight entry');
+    await page.evaluate(() => {
+      const t=window.testAPI;
+      t.state.activeWorkout=null;
+      t.state.exercises.push({id:'bw-ui',name:'Weighted Pull-up',category:'Back',unit:'bw',notes:'',url:''});
+      t.state.routines.push({id:'bw-ui-routine',name:'Bodyweight test',items:[{id:'bw-ui-item',exerciseId:'bw-ui',sets:2,repsMin:5,repsMax:8,targetRir:2,weight:10}]});
+      t.startRoutine('bw-ui-routine');
+    });
+    const addedLoad=page.getByLabel('Set 1 added load in kg');
+    assert.equal(await addedLoad.inputValue(),'10','bodyweight routine target seeds added load');
+    await addedLoad.fill('15');
+    assert.deepEqual(await page.evaluate(() => {
+      const set=window.testAPI.state.activeWorkout.exercises[0].sets[0];
+      return {addedWeight:set.addedWeight,addedWeightUnit:set.addedWeightUnit,weight:set.weight};
+    }),{addedWeight:15,addedWeightUnit:'kg',weight:null},'active bodyweight logging keeps added load distinct');
+    await page.getByRole('button',{name:'Settings'}).click();
     const beforeClear = await page.evaluate(() => ({
       exercises:window.testAPI.state.exercises.length,
       routines:window.testAPI.state.routines.length,
-      theme:window.testAPI.state.settings.theme
+      theme:window.testAPI.state.settings.theme,
+      bodyweights:window.testAPI.state.bodyweights.length
     }));
     await page.getByRole('button', {name:'Clear workout data…'}).click();
     await page.getByRole('dialog', {name:'Clear workout data?'}).getByRole('button', {name:'Clear workout data', exact:true}).click();
@@ -375,6 +436,7 @@ const fs = require('node:fs');
       exercises:window.testAPI.state.exercises.length,
       routines:window.testAPI.state.routines.length,
       theme:window.testAPI.state.settings.theme,
+      bodyweights:window.testAPI.state.bodyweights.length,
       workouts:window.testAPI.state.workouts.length,
       active:window.testAPI.state.activeWorkout
     })), {...beforeClear,workouts:0,active:null}, 'clear workout data preserves library, routines and settings');

@@ -5,14 +5,14 @@ const fs = require('node:fs');
 const html = fs.readFileSync('index.html', 'utf8').replace('init();\n})();', `window.testAPI = { prepareBackup, validateBackup, backupPayload, applyFullBackup, importData, importHistory, readJSONFile, remoteRestore, navigate, render, save, get state(){return state}, get ui(){return ui} };\ninit();\n})();`);
 const origin = 'https://liftlog.test/';
 const fixture = () => ({
-  app:'liftlog', kind:'backup', version:9,
+  app:'liftlog', kind:'backup', version:10,
   settings:{ theme:'system', unit:'kg', defaultRest:90, autoRest:false, sound:false, vibrate:false, effortMetric:'rir' },
   exercises:[{id:'ex', name:'Squat', unit:'kg'}, {id:'time', name:'Plank', unit:'time'}],
   routines:[{id:'routine', name:'Routine', items:[{id:'item',exerciseId:'ex',sets:3,repsMin:5,repsMax:8,targetRir:2,weight:20}]}],
   workouts:[{id:'history', routineId:'routine', routineName:'History', startedAt:1700000000000, finishedAt:1700000300000,
     exercises:[{exerciseId:'ex',name:'Squat',unit:'kg',sets:[{id:'set',weight:20,reps:5,rpe:8,completed:true}]},
       {exerciseId:'time',name:'Plank',unit:'time',sets:[{id:'timed-set',durationSeconds:45,reps:null,completed:true}]}]}],
-  exerciseLinks:[], historySeparateIds:[],
+  exerciseLinks:[], historySeparateIds:[], bodyweights:[],
   activeWorkout:null
 });
 (async () => {
@@ -59,11 +59,12 @@ const fixture = () => ({
       ['control character ID', s => s.routines[0].id = 'a\u0000b'],
       ['string version', s => s.version = '3'],
       ['fractional version', s => s.version = 3.5],
-      ['future version', s => s.version = 10],
+      ['future version', s => s.version = 11],
       ['malformed history link', s => s.exerciseLinks = [{sourceId:'old',targetId:7}]],
       ['self history link', s => s.exerciseLinks = [{sourceId:'ex',targetId:'ex'}]],
       ['duplicate history link source', s => s.exerciseLinks = [{sourceId:'old',targetId:'ex'},{sourceId:'old',targetId:'time'}]],
       ['duplicate separate history ID', s => s.historySeparateIds = ['old','old']],
+      ['duplicate bodyweight ID', s => s.bodyweights = [{id:'bw',loggedAt:1,weight:80,unit:'kg'},{id:'bw',loggedAt:2,weight:81,unit:'kg'}]],
       ['wrong app', s => s.app = 'other'],
       ['wrong kind', s => s.kind = 'remote-config'],
       ['missing timestamp', s => delete s.workouts[0].startedAt],
@@ -91,6 +92,10 @@ const fixture = () => ({
       if (JSON.stringify(good)!==serialized || prepared===good) throw Error('Mutated input');
       const dangling=structuredClone(good); dangling.exercises=[];
       t.prepareBackup(dangling); // users can delete definitions without deleting history/routines
+      const incompatible=structuredClone(good);
+      incompatible.workouts[0].exercises[1].exerciseId='old-timed';
+      incompatible.exerciseLinks=[{sourceId:'old-timed',targetId:'ex'}];
+      if(t.prepareBackup(incompatible).exerciseLinks.length) throw Error('Kept incompatible history link');
       return cases.length;
     }, {good,cases});
     console.log('PASS ' + validation + ' invalid backup cases reject before confirmation without changing memory/storage');
@@ -109,15 +114,16 @@ const fixture = () => ({
     await page.waitForFunction(() => document.getElementById('toast-region').textContent.includes('Could not import'));
     assert.equal(await page.locator('#toast-region').textContent().then(x => x.includes('not valid JSON')),false);
     console.log('PASS JSON parsing errors and import errors are distinct');
-    for (let version=1;version<=9;version++){
+    for (let version=1;version<=10;version++){
       const legacy=fixture(); legacy.version=version; delete legacy.app; delete legacy.kind;
+      if(version<=9) delete legacy.bodyweights;
       if(version<=8){delete legacy.exerciseLinks;delete legacy.historySeparateIds;}
       if(version<=7){const item=legacy.routines[0].items[0];item.reps=item.repsMin;delete item.repsMin;delete item.repsMax;delete item.targetRir;}
       if(version<=2){const set=legacy.workouts[0].exercises[1].sets[0];set.reps=set.durationSeconds;delete set.durationSeconds;}
       if(version<=3) delete legacy.settings.effortMetric;
       if(version<=5){legacy.routines[0].items[0].rest=60;legacy.workouts[0].exercises[0].restSeconds=60;}
       const prepared=await page.evaluate(s => window.testAPI.prepareBackup(s),legacy);
-      assert.equal(prepared.version,9);
+      assert.equal(prepared.version,10);
       assert.equal(prepared.routines[0].items[0].repsMin,version===1 ? 10 : 5);
       assert.equal(prepared.routines[0].items[0].repsMax,version===1 ? 15 : (version<=7 ? 5 : 8));
       assert.equal(prepared.workouts[0].exercises[1].sets[0].durationSeconds,45);
@@ -126,7 +132,7 @@ const fixture = () => ({
       if(version<=3) assert.equal(prepared.settings.effortMetric,'rpe');
       if(version<=5) assert.equal('restSeconds' in prepared.workouts[0].exercises[0],false);
     }
-    console.log('PASS v1–v9 backups migrate and preserve history');
+    console.log('PASS v1–v10 backups migrate and preserve history');
     const beforeCancel=await page.evaluate(() => JSON.stringify(window.testAPI.state));
     await page.evaluate(s => {window.testAPI.applyFullBackup(s);},good);
     await page.getByRole('button',{name:'Cancel',exact:true}).click();
@@ -236,9 +242,22 @@ const fixture = () => ({
     for (const raw of ['{broken',JSON.stringify(cases[1].value),JSON.stringify({...good,version:99})]){
       const recovery=await newPage({raw});
       assert.equal(await recovery.evaluate(()=>localStorage.getItem('liftlog.v1.unreadable')),raw);
-      assert.equal(await recovery.evaluate(()=>window.testAPI.state.version),9);
+      assert.equal(await recovery.evaluate(()=>window.testAPI.state.version),10);
       await recovery.context().close();
     }
+    const rescued=await newPage({raw:'{broken'});
+    await rescued.evaluate(()=>window.testAPI.navigate('settings'));
+    assert.equal(await rescued.getByRole('button',{name:'Download rescued data'}).count(),1);
+    const downloadPromise=rescued.waitForEvent('download');
+    await rescued.getByRole('button',{name:'Download rescued data'}).click();
+    const download=await downloadPromise;
+    assert.match(download.suggestedFilename(),/^liftlog-rescued-data-.*\.txt$/);
+    await rescued.getByRole('button',{name:'Discard rescued data…'}).click();
+    await rescued.getByRole('dialog',{name:'Discard rescued data?'}).getByRole('button',{name:'Discard',exact:true}).click();
+    await rescued.waitForFunction(()=>localStorage.getItem('liftlog.v1.unreadable')===null);
+    assert.equal(await rescued.evaluate(()=>localStorage.getItem('liftlog.v1.unreadable')),null);
+    await rescued.context().close();
+    console.log('PASS rescued unreadable data can be downloaded unchanged and explicitly discarded');
     for (const options of [{failRescue:true},{rescue:'previous recovery copy'}]){
       const raw=JSON.stringify(cases[1].value);
       const recovery=await newPage({raw,...options});

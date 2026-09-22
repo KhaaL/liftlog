@@ -893,6 +893,9 @@ html.is-reordering{ user-select:none; -webkit-user-select:none; }
 .setting-block h3{ margin-bottom:var(--sp-1); }
 .setting-block .desc{ color:var(--muted); font-size:var(--fs-sm); margin-bottom:var(--sp-3); }
 .setting-block .danger-heading{ color:var(--danger); }
+.bodyweight-list{ border-top:1px solid var(--border); }
+.bodyweight-row{ display:grid; grid-template-columns:1fr auto 44px; gap:var(--sp-3); align-items:center; padding:var(--sp-2) 0; border-bottom:1px solid var(--border); font-size:var(--fs-sm); }
+.bodyweight-row:last-child{ border-bottom:0; }
 .transfer-grid{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--sp-3); }
 .transfer-group{ min-width:0; padding:var(--sp-3); border:1px solid var(--border); border-radius:var(--radius); background:var(--surface-2); }
 .transfer-group h4{ margin:0 0 var(--sp-2); font-size:var(--fs-sm); }
@@ -1510,18 +1513,35 @@ function clamp(n, lo, hi){ return Math.min(hi, Math.max(lo, n)); }
 function normalizeSetNumber(field, raw){
   const n = toNum(raw);
   if (n == null) return null;
-  if (field === 'weight' || field === 'durationSeconds' || field === 'distance') return n < 0 ? null : n;
+  if (field === 'weight' || field === 'addedWeight' || field === 'durationSeconds') return n < 0 ? null : n;
   if (field === 'reps') return Math.max(0, Math.round(n));
   if (field === 'rpe') return clamp(n, 1, 10);
   if (field === 'rir') return clamp(Math.round(n), 0, 10);
   return n;
 }
 function normalizeSetMeasurements(set){
-  ['weight','reps','durationSeconds','rpe','rir','distance'].forEach(field => {
+  ['weight','addedWeight','reps','durationSeconds','rpe','rir'].forEach(field => {
     if (field in set) set[field] = normalizeSetNumber(field, set[field]);
   });
-  if (set.distance == null) delete set.distanceUnit;
+  /* Distance was briefly accepted by the transfer parser without any way to
+     log or edit it. Do not retain fields the application cannot manage. */
+  delete set.distance;
+  delete set.distanceUnit;
+  if (set.unit === 'bw'){
+    set.weight = null;
+    set.addedWeightUnit = set.addedWeightUnit === 'lb' ? 'lb' : 'kg';
+  } else {
+    delete set.addedWeight;
+    delete set.addedWeightUnit;
+  }
   return set;
+}
+function normalizeBodyweightEntry(entry){
+  if (!entry) return null;
+  const loggedAt = toNum(entry.loggedAt), weight = toNum(entry.weight);
+  if (!validId(String(entry.id || '')) || loggedAt == null ||
+      !Number.isFinite(new Date(loggedAt).getTime()) || !(weight > 0)) return null;
+  return { id:String(entry.id), loggedAt, weight, unit:entry.unit === 'lb' ? 'lb' : 'kg' };
 }
 /* Volume = execution (completed) AND inclusion (countForVolume, default true).
    Warm-ups opt out with countForVolume:false instead of abusing completed:false. */
@@ -1548,16 +1568,34 @@ function convertWeight(w, from, to){
   if (from === 'lb' && to === 'kg') return w / LB_PER_KG;
   return w;
 }
-/* Weight of a logged set expressed in the current display unit. */
+/* A dated bodyweight is valid from that day forward. A later entry must never
+   leak backwards into an older workout. */
+function bodyweightAt(at, displayUnit = unitLabel()){
+  const entry = (state.bodyweights || []).find(x => x.loggedAt <= at);
+  return entry ? convertWeight(entry.weight, entry.unit, displayUnit) : null;
+}
+/* External weight of a logged set expressed in the current display unit. */
 function setWeight(s){
   const w = toNum(s.weight);
   if (w == null) return 0;
   return convertWeight(w, s.unit === 'lb' ? 'lb' : 'kg', unitLabel());
 }
-function sumVolume(sets){
+function addedSetWeight(s){
+  const w = toNum(s.addedWeight);
+  if (w == null) return 0;
+  return convertWeight(w, s.addedWeightUnit === 'lb' ? 'lb' : 'kg', unitLabel());
+}
+/* Total resistance for analytics. Bodyweight work uses the most recent body
+   weight known on the workout date plus any external load recorded on the set. */
+function effectiveSetWeight(s, at){
+  if (s.unit !== 'bw') return setWeight(s);
+  const base = bodyweightAt(at, unitLabel());
+  return base == null ? 0 : base + addedSetWeight(s);
+}
+function sumVolume(sets, at){
   return sets.reduce((a,s) => {
     if (!countsVolume(s) || !(s.reps > 0)) return a;
-    const w = setWeight(s);
+    const w = effectiveSetWeight(s, at);
     return w > 0 ? a + w * s.reps : a;
   }, 0);
 }
@@ -1595,7 +1633,7 @@ const IC = {
    Single source of truth for the small closed vocabularies that used to be
    spelled out again in every template, validator and importer.
    ============================================================ */
-/* How a set is measured. 'bw' and 'time' carry no weight. */
+/* How an exercise is measured. Bodyweight sets can carry separate added load. */
 const UNITS = ['kg','lb','bw','time'];
 const isUnit = u => UNITS.indexOf(u) !== -1;
 const UNIT_TEXT = {                       /* short form, used in lists */
@@ -1639,7 +1677,7 @@ const THEME_SCHEME = {
    the import-format help enumerates them. normalizeImportedSet() branches on
    them individually, since each decides a different field — so adding a type
    means teaching that function what it means, not just extending this list. */
-const SET_TYPES = ['reps','time','hold','distance'];
+const SET_TYPES = ['reps','time','hold'];
 
 /* Rest timer bounds, shared by the settings field and the routine editor. */
 const REST_MIN = 15, REST_MAX = 600;
@@ -1674,7 +1712,7 @@ const SHORTCUTS = [
    ============================================================ */
 const LS_KEY = 'liftlog.v1';
 const LS_RESCUE_KEY = 'liftlog.v1.unreadable';  /* holds data we could not load, so nothing is lost silently */
-const SCHEMA_VERSION = 9;   /* v3: sets carry durationSeconds (time no longer overloads reps)
+const SCHEMA_VERSION = 10;  /* v3: sets carry durationSeconds (time no longer overloads reps)
                                + countForVolume / countForPR split execution from analytics
                                v4: settings carry effortMetric ('none'|'rpe'|'rir'), sets carry rir
                                v5: library exercises carry url (how to perform the movement)
@@ -1682,11 +1720,13 @@ const SCHEMA_VERSION = 9;   /* v3: sets carry durationSeconds (time no longer ov
                                    exercises[].restSeconds are gone
                                v7: routine items can share an eitherOf pair key
                                v8: routine/workout targets carry a rep range and optional target RIR
-                               v9: exerciseLinks connect historical IDs to current Library exercises */
-const EXPORT_SCHEMA = '1.6.0'; /* version of the documented import/export contract — 1.1: sets[].rir;
+                               v9: exerciseLinks connect historical IDs to current Library exercises
+                               v10: dated bodyweights and added load on bodyweight sets */
+const EXPORT_SCHEMA = '1.7.0'; /* version of the documented import/export contract — 1.1: sets[].rir;
                                   1.2: exercises[].url; 1.3: per-item rest dropped; 1.4: items[].eitherOf;
                                   1.5: lower/upper rep targets and optional target RIR;
-                                  1.6: reversible historical exercise links */
+                                  1.6: reversible historical exercise links;
+                                  1.7: bodyweights plus sets[].addedWeight/unit, distance removed */
 
 /* Set by load() when stored data could not be used, surfaced once after init. */
 let loadWarning = '';
@@ -1899,6 +1939,7 @@ function validateBackup(s){
   if (s.app != null && s.app !== 'liftlog') fail('app', 'liftlog');
   if (s.kind != null && s.kind !== 'backup') fail('kind', 'backup');
   ['exercises', 'routines', 'workouts'].forEach(key => array(s[key], key));
+  if (s.bodyweights != null) array(s.bodyweights, 'bodyweights');
   if (s.exerciseLinks != null) array(s.exerciseLinks, 'exerciseLinks');
   if (s.historySeparateIds != null) array(s.historySeparateIds, 'historySeparateIds');
   if (s.settings != null){
@@ -1907,7 +1948,14 @@ function validateBackup(s){
     fields(s.settings, 'settings', ['defaultRest', 'lastFileBackupAt', 'seededAt'], number);
     fields(s.settings, 'settings', ['autoRest', 'sound', 'vibrate'], bool);
   }
-  const exercises = new Set(), routines = new Set(), workouts = new Set();
+  const exercises = new Set(), routines = new Set(), workouts = new Set(), bodyweights = new Set();
+  (s.bodyweights || []).forEach((entry, i) => {
+    const path = 'bodyweights[' + i + ']'; object(entry, path);
+    id(entry.id, path + '.id', bodyweights);
+    timestamp(entry.loggedAt, path + '.loggedAt', true);
+    number(entry.weight, path + '.weight', true);
+    text(entry.unit, path + '.unit', true);
+  });
   s.exercises.forEach((e, i) => {
     const path = 'exercises[' + i + ']'; object(e, path);
     id(e.id, path + '.id', exercises); text(e.name, path + '.name', true);
@@ -1965,9 +2013,9 @@ function validateBackup(s){
       ex.sets.forEach((set, j) => {
         const here = at + '.sets[' + j + ']'; object(set, here);
         id(set.id, here + '.id', sets);
-        fields(set, here, ['weight', 'reps', 'durationSeconds', 'rpe', 'rir', 'distance'], number);
+        fields(set, here, ['weight', 'addedWeight', 'reps', 'durationSeconds', 'rpe', 'rir', 'distance'], number);
         timestamp(set.completedAt, here + '.completedAt');
-        fields(set, here, ['unit', 'setType', 'distanceUnit'], text);
+        fields(set, here, ['unit', 'setType', 'addedWeightUnit', 'distanceUnit'], text);
         fields(set, here, ['completed', 'countForVolume', 'countForPR', 'includeInVolume'], bool);
       });
     });
@@ -1997,6 +2045,7 @@ function migrateState(s){
   if (s.version === 6) s.version = 7; // optional eitherOf: old routines need no conversion
   if (s.version === 7) migrateToV8(s);
   if (s.version === 8) migrateToV9(s);
+  if (s.version === 9) migrateToV10(s);
   return s;
 }
 /* v1 shipped an earlier seed library/routines. v2 refreshes both to the
@@ -2087,6 +2136,23 @@ function migrateToV9(s){
   s.historySeparateIds = [];
   s.version = 9;
 }
+function migrateToV10(s){
+  s.bodyweights = [];
+  const migrateWorkout = w => (w && w.exercises || []).forEach(ex => {
+    (ex.sets || []).forEach(set => {
+      if (set.unit === 'bw' && set.weight != null){
+        set.addedWeight = set.weight;
+        set.addedWeightUnit = s.settings && s.settings.unit === 'lb' ? 'lb' : 'kg';
+        set.weight = null;
+      }
+      delete set.distance;
+      delete set.distanceUnit;
+    });
+  });
+  (s.workouts || []).forEach(migrateWorkout);
+  migrateWorkout(s.activeWorkout);
+  s.version = 10;
+}
 /* Anything reachable from disk or an import file gets clamped to a known value
    here, so the render layer never has to defend against stray strings. */
 function normalizeState(s){
@@ -2103,6 +2169,13 @@ function normalizeState(s){
   set.seededAt = toNum(set.seededAt);
   set.historyLinksDismissedKey = typeof set.historyLinksDismissedKey === 'string' ? set.historyLinksDismissedKey : '';
   s.settings = set;
+  const bodyweightIds = new Set(), bodyweightDates = new Set();
+  s.bodyweights = (Array.isArray(s.bodyweights) ? s.bodyweights : []).map(normalizeBodyweightEntry)
+    .filter(Boolean).sort((a,b) => b.loggedAt - a.loggedAt)
+    .filter(entry => {
+      if (bodyweightIds.has(entry.id) || bodyweightDates.has(entry.loggedAt)) return false;
+      bodyweightIds.add(entry.id); bodyweightDates.add(entry.loggedAt); return true;
+    });
   s.exercises = (s.exercises || []).map(e => ({ ...e,
     category: typeof e.category === 'string' ? e.category : '',
     unit: normalizedExerciseUnit(isUnit(e.unit) ? e.unit : set.unit, set.unit),
@@ -2145,6 +2218,20 @@ function normalizeState(s){
   };
   s.workouts.forEach(w => normalizeWorkout(w, false));
   if (s.activeWorkout) normalizeWorkout(s.activeWorkout, true);
+  /* Links are analytics joins, so both ends must describe the same measurement
+     kind. This catches restored links as well as choices made in the UI. */
+  const historyKinds = sourceId => {
+    const kinds = new Set();
+    s.workouts.forEach(w => (w.exercises || []).forEach(ex => {
+      if (ex.exerciseId === sourceId) kinds.add(exerciseMeasureKind(ex.unit));
+    }));
+    return kinds;
+  };
+  s.exerciseLinks = s.exerciseLinks.filter(link => {
+    const target = s.exercises.find(ex => ex.id === link.targetId);
+    const kinds = historyKinds(link.sourceId);
+    return target && kinds.size === 1 && kinds.has(exerciseMeasureKind(target.unit));
+  });
   sortWorkouts(s.workouts);
   return s;
 }
@@ -2275,7 +2362,7 @@ function seedState(){
   /* When this install was created. The sample sessions below it are demo data,
      not something the user would miss, so the backup reminder ignores them. */
   const settings = Object.assign(defaultSettings(), { seededAt:Date.now() });
-  return { version:SCHEMA_VERSION, settings, exercises:exs, routines, workouts,
+  return { version:SCHEMA_VERSION, settings, exercises:exs, routines, workouts, bodyweights:[],
     exerciseLinks:[], historySeparateIds:[], activeWorkout:null };
 }
 
@@ -2389,8 +2476,20 @@ function historyExerciseById(id){
 const normalizedExerciseName = name => String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
 function suggestedExercise(identity){
   const matches = state.exercises.filter(ex => normalizedExerciseName(ex.name) === normalizedExerciseName(identity.name) &&
-    exerciseMeasureKind(ex.unit) === exerciseMeasureKind(identity.unit));
+    compatibleHistoryLink(identity.id, ex.id));
   return matches.length === 1 ? matches[0] : null;
+}
+function historyMeasurementKinds(sourceId){
+  const kinds = new Set();
+  state.workouts.forEach(w => (w.exercises || []).forEach(ex => {
+    if (ex.exerciseId === sourceId) kinds.add(exerciseMeasureKind(ex.unit));
+  }));
+  return kinds;
+}
+function compatibleHistoryLink(sourceId, targetId){
+  const target = exerciseById(targetId);
+  const kinds = historyMeasurementKinds(sourceId);
+  return !!(target && kinds.size === 1 && kinds.has(exerciseMeasureKind(target.unit)));
 }
 function unresolvedHistoryExercises(){
   const separate = new Set(state.historySeparateIds || []);
@@ -2404,7 +2503,7 @@ function unresolvedHistorySignature(){
 }
 function setExerciseLink(sourceId, targetId){
   if (!validId(sourceId) || !exerciseById(targetId) || sourceId === targetId || exerciseById(sourceId) ||
-      !historyExerciseIdentities().some(x => x.id === sourceId)) return false;
+      !compatibleHistoryLink(sourceId, targetId)) return false;
   const existing = exerciseLink(sourceId);
   if (existing && existing.targetId === targetId) return false;
   state.exerciseLinks = (state.exerciseLinks || []).filter(link => link.sourceId !== sourceId);
@@ -3007,10 +3106,10 @@ function exerciseStats(exId){
       if (canonicalExerciseId(ex.exerciseId) !== exId) continue;
       const completed = ex.sets.filter(s => s.completed);
       if (!out.last && completed.length) out.last = { date:w.startedAt, sets:completed };
-      out.volume = Math.max(out.volume, sumVolume(ex.sets));
+      out.volume = Math.max(out.volume, sumVolume(ex.sets, w.startedAt));
       for (const s of ex.sets){
         if (!countsPR(s)) continue;
-        const weight = setWeight(s);
+        const weight = effectiveSetWeight(s, w.startedAt);
         if (weight > 0) out.e1rm = Math.max(out.e1rm, epley(weight, s.reps));
         const d = setDuration(s);
         if (d != null) out.duration = Math.max(out.duration, Number(d) || 0);
@@ -3024,15 +3123,14 @@ function exerciseStats(exId){
 const lastPerformance = exId => exerciseStats(exId).last;
 
 const setDuration = s => s.durationSeconds != null ? s.durationSeconds : (s.unit === 'time' ? s.reps : null); /* reps fallback: pre-v3 data */
-/* Returns escaped HTML: distanceUnit and unit can originate in an import file. */
 function setSummary(s){
-  if (s.distance != null) return fmtNum(s.distance) + ' ' + esc(s.distanceUnit || 'm');
   const dur = setDuration(s);
   if (s.unit === 'time' || dur != null) return (dur != null ? dur + ' s' : '–');
-  if (s.unit === 'bw') return (s.reps != null ? s.reps + ' reps' : '–') + ' BW';
+  if (s.unit === 'bw') return (s.reps != null ? s.reps + ' reps' : '–') + ' BW' +
+    (toNum(s.addedWeight) > 0 ? ' + ' + fmtNum(s.addedWeight) + ' ' + esc(s.addedWeightUnit || 'kg') : '');
   return fmtNum(s.weight) + ' ' + esc(s.unit || 'kg') + ' × ' + (s.reps != null ? s.reps : '–');
 }
-function workoutVolume(w){ return w.exercises.reduce((a,ex) => a + sumVolume(ex.sets), 0); }
+function workoutVolume(w){ return w.exercises.reduce((a,ex) => a + sumVolume(ex.sets, w.startedAt), 0); }
 function workoutSets(w){
   return routineGroups(w.exercises).reduce((a, group) =>
     a + Math.max(...group.map(ex => ex.sets.filter(s => s.completed).length)), 0);
@@ -3073,10 +3171,15 @@ function workoutDuration(w){
    ============================================================ */
 function newSetFrom(ex, copyFrom){
   const timed = ex.unit === 'time';
+  const bodyweight = ex.unit === 'bw';
   const lower = ex.targetRepsMin != null ? ex.targetRepsMin : 0;
   return {
     id:uid(),
     weight: copyFrom ? copyFrom.weight : null,
+    ...(bodyweight ? {
+      addedWeight:copyFrom ? copyFrom.addedWeight : null,
+      addedWeightUnit:copyFrom ? (copyFrom.addedWeightUnit || unitLabel()) : unitLabel()
+    } : {}),
     /* reps stays a pure count; timed work lives in durationSeconds */
     reps:   copyFrom ? (timed ? null : copyFrom.reps) : (!timed ? lower : null),
     durationSeconds: copyFrom ? (timed ? copyFrom.durationSeconds : null) : (timed ? lower : null),
@@ -3104,7 +3207,13 @@ function buildWorkoutExercise(item){
     const set = newSetFrom(ex, null);
     /* seed the bar with the plan, else with what was lifted last time */
     const prevSet = prev && (prev.sets[i] || prev.sets[0]);
-    if (item.weight != null) set.weight = item.weight;
+    if (ex.unit === 'bw'){
+      if (item.weight != null){ set.addedWeight = item.weight; set.addedWeightUnit = unitLabel(); }
+      else if (prevSet && prevSet.addedWeight != null){
+        set.addedWeight = convertWeight(prevSet.addedWeight, prevSet.addedWeightUnit || unitLabel(), unitLabel());
+        set.addedWeightUnit = unitLabel();
+      }
+    } else if (item.weight != null) set.weight = item.weight;
     else if (prevSet && prevSet.weight != null) set.weight = prevSet.weight;
     ex.sets.push(set);
   }
@@ -3276,7 +3385,10 @@ function cascadeSetField(setId, field, value, elPrefix, unitSuffix){
   if (changed) announce(plural(changed, 'later set') + ' set to ' + fmtNum(value) + (unitSuffix ? ' ' + unitSuffix : '') + '.');
 }
 function cascadeWeight(setId, value){
-  cascadeSetField(setId, 'weight', value, 'sw-', unitLabel());
+  const ex = currentExercise(); if (!ex) return;
+  const field = ex.unit === 'bw' ? 'addedWeight' : 'weight';
+  if (ex.unit === 'bw') ex.sets.forEach(s => { s.addedWeightUnit = unitLabel(); });
+  cascadeSetField(setId, field, value, 'sw-', unitLabel());
 }
 function cascadeReps(setId, value){
   const ex = currentExercise(); if (!ex) return;
@@ -3827,6 +3939,11 @@ function setUnit(v){
       if (exerciseMeasureKind(ex.unit) === 'weighted') ex.unit = v;
       ex.targetWeight = conv(ex.targetWeight);
       ex.sets.forEach(set => {
+        if (set.unit === 'bw' && set.addedWeightUnit === from){
+          set.addedWeight = conv(set.addedWeight);
+          set.addedWeightUnit = v;
+          return;
+        }
         if (set.unit !== from) return;
         set.weight = conv(set.weight);
         set.unit = v;
@@ -3842,7 +3959,9 @@ function dateStamp(prefix){
   return prefix + '-' + d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0') + '.json';
 }
 function downloadJSON(payload, filename){
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
+  downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' }), filename);
+}
+function downloadBlob(blob, filename){
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = filename;
@@ -4364,7 +4483,7 @@ function schemaHelpHTML(){
       ['items[].repsMax', 'integer', 'Upper rep target, clamped to the same range. Values below <code>repsMin</code> are reordered.'],
       ['items[].targetRir', 'integer | null', 'Optional target reps in reserve, clamped to 0\u201310. When set, RIR is shown while logging this exercise.'],
       ['items[].eitherOf', 'optional string', 'Exactly two different exercises in a routine share a key to form an either-of pair. They are placed together; completing one removes the other from that workout only. Invalid or incomplete pairs become independent exercises.'],
-      ['items[].weight', 'number | null', 'Planned load. <code>null</code> leaves the bar to last time\u2019s figure.'],
+      ['items[].weight', 'number | null', 'Planned load, or added load for a bodyweight exercise. <code>null</code> uses last time\u2019s figure.'],
       ['exercises[]', 'optional', 'Definitions for the ids above: <code>id</code>, <code>name</code>, <code>category</code>, <code>unit</code>, <code>notes</code>, <code>url</code>.'],
       ['exercises[].unit', 'enum', 'One of ' + units + '. <code>kg</code> and <code>lb</code> both mean weighted; a created Library exercise follows this browser’s global weight unit.'],
       ['exercises[].url', 'string', 'A link showing how to perform the movement. Only <code>http</code> and <code>https</code> survive; anything else is dropped.']
@@ -4387,6 +4506,7 @@ function schemaHelpHTML(){
       ['exercises[].targetRir', 'integer | null', 'Optional prescribed reps in reserve, clamped to 0\u201310.'],
       ['sets[].setType', 'enum', SET_TYPES.map(t => '<code>' + t + '</code>').join(' · ') + '. Decides which fields carry the measurement.'],
       ['sets[].weight', 'number | null', 'Negative values are dropped.'],
+      ['sets[].addedWeight', 'number | null', 'External load for a bodyweight set. Stored with <code>addedWeightUnit</code>; negative values are dropped.'],
       ['sets[].reps', 'integer', 'A count, never seconds. Rounded, floored at 0.'],
       ['sets[].durationSeconds', 'number', 'Where timed work goes. A legacy file with seconds in <code>reps</code> is corrected on import.'],
       ['sets[].rir', 'integer', 'Reps in reserve \u2014 shown in the sample file; enable RIR in Settings (effort is hidden by default). Clamped to 0\u201310.'],
@@ -4394,6 +4514,7 @@ function schemaHelpHTML(){
       ['sets[].completed', 'boolean', 'Whether the set was performed.'],
       ['sets[].countForVolume', 'boolean', 'Default true. <code>false</code> marks a warm-up: performed, but out of the totals. <code>includeInVolume</code> is accepted as an alias.'],
       ['sets[].countForPR', 'boolean', 'Default true. <code>false</code> keeps a set out of records.'],
+      ['bodyweights[]', 'optional', 'Dated entries with <code>id</code>, <code>loggedAt</code>, <code>weight</code>, and <code>unit</code>. Used for bodyweight volume and progression.'],
       ['exerciseLinks[]', 'optional', 'Reversible analytics links from a historical <code>sourceId</code> to a current exercise <code>targetId</code>. Imported only when the target exists locally. Workout records are never rewritten.'],
       ['historySeparateIds[]', 'optional', 'Historical exercise IDs explicitly reviewed and intentionally kept as their own progression series.']
     ]) +
@@ -4425,57 +4546,68 @@ function downloadSample(kind){
 /* Sets go out with an explicit setType so importers never guess at field
    semantics. Shared with the sample file and the help example — see
    routinesPayload() for why. */
-function historyPayload(sourceWorkouts, sourceLinks, separateIds){
-  const setTypeOf = s => s.distance != null ? 'distance'
-    : (s.unit === 'time' || s.durationSeconds != null) ? 'time' : 'reps';
+function historyPayload(sourceWorkouts, sourceLinks, separateIds, sourceBodyweights){
+  const setTypeOf = s => (s.unit === 'time' || s.durationSeconds != null) ? 'time' : 'reps';
   const workouts = deepCopy(sourceWorkouts);
-  workouts.forEach(w => w.exercises.forEach(ex => (ex.sets || []).forEach(s => { s.setType = setTypeOf(s); })));
+  workouts.forEach(w => w.exercises.forEach(ex => (ex.sets || []).forEach(s => {
+    delete s.distance; delete s.distanceUnit;
+    s.setType = setTypeOf(s);
+  })));
   const ids = new Set(workouts.flatMap(w => w.exercises.map(ex => ex.exerciseId)).filter(Boolean));
   const exerciseLinks = (sourceLinks || []).filter(link => ids.has(link.sourceId)).map(link => ({ ...link }));
   const historySeparateIds = (separateIds || []).filter(id => ids.has(id));
   return {
     app:'liftlog', kind:'history', schemaVersion:EXPORT_SCHEMA, source:'liftlog-web',
     version:SCHEMA_VERSION, exportedAt:new Date().toISOString(),
-    workouts, exerciseLinks, historySeparateIds
+    workouts, bodyweights:deepCopy(sourceBodyweights || []), exerciseLinks, historySeparateIds
   };
 }
 function exportHistory(){
   if (!state.workouts.length){ toast('No workout history to export'); return; }
-  downloadJSON(historyPayload(state.workouts, state.exerciseLinks, state.historySeparateIds), dateStamp('liftlog-history'));
+  downloadJSON(historyPayload(state.workouts, state.exerciseLinks, state.historySeparateIds, state.bodyweights), dateStamp('liftlog-history'));
   toast('History exported');
 }
 /* ---- import normalization (schema 1.0.0 contract) ----
-   Sets: `setType` ("reps"|"time"|"hold"|"distance") decides which fields carry data.
+   Sets: `setType` ("reps"|"time"|"hold") decides which fields carry data.
    Legacy files without setType fall back to the exercise/set unit ("time" unit →
    seconds in `reps` are moved into durationSeconds). Numeric bounds are coerced,
    includeInVolume is accepted as an alias of countForVolume. */
 function normalizeImportedSet(s, exUnit){
+  if (s.setType != null && !SET_TYPES.includes(s.setType)) return null;
   const incomingId = s.id == null ? '' : String(s.id);
   const o = { id:validId(incomingId) ? incomingId : uid() };
   o.weight = normalizeSetNumber('weight', s.weight);
+  o.addedWeight = normalizeSetNumber('addedWeight', s.addedWeight);
   o.reps = normalizeSetNumber('reps', s.reps);
   o.rpe = normalizeSetNumber('rpe', s.rpe);
   o.rir = normalizeSetNumber('rir', s.rir);
   o.durationSeconds = normalizeSetNumber('durationSeconds', s.durationSeconds);
-  o.distance = normalizeSetNumber('distance', s.distance);
-  /* distanceUnit is free text in the contract; keep it short and inert */
-  if (o.distance != null && o.distance >= 0)
-    o.distanceUnit = String(s.distanceUnit || 'm').replace(/[^\w/²³°.-]/g, '').slice(0, 8) || 'm';
   o.completed = !!s.completed;
   o.completedAt = (typeof s.completedAt === 'number' && s.completedAt > 0 && Number.isFinite(new Date(s.completedAt).getTime())) ? s.completedAt : 0;
   /* execution (completed) is separate from analytics inclusion; only explicit opt-outs are stored */
   const cv = s.countForVolume != null ? s.countForVolume : s.includeInVolume;
   if (cv === false) o.countForVolume = false;
   if (s.countForPR === false) o.countForPR = false;
-  /* interpret by setType first, then by unit (legacy files) */
+  /* Explicit setType is authoritative. Unit is only the fallback for legacy
+     files and cannot turn an explicit reps set into timed work. */
   const unit = isUnit(s.unit) ? s.unit : (isUnit(exUnit) ? exUnit : 'kg');
-  if (s.setType === 'distance'){ o.unit = unit === 'time' ? 'kg' : unit; o.reps = null; }
-  else if (s.setType === 'time' || s.setType === 'hold' || unit === 'time'){
+  if (s.setType === 'time' || s.setType === 'hold' || (s.setType == null && unit === 'time')){
     o.unit = 'time';
     if (o.durationSeconds == null && o.reps != null) o.durationSeconds = o.reps; /* legacy: seconds in reps */
     o.reps = null;
-  } else { o.unit = unit; }
-  return o;
+    o.weight = null; delete o.addedWeight; delete o.addedWeightUnit;
+  } else {
+    o.unit = unit === 'bw' ? 'bw' : (unit === 'lb' ? 'lb' : (unit === 'kg' ? 'kg' : (exUnit === 'bw' ? 'bw' : unitLabel())));
+    o.durationSeconds = null;
+    if (o.unit === 'bw'){
+      /* 1.6 and older sometimes put added load in weight even though the UI
+         could not create it. Preserve it under the unambiguous 1.7 field. */
+      if (o.addedWeight == null) o.addedWeight = o.weight;
+      o.addedWeightUnit = s.addedWeightUnit === 'lb' ? 'lb' : (s.addedWeightUnit === 'kg' ? 'kg' : unitLabel());
+      o.weight = null;
+    } else { delete o.addedWeight; delete o.addedWeightUnit; }
+  }
+  return normalizeSetMeasurements(o);
 }
 function normalizeImportedWorkout(w){
   const ts = v => typeof v === 'number' && Number.isFinite(new Date(v).getTime()) ? v : (typeof v === 'string' && v && !isNaN(Date.parse(v)) ? Date.parse(v) : NaN);
@@ -4503,6 +4635,13 @@ function normalizeImportedWorkout(w){
       notes:typeof ex.notes === 'string' ? ex.notes : '', skipped:!!ex.skipped,
       sets:(Array.isArray(ex.sets) ? ex.sets : []).map(s => s ? normalizeImportedSet(s, ex.unit) : null).filter(Boolean)
     };
+    const measurementKinds = new Set(block.sets.map(set => exerciseMeasureKind(set.unit)));
+    if (measurementKinds.size === 1){
+      const kind = measurementKinds.values().next().value;
+      if (kind !== exerciseMeasureKind(block.unit))
+        block.unit = kind === 'time' ? 'time' : kind === 'bodyweight' ? 'bw' :
+          (block.sets.find(set => set.unit === 'lb') ? 'lb' : 'kg');
+    }
     block.sets.forEach(set => {
       if (setIds.has(set.id)) set.id = uid();
       setIds.add(set.id);
@@ -4521,7 +4660,7 @@ function importHistory(file){
     if (!Array.isArray(list) || !list.length){ toast('No workout history found in that file'); return; }
     const existing = new Map(state.workouts.map(w => [w.id, w]));
     if (state.activeWorkout) existing.set(state.activeWorkout.id, state.activeWorkout);
-    let added = 0, already = 0, invalid = 0, conflicts = 0;
+    let added = 0, already = 0, invalid = 0, conflicts = 0, bodyweightsAdded = 0;
     list.forEach(raw => {
       const w = (raw && raw.id && raw.startedAt) ? normalizeImportedWorkout(raw) : null;
       if (!w){ invalid++; return; }
@@ -4534,6 +4673,14 @@ function importHistory(file){
       }
       state.workouts.push(w); existing.set(w.id, w); added++;
     });
+    const bodyweightIds = new Set((state.bodyweights || []).map(entry => entry.id));
+    const bodyweightDates = new Set((state.bodyweights || []).map(entry => entry.loggedAt));
+    (Array.isArray(obj.bodyweights) ? obj.bodyweights : []).forEach(raw => {
+      const entry = normalizeBodyweightEntry(raw);
+      if (!entry || bodyweightIds.has(entry.id) || bodyweightDates.has(entry.loggedAt)) return;
+      state.bodyweights.push(entry); bodyweightIds.add(entry.id); bodyweightDates.add(entry.loggedAt); bodyweightsAdded++;
+    });
+    state.bodyweights.sort((a,b) => b.loggedAt - a.loggedAt);
     let importedLinks = 0;
     (Array.isArray(obj.exerciseLinks) ? obj.exerciseLinks : []).forEach(link => {
       if (!link || !validId(link.sourceId) || !exerciseById(link.targetId) ||
@@ -4545,7 +4692,7 @@ function importHistory(file){
           !state.historySeparateIds.includes(id)) state.historySeparateIds.push(id);
     });
     sortWorkouts();
-    ui.importSummary = { added, already, invalid, conflicts, importedLinks };
+    ui.importSummary = { added, already, invalid, conflicts, bodyweightsAdded, importedLinks };
     save(); render();
     toast('History import: ' + added + ' new · ' + already + ' already present' +
       (invalid ? ' · ' + invalid + ' invalid' : '') + (conflicts ? ' · ' + conflicts + ' conflicts' : ''));
@@ -4554,7 +4701,7 @@ function importHistory(file){
 
 function clearWorkoutData(){
   dialog({ title:'Clear workout data?',
-    body:'This permanently deletes workout history and any workout in progress. Exercises, routines, settings and remote backup configuration are kept.',
+    body:'This permanently deletes workout history and any workout in progress. Bodyweight entries, exercises, routines, settings and remote backup configuration are kept.',
     buttons:[
       { label:'Cancel', value:false, cls:'', autofocus:true },
       { label:'Clear workout data', value:true, cls:'btn-danger-solid' }
@@ -4881,7 +5028,8 @@ function htmlCurrentExercise(w, ex){
   const next = w.exercises[w.currentExerciseIndex + 1] || null;
   const stats = exerciseStats(ex.exerciseId);
   const prev = stats.last;
-  const showWeight = ex.unit !== 'bw' && ex.unit !== 'time';
+  const showWeight = ex.unit !== 'time';
+  const bodyweight = ex.unit === 'bw';
   const repsLabel = ex.unit === 'time' ? 'sec' : 'reps';
   const wLabel = unitLabel();
 
@@ -4889,9 +5037,9 @@ function htmlCurrentExercise(w, ex){
   const bits = [];
   const bit = (k, v) => bits.push('<span class="pp-item"><span class="pp-k">' + k + '</span><strong>' + v + '</strong></span>');
   if (prev) bit('Last · ' + esc(relDays(prev.date)), prev.sets.slice(0,4).map(setSummary).join(', '));
-  if (showWeight && stats.e1rm > 0) bit('Best e1RM', fmtNum(roundHalf(stats.e1rm)) + ' ' + unitLabel());
-  if (showWeight && stats.volume > 0) bit('Best volume', fmtNum(stats.volume) + ' ' + unitLabel());
-  if (ex.unit === 'bw' && stats.reps > 0) bit('Best set', stats.reps + ' reps');
+  if (stats.e1rm > 0) bit(bodyweight ? 'Best total e1RM' : 'Best e1RM', fmtNum(roundHalf(stats.e1rm)) + ' ' + unitLabel());
+  if (stats.volume > 0) bit('Best volume', fmtNum(stats.volume) + ' ' + unitLabel());
+  if (bodyweight && stats.e1rm <= 0 && stats.reps > 0) bit('Best set', stats.reps + ' reps');
   if (ex.unit === 'time' && stats.duration > 0) bit('Best hold', stats.duration + ' s');
   if (bits.length) prevHTML = '<div class="prev-perf">' + bits.join('') + '</div>';
 
@@ -4907,7 +5055,7 @@ function htmlCurrentExercise(w, ex){
   let setsHTML =
     '<div class="sets-head" aria-hidden="true">' +
       '<span>Set</span>' +
-      (showWeight ? '<span>Weight<span class="narrow-hide"> (' + esc(wLabel) + ')</span></span>' : '') +
+      (showWeight ? '<span>' + (bodyweight ? 'Added' : 'Weight') + '<span class="narrow-hide"> (' + esc(wLabel) + ')</span></span>' : '') +
       '<span>' + esc(repsLabel) + '</span>' +
       (showMetric ? '<span>' + metricLabel + '</span>' : '') +
       '<span>Done</span><span></span>' +
@@ -4937,11 +5085,13 @@ function htmlCurrentExercise(w, ex){
        the columns), so every input carries its own aria-label — which also
        names it better than the bare unit ever did. */
     if (showWeight){
+      const weightField = bodyweight ? 'addedWeight' : 'weight';
+      const weightValue = bodyweight ? s.addedWeight : s.weight;
       setsHTML += '<label class="field"><span class="cap">' + esc(wLabel) + '</span>' +
         '<input id="sw-' + esc(s.id) + '" type="number" inputmode="decimal" min="0" step="0.5" ' +
-        'aria-label="Set ' + n + ' weight in ' + esc(wLabel) + '" ' +
-        'data-bind="set" data-change="set-weight" data-id="' + esc(s.id) + '" data-field="weight" ' +
-        'value="' + esc(s.weight != null ? s.weight : '') + '" placeholder="0"></label>';
+        'aria-label="Set ' + n + (bodyweight ? ' added load' : ' weight') + ' in ' + esc(wLabel) + '" ' +
+        'data-bind="set" data-change="set-weight" data-id="' + esc(s.id) + '" data-field="' + weightField + '" ' +
+        'value="' + esc(weightValue != null ? weightValue : '') + '" placeholder="0"></label>';
     }
     const timedField = ex.unit === 'time';
     const midVal = timedField ? setDuration(s) : s.reps;
@@ -4977,7 +5127,7 @@ function htmlCurrentExercise(w, ex){
       '<span class="ex-tags">' +
         (ex.category ? '<span class="tag">' + esc(ex.category) + '</span>' : '') +
         '<span class="tag">target ' + ex.sets.length + ' × ' + esc(targetRangeLabel(ex)) +
-          (ex.targetWeight != null ? ' @ ' + fmtNum(ex.targetWeight) + ' ' + unitLabel() : '') +
+          (ex.targetWeight != null ? ' @ ' + (bodyweight ? '+' : '') + fmtNum(ex.targetWeight) + ' ' + unitLabel() : '') +
           (ex.targetRir != null ? ' · RIR ' + fmtNum(ex.targetRir) : '') + '</span>' +
         '<span class="tag">' + icon('timer','ic-inline') + ' rest ' + fmtClock(currentRestSeconds()) + '</span>' +
       '</span>' +
@@ -5210,7 +5360,8 @@ function htmlRoutineEditor(){
     const groupIndex = groups.findIndex(group => group.includes(it));
     const moveName = partner ? name + ' and ' + (partnerDef ? partnerDef.name : 'alternative') : name;
     const timed = e && e.unit === 'time';
-    const loaded = e && e.unit !== 'bw' && e.unit !== 'time';
+    const loaded = e && e.unit !== 'time';
+    const bodyweight = e && e.unit === 'bw';
     const countLabel = timed ? 'Sec' : 'Reps';
     const numberField = (cap, field, value, extra) =>
       '<label class="field ' + (field === 'weight' ? 'target-weight' : '') + '"><span class="cap">' + cap + '</span>' +
@@ -5221,7 +5372,7 @@ function htmlRoutineEditor(){
       numberField(countLabel + ' min', 'repsMin', it.repsMin, 'max="999" step="1" inputmode="numeric"') +
       numberField(countLabel + ' max', 'repsMax', it.repsMax, 'max="999" step="1" inputmode="numeric"') +
       numberField('Target RIR', 'targetRir', it.targetRir, 'max="10" step="1" inputmode="numeric"') +
-      (loaded ? numberField(unitLabel(), 'weight', it.weight, 'step="0.5" inputmode="decimal"') : '');
+      (loaded ? numberField((bodyweight ? 'Added ' : '') + unitLabel(), 'weight', it.weight, 'step="0.5" inputmode="decimal"') : '');
     const pairClass = partner ? ' either-pair ' + (groups[groupIndex][0] === it ? 'either-first' : 'either-last') : '';
     html += '<div class="item-row' + pairClass + '">' +
       '<button type="button" class="grip" id="ri-grip-' + i + '" data-drag="routine-items" ' +
@@ -5274,6 +5425,7 @@ function historyImportSummaryHTML(){
       '<button type="button" class="btn btn-sm" data-action="history-import-dismiss">Dismiss</button></div>' +
     '<p class="small mt-2">' + plural(s.added, 'new workout') + ' · ' + s.already + ' already present · ' +
       s.invalid + ' invalid · ' + s.conflicts + ' conflict' + (s.conflicts === 1 ? '' : 's') +
+      (s.bodyweightsAdded ? ' · ' + plural(s.bodyweightsAdded, 'bodyweight entry') + ' added' : '') +
       (s.importedLinks ? ' · ' + plural(s.importedLinks, 'exercise link') + ' restored' : '') + '.</p>' +
     (s.conflicts ? '<p class="hint mt-2">Existing copies were kept. No local workout was overwritten.</p>' : '') +
     (unresolved ? '<p class="hint mt-2">' + plural(unresolved, 'historical exercise') + ' still need a linking decision for continuity with your current exercises.</p>' : '') +
@@ -5298,8 +5450,8 @@ function historyLinksPanel(){
   const filter = normalizedExerciseName(ui.historyLinkFilter);
   let shown = identities.filter(x => ui.historyLinksShowAll || (!exerciseLink(x.id) && !separate.has(x.id)));
   if (filter) shown = shown.filter(x => normalizedExerciseName(x.name + ' ' + x.category).includes(filter));
-  const library = state.exercises.slice().sort(compareExerciseNames);
   const row = x => {
+    const library = state.exercises.filter(ex => compatibleHistoryLink(x.id, ex.id)).sort(compareExerciseNames);
     const link = exerciseLink(x.id), target = link && exerciseById(link.targetId);
     const suggestion = !link && !separate.has(x.id) ? suggestedExercise(x) : null;
     const status = target ? 'Linked to ' + target.name : separate.has(x.id) ? 'Kept as separate history' : 'Needs review';
@@ -5411,7 +5563,7 @@ function htmlWorkoutDetail(w){
     const done = ex.sets.filter(s => s.completed);
     if (!done.length && !ex.skipped) return;
     shown++;
-    const top = done.filter(countsPR).reduce((a,s) => Math.max(a, epley(setWeight(s), s.reps)), 0);
+    const top = done.filter(countsPR).reduce((a,s) => Math.max(a, epley(effectiveSetWeight(s, w.startedAt), s.reps)), 0);
     html += '<div class="hist-ex"><h4>' + esc(ex.name) +
       (ex.skipped ? ' <span class="status-chip skip">skipped</span>' : '') +
       (top > 0 ? ' <span class="muted top-e1rm">· top e1RM ' + fmtNum(roundHalf(top)) + ' ' + unitLabel() + '</span>' : '') +
@@ -5461,9 +5613,10 @@ function htmlWorkoutEditor(w){
          set itself rather than dropping a value nobody can then reach. */
       const em = ex.targetRir != null ? 'rir' : state.settings.effortMetric;
       const effortKey = em === 'rir' ? 'rir' : em === 'rpe' ? 'rpe' : (s.rir != null ? 'rir' : 'rpe');
-      const weightUnit = s.unit === 'lb' ? 'lb' : 'kg';
+      const bodyweight = ex.unit === 'bw';
+      const weightUnit = bodyweight ? (s.addedWeightUnit === 'lb' ? 'lb' : 'kg') : (s.unit === 'lb' ? 'lb' : 'kg');
       const flds = [
-        { cap:'Weight (' + weightUnit + ')', key:'weight' },
+        { cap:(bodyweight ? 'Added' : 'Weight') + ' (' + weightUnit + ')', key:bodyweight ? 'addedWeight' : 'weight' },
         timed ? { cap:'Sec', key:'durationSeconds' } : { cap:'Reps', key:'reps' },
         { cap:effortKey.toUpperCase(), key:effortKey }
       ];
@@ -5528,18 +5681,21 @@ function weeklyChart(ws){
                 v => fmtNum(v) + ' ' + unitLabel()) +
   '</section>';
 }
-/* What "better" means for one movement, in one place: loaded work is judged on
-   estimated 1RM, a hold on its length, bodyweight work on reps. Both progress
-   modes read this, so the per-exercise chart and the muscle-group breakdown can
-   never drift apart. */
+/* What "better" means for one movement, in one place. Bodyweight work uses
+   total resistance when a dated bodyweight is known; older sessions without
+   one retain their reps-only history. */
 function exMetric(ex){
   const isWeighted = ex.unit !== 'bw' && ex.unit !== 'time';
+  const bodyweightHasLoad = ex.unit === 'bw' && (state.bodyweights || []).length > 0;
   return {
-    isWeighted,
-    of: s => isWeighted ? epley(setWeight(s), s.reps)
-      : (ex.unit === 'time' ? (Number(setDuration(s)) || 0) : (Number(s.reps) || 0)),
-    name: isWeighted ? 'estimated 1RM' : (ex.unit === 'time' ? 'longest hold (s)' : 'best set (reps)'),
-    unit: isWeighted ? unitLabel() : (ex.unit === 'time' ? 's' : 'reps')
+    isWeighted:isWeighted || bodyweightHasLoad,
+    of: (s, at) => isWeighted ? epley(setWeight(s), s.reps)
+      : (ex.unit === 'time' ? (Number(setDuration(s)) || 0)
+        : (bodyweightHasLoad ? (bodyweightAt(at) != null ? epley(effectiveSetWeight(s, at), s.reps) : 0)
+          : (Number(s.reps) || 0))),
+    name: isWeighted ? 'estimated 1RM' : (ex.unit === 'time' ? 'longest hold (s)'
+      : (bodyweightHasLoad ? 'estimated total 1RM' : 'best set (reps)')),
+    unit: isWeighted || bodyweightHasLoad ? unitLabel() : (ex.unit === 'time' ? 's' : 'reps')
   };
 }
 /* Per-session bests for one exercise, oldest first. */
@@ -5549,7 +5705,7 @@ function exSessions(ex){
   sortedWorkouts().slice().reverse().forEach(w => {
     const blocks = w.exercises.filter(x => canonicalExerciseId(x.exerciseId) === ex.id);
     if (!blocks.length) return;
-    const best = blocks.reduce((top,b) => b.sets.filter(countsPR).reduce((a,s) => Math.max(a, m.of(s)), top), 0);
+    const best = blocks.reduce((top,b) => b.sets.filter(countsPR).reduce((a,s) => Math.max(a, m.of(s, w.startedAt)), top), 0);
     if (best > 0) out.push({ date:w.startedAt, best });
   });
   return out;
@@ -5559,7 +5715,7 @@ function exSessions(ex){
    sets only, so adding extra sets cannot manufacture a rep gain. Mixed loads,
    missing reps, and partial sessions break a streak rather than being called
    failures. Timed movements use a different progression method. */
-function progressionExposure(block){
+function progressionExposure(block, at){
   const working = block.sets.filter(s => s.completed && !isWarmup(s));
   if (!working.length) return null;
   if (block.unit !== 'kg' && block.unit !== 'lb' && block.unit !== 'bw') return { comparable:false };
@@ -5578,6 +5734,12 @@ function progressionExposure(block){
     });
     if (loads.some(n => n == null || Math.abs(n - loads[0]) > 0.05)) return { comparable:false };
     load = loads[0];
+  } else {
+    const base = bodyweightAt(at, 'kg') || 0;
+    const loads = sets.map(s => base + convertWeight(toNum(s.addedWeight) || 0,
+      s.addedWeightUnit === 'lb' ? 'lb' : 'kg', 'kg'));
+    if (loads.some(n => Math.abs(n - loads[0]) > 0.05)) return { comparable:false };
+    load = loads[0];
   }
   return { comparable:true, kind:block.unit === 'bw' ? 'bw' : 'loaded',
     count, load, reps, totalReps:reps.reduce((a,n) => a + n, 0) };
@@ -5593,7 +5755,7 @@ function progressionStatus(exId, workouts = state.workouts){
     const block = w.exercises.find(ex => canonicalExerciseId(ex.exerciseId) === exId &&
       ex.sets.some(s => s.completed && !isWarmup(s)));
     if (!block) return;
-    const exposure = progressionExposure(block);
+    const exposure = progressionExposure(block, w.startedAt);
     if (!exposure) return;
     if (!exposure.comparable){ best = null; streak = 0; latest = null; return; }
     latest = { ...exposure, date:w.startedAt };
@@ -5621,7 +5783,8 @@ function progressionFlagsPanel(){
     '<ul class="progression-list">' + flags.map(({id, fallback, status}) => {
       const def = historyExerciseById(id), name = def ? def.name : fallback;
       const last = status.latest;
-      const load = last.kind === 'loaded' ? fmtNum(convertWeight(last.load, 'kg', unitLabel())) + ' ' + unitLabel() + ' · ' : '';
+      const load = last.load > 0 ? fmtNum(convertWeight(last.load, 'kg', unitLabel())) + ' ' + unitLabel() +
+        (last.kind === 'bw' ? ' total' : '') + ' · ' : '';
       const summary = fmtDate(last.date) + ' · ' + load + last.reps.map(fmtNum).join(' / ') + ' reps';
       return '<li><span class="progression-name">' + (def
         ? '<button type="button" data-action="progression-select" data-id="' + esc(id) + '" aria-label="Show progress for ' + esc(name) + '">' + esc(name) + '</button>'
@@ -5966,6 +6129,53 @@ function storageSize(){
     return (bytes < 1024) ? bytes + ' B' : Math.round(bytes/102.4)/10 + ' KB';
   }catch(e){ return '–'; }
 }
+function rescuedDataRaw(){
+  try{ return localStorage.getItem(LS_RESCUE_KEY); }
+  catch(e){ return null; }
+}
+function rescuedDataHTML(){
+  const raw = rescuedDataRaw();
+  if (raw == null) return '';
+  return '<div class="setting-block" role="status">' +
+    '<h3 class="danger-heading">Recovered unreadable data</h3>' +
+    '<p class="desc">Liftlog preserved ' + fmtBytes(new Blob([raw]).size) +
+      ' that it could not load. Download the untouched copy before discarding it.</p>' +
+    '<div class="form-actions">' +
+      '<button type="button" class="btn" data-action="rescue-download">' + IC.down + '<span>Download rescued data</span></button>' +
+      '<button type="button" class="btn btn-danger" data-action="rescue-discard">Discard rescued data…</button>' +
+    '</div></div>';
+}
+function bodyweightSettingsHTML(){
+  const entries = state.bodyweights || [];
+  const latest = entries[0];
+  return '<div class="setting-block">' +
+    '<h3>Bodyweight</h3>' +
+    '<p class="desc">Used with optional added load to calculate bodyweight-exercise volume and progression. Each workout uses the latest entry recorded on or before that date.</p>' +
+    (latest ? '<p class="hint">Latest: ' + fmtNum(convertWeight(latest.weight, latest.unit, unitLabel())) + ' ' + unitLabel() +
+      ' · ' + fmtDate(latest.loggedAt) + '</p>' : '<p class="hint">No bodyweight recorded yet.</p>') +
+    '<form data-form="bodyweight-add" class="form-row mt-3">' +
+      '<label class="field"><span class="cap">Date</span><input type="datetime-local" name="bodyweight-date" required value="' + toLocalInput(Date.now()) + '"></label>' +
+      '<label class="field"><span class="cap">Bodyweight (' + unitLabel() + ')</span><input type="number" name="bodyweight-value" min="1" step="0.1" inputmode="decimal" required placeholder="0"></label>' +
+      '<button type="submit" class="btn btn-primary">Add entry</button>' +
+    '</form>' +
+    (entries.length ? '<div class="bodyweight-list mt-3">' + entries.map(entry =>
+      '<div class="bodyweight-row"><span>' + fmtDate(entry.loggedAt) + '</span><strong>' +
+        fmtNum(convertWeight(entry.weight, entry.unit, unitLabel())) + ' ' + unitLabel() + '</strong>' +
+        '<button type="button" class="btn btn-sm btn-danger" data-action="bodyweight-del" data-id="' + esc(entry.id) + '" aria-label="Delete bodyweight entry from ' + esc(fmtDate(entry.loggedAt)) + '">' + IC.trash + '<span class="sr-only">Delete</span></button></div>').join('') + '</div>' : '') +
+  '</div>';
+}
+function addBodyweightEntry(form){
+  const date = form.elements.namedItem('bodyweight-date');
+  const value = form.elements.namedItem('bodyweight-value');
+  const loggedAt = date ? new Date(date.value).getTime() : NaN;
+  const weight = normalizeSetNumber('weight', value && value.value);
+  if (!Number.isFinite(loggedAt) || !(weight > 0)){ toast('Enter a valid date and bodyweight'); return; }
+  const existing = state.bodyweights.find(entry => entry.loggedAt === loggedAt);
+  if (existing){ existing.weight = weight; existing.unit = unitLabel(); }
+  else state.bodyweights.push({ id:uid(), loggedAt, weight, unit:unitLabel() });
+  state.bodyweights.sort((a,b) => b.loggedAt - a.loggedAt);
+  clearStatsCache(); save(); render(); toast(existing ? 'Bodyweight entry updated' : 'Bodyweight entry added');
+}
 /* Manual, user-initiated backup/restore against a bucket the user configures
    themselves. Nothing here runs unless a config exists; see the comment on
    the REMOTE STORAGE section above for what stays local vs. what is sent. */
@@ -6055,6 +6265,7 @@ function viewSettings(){
           '<label class="radio-pill"><input type="radio" name="unit" value="' + u + '" data-change="unit"' + (s.unit === u ? ' checked' : '') + '><span>' + u + '</span></label>').join('') +
       '</div>' +
     '</div>' +
+    bodyweightSettingsHTML() +
     '<div class="setting-block">' +
       '<h3>Effort tracking</h3><p class="desc">Adds an optional column when logging sets: Rate of Perceived Exertion (1–10) ' +
         'or Reps In Reserve (how many more you could have done). Choose one, or turn it off.</p>' +
@@ -6091,6 +6302,7 @@ function viewSettings(){
     /* Whole-state backup first, in both the places it can be written — a file
        here, the same file in a bucket below — then the partial transfer files,
        which are a different job and not a second way to do this one. */
+    rescuedDataHTML() +
     '<div class="setting-block">' +
       '<h3>Backup &amp; restore</h3>' +
       '<p class="desc">Everything in one file: exercises, routines, history and preferences. ' +
@@ -6136,7 +6348,7 @@ function viewSettings(){
     '</div>' +
     '<div class="setting-block">' +
       '<h3 class="danger-heading">Workout data</h3>' +
-      '<p class="desc">Removes workout history and any workout in progress. Exercises, routines and settings are kept.</p>' +
+      '<p class="desc">Removes workout history and any workout in progress. Bodyweight entries, exercises, routines and settings are kept.</p>' +
       '<button type="button" class="btn btn-danger" data-action="clear-workouts">' + IC.trash + '<span>Clear workout data…</span></button>' +
     '</div>' +
   '</section>' +
@@ -6252,7 +6464,7 @@ const actions = {
     else toast('No unambiguous exact matches found');
   },
   'history-link-suggest'(d){
-    if (!setExerciseLink(d.source, d.target)) return;
+    if (!setExerciseLink(d.source, d.target)){ toast('That exercise uses a different measurement type'); return; }
     save(); render(); toast('Exercise history linked');
   },
   'history-link-add'(d){
@@ -6279,6 +6491,8 @@ const actions = {
     const last = ex.sets[ex.sets.length - 1];
     const ns = { id:uid(),
       weight: last && last.weight != null ? last.weight : null,
+      addedWeight: last && last.addedWeight != null ? last.addedWeight : null,
+      addedWeightUnit: last && last.addedWeightUnit ? last.addedWeightUnit : (ex.unit === 'bw' ? unitLabel() : undefined),
       reps:   last && last.reps != null ? last.reps : null,
       durationSeconds: last && last.durationSeconds != null ? last.durationSeconds : null,
       rpe:    last && last.rpe != null ? last.rpe : null,
@@ -6296,6 +6510,31 @@ const actions = {
   },
 
   'export'(){ exportData(); },
+  'rescue-download'(){
+    const raw = rescuedDataRaw();
+    if (raw == null){ toast('No rescued data is available'); return; }
+    downloadBlob(new Blob([raw], {type:'text/plain'}), dateStamp('liftlog-rescued-data').replace(/\.json$/, '.txt'));
+    toast('Rescued data downloaded');
+  },
+  'rescue-discard'(){
+    confirmDlg('Discard rescued data?', 'This permanently removes the preserved unreadable copy. Download it first if you may need to recover it.', 'Discard', true)
+      .then(ok => {
+        if (!ok) return;
+        try{ localStorage.removeItem(LS_RESCUE_KEY); }
+        catch(e){ toast('Could not remove rescued data'); return; }
+        render(); toast('Rescued data discarded');
+      });
+  },
+  'bodyweight-del'(d){
+    const entry = (state.bodyweights || []).find(x => x.id === d.id); if (!entry) return;
+    confirmDlg('Delete bodyweight entry?', fmtDate(entry.loggedAt) + ' · ' +
+      fmtNum(convertWeight(entry.weight, entry.unit, unitLabel())) + ' ' + unitLabel(), 'Delete', true)
+      .then(ok => {
+        if (!ok) return;
+        state.bodyweights = state.bodyweights.filter(x => x.id !== d.id);
+        clearStatsCache(); save(); render(); toast('Bodyweight entry deleted');
+      });
+  },
   'request-persist'(){ requestPersistence(true); },
   'export-routines'(){ exportRoutines(); },
   'export-history'(){ exportHistory(); },
@@ -6655,7 +6894,11 @@ const changeHandlers = {
     const source = t.dataset.source;
     if (!validId(source)) return;
     if (t.value === '__separate') keepHistoricalExerciseSeparate(source);
-    else if (t.value) setExerciseLink(source, t.value);
+    else if (t.value){
+      if (!setExerciseLink(source, t.value)){
+        toast('That exercise uses a different measurement type'); render(); return;
+      }
+    }
     else {
       unlinkExerciseHistory(source);
       state.historySeparateIds = (state.historySeparateIds || []).filter(id => id !== source);
@@ -6700,7 +6943,7 @@ const changeHandlers = {
     toast(adjusted ? 'Time updated — the end cannot be before the start' :
       (field === 'startedAt' ? 'Start time updated' : 'End time updated'));
   },
-  'set-weight'(t){ cascadeWeight(t.dataset.id, normalizeSetNumber('weight', t.value)); },
+  'set-weight'(t){ cascadeWeight(t.dataset.id, normalizeSetNumber(t.dataset.field, t.value)); },
   'set-reps'(t){
     const ex = currentExercise();
     cascadeReps(t.dataset.id, normalizeSetNumber(ex && ex.unit === 'time' ? 'durationSeconds' : 'reps', t.value));
@@ -6738,6 +6981,7 @@ document.addEventListener('submit', e => {
     saveNewExercise({ name:g('exname'), category:g('excat'), unit:g('exunit'), notes:g('exnotes'), url:g('exurl') });
   }
   else if (kind === 'ex-save'){ saveExerciseDraft(); }
+  else if (kind === 'bodyweight-add'){ addBodyweightEntry(form); }
   else if (kind === 'remote-config'){ saveRemoteConfigForm(form); }
 });
 

@@ -118,16 +118,7 @@ actually capture.
 
 ## Remaining findings
 
-1. **Medium: the history contract accepts measurements the editor cannot fully manage.**
-   `normalizeImportedSet` supports distance, but the ordinary logging/editor
-   controls do not provide equivalent distance editing. Negative distance values
-   are now dropped through the shared set normalizer. Explicit `setType: "reps"`
-   with `unit: "time"` is still interpreted as time despite
-   the documented claim that setType takes precedence. Decide on supported
-   measurements, enforce consistent precedence, and add mixed-field fixtures.
-   Related distance support debt already appears in `ENHANCEMENTS.md`.
-
-2. **Low: schema guarantees are implemented procedurally and tests need setup.**
+1. **Low: schema guarantees are implemented procedurally and tests need setup.**
    There is no standalone JSON Schema. Sample builders share export code, which
    ensures export shape but does not itself prove importer compatibility. The
    new browser regression script checks that compatibility; it requires Node,
@@ -145,8 +136,8 @@ actually capture.
   while the weekly charts show volume or set counts. Neither shows whether reps
   rose across *all* prescribed sets at one load. Routines have one rep target,
   not a rep range; there is no technique marker; effort logging defaults off.
-  Added load on bodyweight movements is not recorded, so those flags use reps
-  alone. The app cannot certify when a load increase is appropriate under the
+  Bodyweight movements use dated bodyweight plus optional added load; older
+  sessions without a bodyweight entry remain reps-only. The app cannot certify when a load increase is appropriate under the
   stated 1–2 RIR and technique rule. The existing green upward `+0` trend cue was
   misleading and is now neutral.
 - **Flag added:** History shows an amber progression check after a baseline and
@@ -209,7 +200,7 @@ failure. See `tests/README.md` for commands.
 
 ## Either-of feature, progression targets, and history reconciliation
 
-State version is **9**; transfer contract version is **1.6.0**. Exactly two
+State version is **10**; transfer contract version is **1.7.0**. Exactly two
 routine items with different exercise IDs share an optional `eitherOf` string.
 Invalid/incomplete groups become independent items. Each item keeps its own
 sets, lower/upper reps or seconds, optional target RIR, and weight. Pairing,

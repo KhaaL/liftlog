@@ -33,13 +33,10 @@ movements.
 `exerciseId` by case-insensitive name match, leaving genuinely unknown movements
 unlinked.
 
-### 1.3 Surface the rescued-data escape hatch in the UI
-**Why:** unreadable data is now preserved under
-`localStorage['liftlog.v1.unreadable']` and announced with a toast, but the only
-way to get it back is the devtools console.
-
-**How:** when that key exists, show a banner in Settings offering "download the
-data we could not read" (as JSON) and "discard it".
+### 1.3 Surface the rescued-data escape hatch in the UI — **done**
+When `localStorage['liftlog.v1.unreadable']` exists, Settings shows its size and
+offers an untouched text download. Discarding it is a separate destructive
+confirmation, so recovery never depends on opening developer tools.
 
 ### 1.4 Warn before a destructive import
 **Why:** a full-backup import replaces everything, including an in-progress
@@ -73,30 +70,21 @@ equivalent at all. The gesture is the fast one on a phone (the done cell is
 already under the thumb) and the set number is the discoverable one; the done
 cell carries the warm-up colour too, since it is now where the flag is set.
 
-### 2.2 Added load on bodyweight exercises
-**Why:** a `bw` exercise renders a disabled weight field, so weighted dips or a
-loaded push-up cannot be logged. Working around this by declaring the exercise
-as `kg` instead then misreports bodyweight volume.
+### 2.2 Added load on bodyweight exercises — **done**
+Bodyweight routine targets and active/history set rows use `addedWeight` and
+`addedWeightUnit`, distinct from a weighted exercise's `weight`. Transfers and
+unit changes preserve that distinction.
 
-**How:** allow an optional `+load` value on `bw` sets (the label already exists
-in the design), and count `bodyweight + load` toward volume once a bodyweight
-figure is known — which needs 2.3.
+### 2.3 Bodyweight tracking — **done for progression and volume**
+Settings stores dated bodyweight entries. A workout uses the latest entry on or
+before its date, so bodyweight plus added load contributes to volume, total-load
+e1RM, and progression checks without rewriting older sets. A standalone
+bodyweight or relative-strength chart remains optional future work.
 
-### 2.3 Bodyweight tracking
-**Why:** bodyweight sets contribute zero volume, so a bodyweight-heavy session
-looks like no work at all in the charts.
-
-**How:** a bodyweight log in Settings (date + weight), used to value `bw` sets
-and to draw a bodyweight trend. Relative strength (e1RM ÷ bodyweight) becomes
-available for free.
-
-### 2.4 Distance sets
-**Why:** `distance` / `distanceUnit` are already normalized on import and
-rendered by `setSummary()`, but no exercise unit produces them and no field
-edits them. It is a half-wired feature.
-
-**How:** either add `distance` to `UNITS` with proper editing and aggregates, or
-remove the fields from the import contract. Half-support is worse than either.
+### 2.4 Distance sets — **resolved by removal**
+Distance is outside Liftlog's supported exercise model. Transfer schema 1.7 no
+longer exports or advertises it; imports drop unsupported distance sets, and
+state normalization removes stale distance fields.
 
 ### 2.5 Richer progress views
 Per-muscle-group volume over time, set/rep tonnage per week, PR history for a

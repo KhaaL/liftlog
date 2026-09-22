@@ -332,12 +332,14 @@ state
 ├─ exercises[]     { id, name, category, unit, notes, url }   — the library; kg/lb means weighted
 ├─ exerciseLinks[] { sourceId, targetId } — historical ID → current Library ID
 ├─ historySeparateIds[] historical IDs explicitly kept as their own series
+├─ bodyweights[]   { id, loggedAt, weight, unit } — dated bodyweight log, newest first
 ├─ routines[]      { id, name, items[] }                      — the plan
 │   └─ items[]     { id, exerciseId, sets, repsMin, repsMax, targetRir?, weight, eitherOf? }
 ├─ workouts[]      logged sessions, newest first              — the log
 │   └─ exercises[] { exerciseId, name, unit, targetRepsMin, targetRepsMax,
 │                    targetRir?, skipped, eitherOf?, sets[] }
-│       └─ sets[]  { id, weight, reps, durationSeconds, rpe, rir, unit, completed, completedAt,
+│       └─ sets[]  { id, weight, addedWeight?, addedWeightUnit?, reps, durationSeconds, rpe, rir,
+│                    unit, completed, completedAt,
 │                    countForVolume?, countForPR? }   — absent means "counts"
 └─ activeWorkout   a workout in progress, or null
 ```
@@ -354,6 +356,12 @@ For a Library exercise, `unit` chooses the measurement kind: weighted (`kg` or
 `lb`), bodyweight, or time. Weighted definitions are always normalized to
 `settings.unit`; kg/lb is one global display and planning preference rather than
 a competing per-exercise choice. A logged set keeps its own kg/lb unit forever.
+
+A bodyweight set keeps external load in `addedWeight` / `addedWeightUnit`; its
+`weight` is null. `bodyweightAt()` chooses the newest bodyweight entry on or
+before the workout date. That dated baseline plus added load drives volume,
+estimated total 1RM, and progression load. Sessions before the first bodyweight
+entry retain reps-only progress and do not invent tonnage.
 
 ### Durability
 
@@ -477,18 +485,22 @@ sequence for older data. Startup and file/remote restore all use it:
   and upper bounds. New routines can then widen the range and add `targetRir`.
 - **v8 → v9** — adds reversible historical exercise links and explicit
   keep-separate decisions. Existing history needs no conversion.
+- **v9 → v10** — adds the dated bodyweight log and distinct added-load fields
+  for bodyweight sets. Any older bodyweight set carrying `weight` moves that
+  value to `addedWeight`; unsupported distance fields are removed.
 
 Data that cannot be read — corrupt JSON, an unrecognized shape, or a *newer*
 schema version — is never overwritten in place. It is copied to
 `localStorage['liftlog.v1.unreadable']` and the app starts from seed with a
-warning. If that copy cannot be saved, or would replace a different recovery
+warning. Settings offers the untouched bytes as a download and requires a
+separate confirmation to discard them. If that copy cannot be saved, or would replace a different recovery
 copy, the original key is left intact and automatic writes are blocked. The
 save banner and startup message explain this state; explicitly restoring a
   valid backup re-enables writes.
 
 ## Import / export
 
-Four flows, all plain JSON (`EXPORT_SCHEMA = '1.6.0'`). Every file names itself
+Four flows, all plain JSON (`EXPORT_SCHEMA = '1.7.0'`). Every file names itself
 with `app: 'liftlog'` and a `kind`:
 
 - **`backup`** — the entire `state`; importing replaces everything. Built by
@@ -508,13 +520,17 @@ with `app: 'liftlog'` and a `kind`:
   resolved by id, then by name, then created. Safe source exercise, routine, and
   item IDs are preserved so a separately transferred history file still lines up.
   Duplicate routine names are skipped.
-- **`history`** — workouts, with an explicit `setType` (`reps` / `time` / `hold` /
-  `distance`) on every set so importers never guess at field semantics.
+- **`history`** — workouts, with an explicit `setType` (`reps` / `time` / `hold`)
+  on every set so importers never guess at field semantics. Explicit `setType`
+  wins over a contradictory unit; unsupported types such as the former
+  half-implemented `distance` set are dropped rather than stored without an
+  editor. History files also carry the dated bodyweight log so bodyweight
+  analytics survive transfer.
   Deduplicated by workout id; first write wins. Identical IDs are reported as
   already present, malformed workouts as invalid, and different content under
   an existing ID as a conflict. History files also carry relevant
   `exerciseLinks` and `historySeparateIds`; links are restored only when their
-  current Library target exists.
+  current Library target exists and has the same measurement kind.
 - **`remote-config`** — the remote-storage settings, optionally without the
   secret key. See [Remote storage](#remote-storage-optional).
 
@@ -526,7 +542,9 @@ itself as another kind. Files predating the marker have no `kind` and are still
 accepted on shape alone.
 
 Legacy files without `setType` fall back to the exercise/set unit, and
-`includeInVolume` is accepted as an alias of `countForVolume`.
+`includeInVolume` is accepted as an alias of `countForVolume`. In schema 1.7,
+bodyweight sets use `addedWeight` and `addedWeightUnit`; older bodyweight sets
+with a `weight` value are normalized into those fields.
 
 ### The format is documented in the app
 
@@ -700,8 +718,9 @@ The History screen reads the same log two ways, switched by the Exercise /
 Muscle group tabs in the Progress panel.
 
 **Per exercise** — `trendPanel()`. One movement over time, judged by
-`exMetric()`: estimated 1RM for loaded work, longest hold for `time`, best set
-in reps for `bw`. Both modes call `exMetric()` and `exSessions()`, so the chart
+`exMetric()`: estimated 1RM for loaded work, longest hold for `time`, and
+estimated total 1RM for bodyweight work once a dated bodyweight is available
+(otherwise best set in reps). Both modes call `exMetric()` and `exSessions()`, so the chart
 and the breakdown list can never disagree about what "better" means.
 
 **Per muscle group** — `musclePanel()`. Every movement carrying the same
@@ -718,20 +737,19 @@ across those sets is a gain; a higher load is a gain even if reps drop. A lower
 load (such as a deload) starts a new comparison window. After a baseline and three consecutive
 comparable sessions without either gain, History shows a progression flag with
 the latest set-by-set reps. Kilograms and pounds are converted before comparing;
-bodyweight exercises compare reps. Timed work is excluded. The flag is derived
+bodyweight exercises compare total bodyweight plus added load when known, and
+otherwise compare reps plus any added load. Timed work is excluded. The flag is derived
 from history on render, so history edits and imports update it without a new
 stored field or schema version.
 
 This is an objective rep/load check, not an instruction to add weight. Routines
-store a single rep target rather than a lower and upper range, RIR is optional,
-and technique is not recorded. The app therefore cannot verify that every set
-reached the top of a range with 1–2 RIR and good technique.
+store lower and upper targets plus optional target RIR, but technique is not
+recorded. The app therefore cannot verify good technique automatically.
 
 Sets, not tonnage, and deliberately so. Load is a property of the machine, not
 of the muscle: a dip on an outdoor bar, a plate-loaded press and a cable fly all
-train the chest at numbers that cannot be summed or compared, and bodyweight
-work carries no weight at all — it contributes exactly zero to `sumVolume()`, so
-an outdoor-gym session would read as a rest day. A completed working set is the
+train the chest at numbers that cannot be summed or compared. Bodyweight work
+uses the dated bodyweight log for its own volume, while a completed working set is the
 one unit that means the same thing on all of them. Load progression is not
 thrown away, it just stays where it is honest: per movement, in the breakdown
 list below the chart, each with its own metric and its own first-to-latest
@@ -1123,7 +1141,7 @@ lower and upper bounds, preserving old prescriptions exactly. Routine and
 history importers continue to accept those legacy names. The downloadable
 samples and field reference use only the canonical v8 names.
 
-### Historical exercise reconciliation (state v9, transfer schema 1.6.0)
+### Historical exercise reconciliation (introduced in state v9, transfer schema 1.6.0)
 
 Workout exercise blocks remain snapshots of what was logged. History derives a
 catalog from those snapshots, which means Progress and muscle-group analytics
@@ -1140,6 +1158,10 @@ history**. Bulk exact matching accepts only unique matches. Reviewed decisions
 can be shown and changed later. The banner can be dismissed for the current set
 of unresolved IDs; importing a genuinely new identity changes the signature and
 shows it again.
+
+Manual choices, imported links, and restored links all enforce the same
+measurement-kind check. Timed, bodyweight, and weighted series cannot be joined
+to each other; the selector only offers compatible Library exercises.
 
 A history import always leaves an inline result with separate counts for new,
 already-present, invalid, and conflicting workouts. This result and the review
