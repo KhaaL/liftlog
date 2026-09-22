@@ -121,8 +121,8 @@ actually capture.
 1. **Medium: the history contract accepts measurements the editor cannot fully manage.**
    `normalizeImportedSet` supports distance, but the ordinary logging/editor
    controls do not provide equivalent distance editing. Negative distance values
-   are retained even though other negative measurements are dropped. Also,
-   explicit `setType: "reps"` with `unit: "time"` is interpreted as time despite
+   are now dropped through the shared set normalizer. Explicit `setType: "reps"`
+   with `unit: "time"` is still interpreted as time despite
    the documented claim that setType takes precedence. Decide on supported
    measurements, enforce consistent precedence, and add mixed-field fixtures.
    Related distance support debt already appears in `ENHANCEMENTS.md`.

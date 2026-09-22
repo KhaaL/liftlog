@@ -9,7 +9,7 @@ const fs = require('node:fs');
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
     let html = fs.readFileSync('index.html', 'utf8');
-    html = html.replace('init();\n})();', `window.testAPI = { sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, validateBackup, importRoutines, importHistory, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, progressionStatus, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, render, get state(){return state}, get ui(){return ui} };\ninit();\n})();`);
+    html = html.replace('init();\n})();', `window.testAPI = { sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, importHistory, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, progressionStatus, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, render, get state(){return state}, get ui(){return ui} };\ninit();\n})();`);
     await page.route('http://liftlog.test/**', route => route.fulfill({ contentType:'text/html', body:html }));
     await page.goto('http://liftlog.test/');
     const result = await page.evaluate(async () => {
@@ -71,6 +71,32 @@ const fs = require('node:fs');
         old.routines[0].items[0].repsMin === 5 && old.routines[0].items[0].repsMax === 5 &&
         old.settings.effortMetric === 'rpe' && old.settings.theme === 'system' && !('rest' in old.routines[0].items[0]) &&
         !('restSeconds' in old.workouts[0].exercises[0]), 'complete migration chain and settings fallback');
+      const dirty = t.backupPayload();
+      dirty.schemaVersion = '0.1.0'; dirty.source = 'old-exporter'; dirty.exportedAt = '2000-01-01T00:00:00.000Z';
+      dirty.settings.unit = 'lb';
+      dirty.exercises.find(ex => ex.unit === 'kg').unit = 'kg';
+      const dirtyWorkout = dirty.workouts[0], dirtySet = dirtyWorkout.exercises[0].sets[0];
+      dirtyWorkout.finishedAt = dirtyWorkout.startedAt - 1;
+      Object.assign(dirtySet, {weight:-5,reps:-2.6,rpe:99,rir:-3,durationSeconds:-10,distance:-1,distanceUnit:'m'});
+      const prepared = t.prepareBackup(dirty);
+      const cleanSet = prepared.workouts[0].exercises[0].sets[0];
+      check(!('schemaVersion' in prepared) && !('source' in prepared) && !('exportedAt' in prepared),
+        'restore strips one-file transfer metadata from application state');
+      check(prepared.exercises.filter(ex => ex.unit === 'kg' || ex.unit === 'lb').every(ex => ex.unit === 'lb'),
+        'restore aligns weighted exercise definitions with the global unit');
+      check(dirtyWorkout.finishedAt < dirtyWorkout.startedAt && prepared.workouts[0].finishedAt === prepared.workouts[0].startedAt &&
+        cleanSet.weight === null && cleanSet.reps === 0 && cleanSet.rpe === 10 && cleanSet.rir === 0 &&
+        cleanSet.durationSeconds === null && cleanSet.distance === null && !('distanceUnit' in cleanSet),
+        'full restore enforces the same workout and set bounds as transfer import');
+      t.state.schemaVersion = 'stale'; t.state.source = 'stale'; t.state.exportedAt = 'stale';
+      const freshEnvelope = t.backupPayload();
+      delete t.state.schemaVersion; delete t.state.source; delete t.state.exportedAt;
+      check(freshEnvelope.schemaVersion === '1.6.0' && freshEnvelope.source === 'liftlog-web' && freshEnvelope.exportedAt !== 'stale',
+        'fresh export metadata wins over stale state fields');
+      t.setUnit('lb');
+      check(t.state.exercises.filter(ex => ex.unit === 'kg' || ex.unit === 'lb').every(ex => ex.unit === 'lb'),
+        'global unit change synchronizes every weighted exercise definition');
+      t.setUnit('kg');
       const roundtrip = structuredClone(t.routinesPayload(t.state.exercises, [r]));
       roundtrip.routines[0].name = 'Round trip';
       t.importRoutines(file(roundtrip)); await wait();
@@ -171,6 +197,16 @@ const fs = require('node:fs');
       'active workout shows the full double-progression prescription');
     assert.equal(await page.getByLabel('Set 1 RIR').count(), 1,
       'a target RIR exposes the logging field even when global effort tracking is off');
+    const activeWeight = page.locator('[data-bind="set"][data-field="weight"]').first();
+    await activeWeight.fill('-5');
+    assert.equal(await page.evaluate(() => window.testAPI.state.activeWorkout.exercises[0].sets[0].weight),null,
+      'active logging rejects a negative weight through the shared normalizer');
+    await activeWeight.fill('100');
+    const activeRir = page.getByLabel('Set 1 RIR');
+    await activeRir.fill('15');
+    assert.equal(await page.evaluate(() => window.testAPI.state.activeWorkout.exercises[0].sets[0].rir),10,
+      'active logging clamps RIR through the shared normalizer');
+    await activeRir.fill('2');
     const activeEdit = await page.evaluate(() => {
       const t = window.testAPI;
       const def = t.state.exercises.find(ex => ex.id === 'ex-squat');
@@ -327,6 +363,22 @@ const fs = require('node:fs');
     assert.equal(await page.locator('#progression-flags').count(), 0,
       'correcting a logged set clears a stale flag without stored flag state');
 
+    await page.getByRole('button', {name:'Settings'}).click();
+    const beforeClear = await page.evaluate(() => ({
+      exercises:window.testAPI.state.exercises.length,
+      routines:window.testAPI.state.routines.length,
+      theme:window.testAPI.state.settings.theme
+    }));
+    await page.getByRole('button', {name:'Clear workout data…'}).click();
+    await page.getByRole('dialog', {name:'Clear workout data?'}).getByRole('button', {name:'Clear workout data', exact:true}).click();
+    assert.deepEqual(await page.evaluate(() => ({
+      exercises:window.testAPI.state.exercises.length,
+      routines:window.testAPI.state.routines.length,
+      theme:window.testAPI.state.settings.theme,
+      workouts:window.testAPI.state.workouts.length,
+      active:window.testAPI.state.activeWorkout
+    })), {...beforeClear,workouts:0,active:null}, 'clear workout data preserves library, routines and settings');
+
     const touch = await browser.newPage({ viewport:{width:320,height:568}, isMobile:true, hasTouch:true });
     touch.on('pageerror', e => errors.push(e.message));
     await touch.route('http://liftlog.test/**', route => route.fulfill({contentType:'text/html',body:html}));
@@ -368,7 +420,8 @@ const fs = require('node:fs');
       'either-of dialog describes in-session completion behavior');
     await touch.close();
     assert.deepEqual(errors, []);
-    console.log([...result, ...progressionChecks, 'mobile editor pairing and in-session alternative completion',
-      'History progression flag and navigation', 'no browser errors'].map(s => 'PASS ' + s).join('\n'));
+    console.log([...result, ...progressionChecks, 'clear workout data preserves library, routines and settings',
+      'mobile editor pairing and in-session alternative completion', 'History progression flag and navigation',
+      'no browser errors'].map(s => 'PASS ' + s).join('\n'));
   } finally { await browser.close(); }
 })().catch(e => { console.error(e); process.exit(1); });

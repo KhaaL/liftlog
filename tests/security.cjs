@@ -174,11 +174,22 @@ const fixture = () => ({
     await page.locator('[data-action="history-toggle"]').click();
     await page.getByRole('button',{name:'Edit session',exact:true}).click();
     await assertInert();
+    assert.equal(await page.locator('select[data-bind="hexsel"]').count(),0,
+      'history measurement kind is not mutable through a unit dropdown');
+    assert.equal(await page.locator('.hedit-unit .field-value').first().innerText(),'Weighted');
     const weight=page.locator('[data-bind="hset"][data-field="weight"]').first();
     assert.equal(await weight.getAttribute('data-sid'),setId);
     assert.equal(await weight.getAttribute('id'),'hw-'+setId);
+    await weight.fill('-5');
+    assert.equal(await page.evaluate(() => window.testAPI.state.workouts[0].exercises[0].sets[0].weight),null);
     await weight.fill('42');
     assert.equal(await page.evaluate(() => window.testAPI.state.workouts[0].exercises[0].sets[0].weight),42);
+    const finished=page.getByLabel('Finished');
+    await finished.fill('2020-01-01T00:00');
+    await finished.press('Tab');
+    assert.equal(await page.evaluate(() => {
+      const w=window.testAPI.state.workouts[0]; return w.finishedAt === w.startedAt;
+    }),true, 'history editor prevents a negative workout duration');
     await page.reload();
     await assertInert();
     assert.equal(await page.evaluate(() => window.testAPI.state.workouts[0].id),malicious.workouts[0].id);

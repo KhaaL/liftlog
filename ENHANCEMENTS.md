@@ -10,18 +10,17 @@ is the thing most of them trade against.
 
 ## 1. Correctness and data safety
 
-### 1.1 A test suite, and a seam to test through
-**Why:** the app has no automated tests, and the logic worth testing (migrations,
-import normalization, unit conversion, e1RM, volume) is sealed inside an IIFE
-with no exports. Every change is verified by hand.
+### 1.1 Stabilize the browser-test seam and run it in CI
+**Why:** `tests/regression.cjs` and `tests/security.cjs` now cover migrations,
+imports, unit conversion, analytics, mobile workflows and hostile files. They
+inject their API by replacing the literal end of the document's IIFE, and the
+repository has no dependency lock or CI workflow, so a harmless formatting
+change can break the seam and regressions are still easy to miss before merge.
 
-**How:** expose a small, explicit surface (`window.Liftlog = { migrateToV3,
-normalizeImportedSet, epley, sumVolume, convertWeight, … }`) guarded so it is
-obviously a test seam, then add a dependency-free `tests.html` that loads
-`index.html` in an iframe and asserts against it. Serve over `http://` — a
-`file://` iframe is cross-origin in Chrome. This keeps the zero-build property.
-A Playwright suite over the real UI is the heavier alternative, and would be the
-right call once a build step exists anyway.
+**How:** expose a small test-only surface intentionally, pin Playwright and its
+browser in development tooling, and run both suites in CI. The shipped app can
+remain dependency-free; these dependencies belong to verification rather than
+runtime.
 
 ### 1.2 Re-link history when v1 data is migrated
 **Why:** `migrateToV2()` replaces the whole exercise library with new ids, so
@@ -211,7 +210,7 @@ sample data replaceable without touching logic.
 ### 4.5 Undo
 `ui` and `state` are plain objects and `deepCopy` already exists, so a bounded
 undo stack for destructive actions (delete routine/exercise, discard workout,
-clear all) is cheap. Currently every one of them is a confirm-and-hope.
+clear workout data) is cheap. Currently every one of them is a confirm-and-hope.
 
 ---
 

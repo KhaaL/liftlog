@@ -329,7 +329,7 @@ state
 ├─ version         schema version (SCHEMA_VERSION)
 ├─ settings        { theme, unit, defaultRest, autoRest, sound, vibrate, effortMetric,
 │                    lastFileBackupAt, seededAt, historyLinksDismissedKey }
-├─ exercises[]     { id, name, category, unit, notes, url }   — the library
+├─ exercises[]     { id, name, category, unit, notes, url }   — the library; kg/lb means weighted
 ├─ exerciseLinks[] { sourceId, targetId } — historical ID → current Library ID
 ├─ historySeparateIds[] historical IDs explicitly kept as their own series
 ├─ routines[]      { id, name, items[] }                      — the plan
@@ -349,6 +349,11 @@ compatible unit so corrections appear immediately. A change between weighted,
 bodyweight, and timed measurement is deferred until the next workout because
 reinterpreting existing set fields would corrupt work already entered. The
 how-to URL is always read from the current exercise definition.
+
+For a Library exercise, `unit` chooses the measurement kind: weighted (`kg` or
+`lb`), bodyweight, or time. Weighted definitions are always normalized to
+`settings.unit`; kg/lb is one global display and planning preference rather than
+a competing per-exercise choice. A logged set keeps its own kg/lb unit forever.
 
 ### Durability
 
@@ -403,6 +408,11 @@ neither guaranteed nor permanent:
   current display unit via `setWeight()`, so totals stay comparable after a
   kg/lb switch. Switching units rewrites the *active* session's sets and re-tags
   their `unit` — converting the value without re-tagging would convert twice.
+- **Set bounds do not depend on the entry path.** `normalizeSetNumber()` and
+  `normalizeSetMeasurements()` apply the same nonnegative weight/duration,
+  integer reps/RIR and 1–10 RPE rules to active logging, history editing,
+  transfer import and full-backup restore. A workout end before its start is
+  pulled up to the start on edit, import and restore.
 - **A completed set is a record, not a plan.** Nothing that propagates a
   planned value may touch one. `cascadeWeight()` writes a committed weight down
   to every later set in the exercise, skipping completed ones; `deleteSet()`
@@ -474,7 +484,7 @@ schema version — is never overwritten in place. It is copied to
 warning. If that copy cannot be saved, or would replace a different recovery
 copy, the original key is left intact and automatic writes are blocked. The
 save banner and startup message explain this state; explicitly restoring a
-valid backup or clearing all data re-enables writes.
+  valid backup re-enables writes.
 
 ## Import / export
 
@@ -489,7 +499,10 @@ with `app: 'liftlog'` and a `kind`:
   stamps) and a restore puts them all back. The one deliberate exception is the
   remote-storage config: it lives under its own `localStorage` key and stays on
   the device, so a backup file — including the copy sitting in the bucket —
-  never carries bucket credentials.
+  never carries bucket credentials. `prepareBackup()` removes the transfer
+  envelope (`app`, `kind`, `schemaVersion`, `source`, `exportedAt`) before the
+  candidate becomes live state, and `backupPayload()` writes a fresh envelope
+  last so restored metadata cannot leak into a later export.
 - **`routines`** — routines plus the exercise definitions they reference, so an
   import into another browser can rebuild missing library entries. Exercises are
   resolved by id, then by name, then created. Safe source exercise, routine, and
@@ -984,12 +997,14 @@ is a bug.
 
 ## Testing
 
-There is no automated suite yet — see [ENHANCEMENTS.md](ENHANCEMENTS.md). When
-changing behaviour, exercise at least: start a routine, log and un-log a set,
-the rest timer across a reload, finish a workout, edit a logged session, a kg/lb
-switch, an export/import round trip, and (if touching remote storage) saving a
-config, a failed connection test, and a backup/restore round trip against a
-real S3-compatible bucket.
+Two Playwright suites exercise the real document on an isolated synthetic
+origin. Run `node tests/regression.cjs` for workflows, migrations, transfer
+round trips, progression and mobile layouts; run `node tests/security.cjs` for
+backup validation, hostile imported values and recovery behavior. They require
+Playwright and a Chromium browser (optionally selected with `BROWSER_PATH`).
+There is no repository CI workflow yet. If touching remote storage, also test a
+failed connection and a backup/restore round trip against a real S3-compatible
+bucket; the local suites stub that boundary.
 
 Also exercise the set row: log a set from its own box in the done column (and
 check auto-rest starts), mark a set as a warm-up both by long-pressing that box
@@ -1118,7 +1133,8 @@ analytics; it never rewrites workout names or IDs. Removing the link restores
 the original independent series.
 
 History and Settings expose **Review exercise links**. Each historical identity
-can be linked manually, accepted as an unambiguous exact name-and-unit match,
+can be linked manually, accepted as an unambiguous exact name-and-measurement match
+(kg and lb are the same weighted kind),
 added to the Library under its original ID, or marked **Keep as separate
 history**. Bulk exact matching accepts only unique matches. Reviewed decisions
 can be shown and changed later. The banner can be dismissed for the current set

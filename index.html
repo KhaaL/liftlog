@@ -617,6 +617,11 @@ kbd{
 .hedit-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:var(--sp-3); }
 .hedit-ex{ border:1px solid var(--border); border-radius:var(--radius); padding:var(--sp-3); margin-top:var(--sp-3); }
 .hedit-ex-head{ display:flex; gap:var(--sp-3); align-items:flex-end; flex-wrap:wrap; }
+.field-value{
+  display:flex; align-items:center; min-height:38px; padding:8px 10px;
+  border:1px solid var(--border); border-radius:var(--radius); background:var(--surface-2);
+  color:var(--muted); font-size:var(--fs-sm);
+}
 .hset-row{ display:grid; grid-template-columns:20px 1fr 1fr 1fr auto; gap:var(--sp-2); align-items:end; margin-top:var(--sp-3); }
 .hset-num{ padding-bottom:9px; text-align:center; }
 .hset-ctl{ display:flex; gap:var(--sp-2); }
@@ -1499,6 +1504,25 @@ function toNum(v){
   return isFinite(n) ? n : null;
 }
 function clamp(n, lo, hi){ return Math.min(hi, Math.max(lo, n)); }
+/* Every path that can create or edit a set uses these bounds: live logging,
+   history editing, transfer import and full-backup restore. HTML min/max is
+   only a keyboard hint and cannot be the data invariant. */
+function normalizeSetNumber(field, raw){
+  const n = toNum(raw);
+  if (n == null) return null;
+  if (field === 'weight' || field === 'durationSeconds' || field === 'distance') return n < 0 ? null : n;
+  if (field === 'reps') return Math.max(0, Math.round(n));
+  if (field === 'rpe') return clamp(n, 1, 10);
+  if (field === 'rir') return clamp(Math.round(n), 0, 10);
+  return n;
+}
+function normalizeSetMeasurements(set){
+  ['weight','reps','durationSeconds','rpe','rir','distance'].forEach(field => {
+    if (field in set) set[field] = normalizeSetNumber(field, set[field]);
+  });
+  if (set.distance == null) delete set.distanceUnit;
+  return set;
+}
 /* Volume = execution (completed) AND inclusion (countForVolume, default true).
    Warm-ups opt out with countForVolume:false instead of abusing completed:false. */
 const countsVolume = s => s.completed && s.countForVolume !== false;
@@ -1580,9 +1604,20 @@ const UNIT_TEXT = {                       /* short form, used in lists */
 const UNIT_OPTION_TEXT = {                /* long form, used in <select> */
   kg:'kg', lb:'lb', bw:'bodyweight', time:'time (seconds)'
 };
-function unitOptions(selected){
-  return UNITS.map(u => '<option value="' + u + '"' + (u === selected ? ' selected' : '') + '>' +
-    UNIT_OPTION_TEXT[u] + '</option>').join('');
+const exerciseMeasureKind = unit => unit === 'time' ? 'time' : unit === 'bw' ? 'bodyweight' : 'weighted';
+/* kg/lb is a display preference, not a property of one movement. Exercise
+   definitions store the active display unit only as the legacy representation
+   of "weighted"; logged sets remain the source of truth for their actual unit. */
+const normalizedExerciseUnit = (unit, displayUnit) =>
+  exerciseMeasureKind(unit) === 'weighted' ? (displayUnit === 'lb' ? 'lb' : 'kg') : unit;
+function exerciseUnitOptions(selected){
+  const weighted = unitLabel();
+  const chosen = normalizedExerciseUnit(selected, weighted);
+  return [
+    [weighted, 'weighted (' + weighted + ')'],
+    ['bw', UNIT_OPTION_TEXT.bw],
+    ['time', UNIT_OPTION_TEXT.time]
+  ].map(([value,label]) => '<option value="' + value + '"' + (value === chosen ? ' selected' : '') + '>' + label + '</option>').join('');
 }
 
 const THEMES = [
@@ -1812,7 +1847,7 @@ function rescueUnreadable(raw, why){
     loadWarning = why + ' The original was set aside; starting fresh.';
   }catch(e){
     storageRecoveryBlocked = true;
-    loadWarning = why + ' The original is still stored. Saving is disabled until you restore a valid backup or clear all data.';
+    loadWarning = why + ' The original is still stored. Saving is disabled until you restore a valid backup or clear this site\'s storage in your browser settings.';
   }
 }
 function load(){
@@ -1945,6 +1980,10 @@ function prepareBackup(obj){
   const candidate = deepCopy(obj); // migration/normalization must not mutate the caller
   migrateState(candidate);
   normalizeState(candidate);
+  /* File-envelope metadata describes one transfer, not the application state.
+     Keeping it in state lets an old restored schemaVersion/exportedAt overwrite
+     the fresh values on the next export. */
+  ['app','kind','schemaVersion','source','exportedAt'].forEach(key => { delete candidate[key]; });
   validateBackup(candidate);
   return candidate;
 }
@@ -2066,7 +2105,7 @@ function normalizeState(s){
   s.settings = set;
   s.exercises = (s.exercises || []).map(e => ({ ...e,
     category: typeof e.category === 'string' ? e.category : '',
-    unit: isUnit(e.unit) ? e.unit : 'kg',
+    unit: normalizedExerciseUnit(isUnit(e.unit) ? e.unit : set.unit, set.unit),
     notes: typeof e.notes === 'string' ? e.notes : '',
     url: safeUrl(e.url)
   }));
@@ -2090,6 +2129,7 @@ function normalizeState(s){
   const normalizeWorkout = (w, active) => {
     w.routineName = w.routineName == null ? 'Imported session' : w.routineName;
     w.notes = w.notes || '';
+    if (w.finishedAt != null && w.finishedAt < w.startedAt) w.finishedAt = w.startedAt;
     /* History edits may have removed blocks since this cursor was recorded. */
     w.currentExerciseIndex = w.currentExerciseIndex == null ? (active ? 0 : w.exercises.length)
       : Math.min(w.currentExerciseIndex, w.exercises.length);
@@ -2097,7 +2137,10 @@ function normalizeState(s){
       ex.name = ex.name == null ? 'Unknown exercise' : ex.name;
       ex.unit = isUnit(ex.unit) ? ex.unit : 'kg';
       normalizeWorkoutTargets(ex);
-      ex.sets.forEach(set => { set.unit = isUnit(set.unit) ? set.unit : ex.unit; });
+      ex.sets.forEach(set => {
+        set.unit = isUnit(set.unit) ? set.unit : ex.unit;
+        normalizeSetMeasurements(set);
+      });
     });
   };
   s.workouts.forEach(w => normalizeWorkout(w, false));
@@ -2345,7 +2388,8 @@ function historyExerciseById(id){
 }
 const normalizedExerciseName = name => String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
 function suggestedExercise(identity){
-  const matches = state.exercises.filter(ex => normalizedExerciseName(ex.name) === normalizedExerciseName(identity.name) && ex.unit === identity.unit);
+  const matches = state.exercises.filter(ex => normalizedExerciseName(ex.name) === normalizedExerciseName(identity.name) &&
+    exerciseMeasureKind(ex.unit) === exerciseMeasureKind(identity.unit));
   return matches.length === 1 ? matches[0] : null;
 }
 function unresolvedHistoryExercises(){
@@ -2385,7 +2429,8 @@ function addHistoricalExerciseToLibrary(sourceId){
   if (exerciseById(sourceId)) return false;
   const x = historyExerciseIdentities().find(item => item.id === sourceId);
   if (!x) return false;
-  state.exercises.push({ id:x.id, name:x.name, category:x.category || 'General', unit:x.unit, notes:'', url:'' });
+  state.exercises.push({ id:x.id, name:x.name, category:x.category || 'General',
+    unit:normalizedExerciseUnit(x.unit, state.settings.unit), notes:'', url:'' });
   unlinkExerciseHistory(sourceId);
   state.historySeparateIds = (state.historySeparateIds || []).filter(id => id !== sourceId);
   state.settings.historyLinksDismissedKey = '';
@@ -3213,6 +3258,7 @@ function cascadeSetField(setId, field, value, elPrefix, unitSuffix){
   const ex = currentExercise(); if (!ex) return;
   const i = ex.sets.findIndex(x => x.id === setId);
   if (i === -1) return;
+  value = normalizeSetNumber(field, value);
   ex.sets[i][field] = value;
   /* clearing a field is not "setting" it, and must not wipe the rest */
   if (value == null){ save(); return; }
@@ -3692,7 +3738,7 @@ function saveNewExercise(form){
   state.exercises.push({
     id:uid(), name,
     category: form.category.trim() || 'General',
-    unit: form.unit || 'kg',
+    unit: normalizedExerciseUnit(form.unit, state.settings.unit),
     notes: form.notes.trim(),
     url
   });
@@ -3701,7 +3747,6 @@ function saveNewExercise(form){
   toast(badUrl ? 'Exercise added — ' + name + ' (the link was not a valid web address)'
                : 'Exercise added — ' + name);
 }
-const exerciseMeasureKind = unit => unit === 'time' ? 'time' : unit === 'bw' ? 'bodyweight' : 'weighted';
 /* An active workout is not history yet. Keep its exercise identity metadata in
    step with Exercises so a correction made mid-session is visible at once.
    Changing between reps, bodyweight, and time would reinterpret fields that
@@ -3732,7 +3777,7 @@ function saveExerciseDraft(){
   const url = safeUrl(d.url);
   const badUrl = !url && String(d.url || '').trim() !== '';
   const updated = { id:d.id, name:d.name.trim(), category:d.category.trim() || 'General',
-                    unit:d.unit, notes:d.notes.trim(), url };
+                    unit:normalizedExerciseUnit(d.unit, state.settings.unit), notes:d.notes.trim(), url };
   state.exercises[i] = updated;
   const activeSync = syncExerciseDefinitionToActiveWorkout(previous, updated);
   ui.exerciseDraft = null;
@@ -3766,6 +3811,12 @@ function setUnit(v){
   if (v === from) return;
   state.settings.unit = v;
   const conv = x => { const n = toNum(x); return n == null ? x : roundHalf(convertWeight(n, from, v)); };
+  /* Weighted movement definitions describe a measurement kind; kg/lb comes
+     from the global setting. Keep the legacy unit field synchronized so lists,
+     routine transfers and history reconciliation cannot disagree with logging. */
+  state.exercises.forEach(ex => {
+    if (exerciseMeasureKind(ex.unit) === 'weighted') ex.unit = v;
+  });
   /* Routine targets carry no unit of their own — they are always in the
      display unit, so they are rewritten in place. */
   state.routines.forEach(r => r.items.forEach(it => { it.weight = conv(it.weight); }));
@@ -3773,6 +3824,7 @@ function setUnit(v){
      converted weight labelled with the old unit would convert it twice. */
   if (state.activeWorkout){
     state.activeWorkout.exercises.forEach(ex => {
+      if (exerciseMeasureKind(ex.unit) === 'weighted') ex.unit = v;
       ex.targetWeight = conv(ex.targetWeight);
       ex.sets.forEach(set => {
         if (set.unit !== from) return;
@@ -3818,9 +3870,9 @@ function readJSONFile(file, cb){
    fields that file does not carry. */
 function backupPayload(){
   return Object.assign(
+    deepCopy(state),
     { app:'liftlog', kind:'backup', schemaVersion:EXPORT_SCHEMA, source:'liftlog-web',
-      exportedAt:new Date().toISOString() },
-    deepCopy(state));
+      exportedAt:new Date().toISOString() });
 }
 function exportData(){
   /* Stamped before the payload is built, so the file records when it was made:
@@ -4191,12 +4243,16 @@ function importRoutines(file){
         const src = exIn.find(e => e.id === it.exerciseId);
         let local = it.exerciseId ? state.exercises.find(e => e.id === it.exerciseId) : null;
         if (local && src && (normalizedExerciseName(local.name) !== normalizedExerciseName(src.name) ||
-            local.unit !== (isUnit(src.unit) ? src.unit : 'kg'))) local = null;
-        if (!local && src) local = byName(src.name);
+            exerciseMeasureKind(local.unit) !== exerciseMeasureKind(isUnit(src.unit) ? src.unit : 'kg'))) local = null;
+        if (!local && src){
+          const named = byName(src.name);
+          if (named && exerciseMeasureKind(named.unit) === exerciseMeasureKind(isUnit(src.unit) ? src.unit : 'kg')) local = named;
+        }
         if (!local && src){
           const sourceId = validId(src.id) && !state.exercises.some(e => e.id === src.id) ? src.id : uid();
           state.exercises.push({ id:sourceId, name:String(src.name), category:String(src.category || 'General'),
-            unit:isUnit(src.unit) ? src.unit : 'kg', notes:String(src.notes || ''), url:safeUrl(src.url) });
+            unit:normalizedExerciseUnit(isUnit(src.unit) ? src.unit : 'kg', state.settings.unit),
+            notes:String(src.notes || ''), url:safeUrl(src.url) });
           local = state.exercises[state.exercises.length - 1]; addedEx++;
         }
         if (!local) return null;
@@ -4310,7 +4366,7 @@ function schemaHelpHTML(){
       ['items[].eitherOf', 'optional string', 'Exactly two different exercises in a routine share a key to form an either-of pair. They are placed together; completing one removes the other from that workout only. Invalid or incomplete pairs become independent exercises.'],
       ['items[].weight', 'number | null', 'Planned load. <code>null</code> leaves the bar to last time\u2019s figure.'],
       ['exercises[]', 'optional', 'Definitions for the ids above: <code>id</code>, <code>name</code>, <code>category</code>, <code>unit</code>, <code>notes</code>, <code>url</code>.'],
-      ['exercises[].unit', 'enum', 'One of ' + units + '. Anything else becomes <code>kg</code>.'],
+      ['exercises[].unit', 'enum', 'One of ' + units + '. <code>kg</code> and <code>lb</code> both mean weighted; a created Library exercise follows this browser’s global weight unit.'],
       ['exercises[].url', 'string', 'A link showing how to perform the movement. Only <code>http</code> and <code>https</code> survive; anything else is dropped.']
     ]) +
     code(sampleRoutinesFile()) +
@@ -4394,16 +4450,14 @@ function exportHistory(){
    seconds in `reps` are moved into durationSeconds). Numeric bounds are coerced,
    includeInVolume is accepted as an alias of countForVolume. */
 function normalizeImportedSet(s, exUnit){
-  const num = toNum;
   const incomingId = s.id == null ? '' : String(s.id);
   const o = { id:validId(incomingId) ? incomingId : uid() };
-  o.weight = num(s.weight);          if (o.weight != null && o.weight < 0) o.weight = null;
-  o.reps = num(s.reps);              if (o.reps != null) o.reps = Math.max(0, Math.round(o.reps));
-  o.rpe = num(s.rpe);                if (o.rpe != null) o.rpe = Math.min(10, Math.max(1, o.rpe));
-  o.rir = num(s.rir);                if (o.rir != null) o.rir = Math.min(10, Math.max(0, Math.round(o.rir)));
-  o.durationSeconds = num(s.durationSeconds);
-  if (o.durationSeconds != null && o.durationSeconds < 0) o.durationSeconds = null;
-  o.distance = num(s.distance);
+  o.weight = normalizeSetNumber('weight', s.weight);
+  o.reps = normalizeSetNumber('reps', s.reps);
+  o.rpe = normalizeSetNumber('rpe', s.rpe);
+  o.rir = normalizeSetNumber('rir', s.rir);
+  o.durationSeconds = normalizeSetNumber('durationSeconds', s.durationSeconds);
+  o.distance = normalizeSetNumber('distance', s.distance);
   /* distanceUnit is free text in the contract; keep it short and inert */
   if (o.distance != null && o.distance >= 0)
     o.distanceUnit = String(s.distanceUnit || 'm').replace(/[^\w/²³°.-]/g, '').slice(0, 8) || 'm';
@@ -4498,19 +4552,23 @@ function importHistory(file){
   });
 }
 
-function clearAllData(){
-  dialog({ title:'Clear all data?', body:'This permanently deletes all exercises, routines, workouts and settings stored in this browser.',
+function clearWorkoutData(){
+  dialog({ title:'Clear workout data?',
+    body:'This permanently deletes workout history and any workout in progress. Exercises, routines, settings and remote backup configuration are kept.',
     buttons:[
       { label:'Cancel', value:false, cls:'', autofocus:true },
-      { label:'Clear everything', value:true, cls:'btn-danger-solid' }
+      { label:'Clear workout data', value:true, cls:'btn-danger-solid' }
     ]}).then(ok => {
     if (!ok) return;
-    storageRecoveryBlocked = false;
-    state = { version:SCHEMA_VERSION, settings:defaultSettings(), exercises:[], routines:[], workouts:[],
-      exerciseLinks:[], historySeparateIds:[], activeWorkout:null };
-    applyTheme(); save(); loadTimer(state.settings.defaultRest);
+    state.workouts = [];
+    state.activeWorkout = null;
+    state.exerciseLinks = [];
+    state.historySeparateIds = [];
+    state.settings.historyLinksDismissedKey = '';
+    cancelRestBeep();
+    save(); loadTimer(state.settings.defaultRest);
     resetUI();
-    render(); toast('All data cleared');
+    render(); toast('Workout data cleared');
   });
 }
 /* ============================================================
@@ -5386,12 +5444,13 @@ function htmlWorkoutEditor(w){
         '<textarea rows="4" data-bind="hwo" data-field="notes">' + esc(w.notes || '') + '</textarea></label>' +
     '</div>';
   w.exercises.forEach((ex, xi) => {
+    const measurement = ex.unit === 'time' ? 'Timed' : ex.unit === 'bw' ? 'Bodyweight' : 'Weighted';
     html += '<div class="hedit-ex">' +
       '<div class="hedit-ex-head">' +
         '<label class="field hedit-name"><span class="cap">Exercise</span>' +
           '<input type="text" data-bind="hex" data-idx="' + xi + '" data-field="name" value="' + esc(ex.name) + '"></label>' +
-        '<label class="field hedit-unit"><span class="cap">Unit</span>' +
-          '<select data-bind="hexsel" data-idx="' + xi + '">' + unitOptions(isUnit(ex.unit) ? ex.unit : 'kg') + '</select></label>' +
+        '<div class="field hedit-unit"><span class="cap">Measurement</span>' +
+          '<span class="field-value">' + measurement + '</span></div>' +
         '<button type="button" class="btn hset-del" data-action="hex-del" data-idx="' + xi + '" aria-label="Remove ' + esc(ex.name) + ' from this session">' + IC.trash + '</button>' +
       '</div>';
     ex.sets.forEach((s, si) => {
@@ -5402,13 +5461,16 @@ function htmlWorkoutEditor(w){
          set itself rather than dropping a value nobody can then reach. */
       const em = ex.targetRir != null ? 'rir' : state.settings.effortMetric;
       const effortKey = em === 'rir' ? 'rir' : em === 'rpe' ? 'rpe' : (s.rir != null ? 'rir' : 'rpe');
+      const weightUnit = s.unit === 'lb' ? 'lb' : 'kg';
       const flds = [
-        { cap:'Weight', key:'weight' },
+        { cap:'Weight (' + weightUnit + ')', key:'weight' },
         timed ? { cap:'Sec', key:'durationSeconds' } : { cap:'Reps', key:'reps' },
         { cap:effortKey.toUpperCase(), key:effortKey }
       ];
+      const attrs = key => key === 'rpe' ? 'min="1" max="10" step="0.5"' : key === 'rir' ? 'min="0" max="10" step="1"' :
+        key === 'reps' || key === 'durationSeconds' ? 'min="0" step="1"' : 'min="0" step="0.5"';
       const f = (d, id) => '<label class="field"><span class="cap">' + d.cap + '</span>' +
-        '<input' + (id ? ' id="' + esc(id) + '"' : '') + ' inputmode="decimal" data-bind="hset" data-idx="' + xi + '" data-sid="' + esc(s.id) + '" data-field="' + d.key + '" ' +
+        '<input type="number" ' + attrs(d.key) + (id ? ' id="' + esc(id) + '"' : '') + ' inputmode="decimal" data-bind="hset" data-idx="' + xi + '" data-sid="' + esc(s.id) + '" data-field="' + d.key + '" ' +
         'value="' + esc(s[d.key] != null ? s[d.key] : '') + '" placeholder="–"></label>';
       html += '<div class="hset-row' + (s.completed ? ' done' : '') + '">' +
         '<span class="hset-num muted xs mono">' + (si+1) + '</span>' +
@@ -5789,8 +5851,8 @@ function htmlExerciseForm(){
         '<label class="field"><span class="cap">Name</span><input type="text" name="exname" required placeholder="e.g. Incline Press"></label>' +
         '<label class="field"><span class="cap">Muscle group</span><input type="text" name="excat" list="ex-cats" placeholder="Chest, Back…">' +
           categoryDatalist('ex-cats') + '</label>' +
-        '<label class="field"><span class="cap">Default unit</span>' +
-          '<select name="exunit">' + unitOptions('kg') + '</select></label>' +
+        '<label class="field"><span class="cap">Measurement</span>' +
+          '<select name="exunit">' + exerciseUnitOptions(state.settings.unit) + '</select></label>' +
       '</div>' +
       '<label class="field mt-3"><span class="cap">Notes (optional)</span>' +
         '<input type="text" name="exnotes" placeholder="Cues, tempo, grip…"></label>' +
@@ -5828,8 +5890,8 @@ function htmlExerciseEditRow(e){
         '<label class="field"><span class="cap">Name</span><input type="text" data-bind="edraft" data-field="name" value="' + esc(d.name) + '" required></label>' +
         '<label class="field"><span class="cap">Muscle group</span><input type="text" data-bind="edraft" data-field="category" value="' + esc(d.category) + '" list="ex-cats-edit">' +
           categoryDatalist('ex-cats-edit') + '</label>' +
-        '<label class="field"><span class="cap">Default unit</span>' +
-          '<select data-bind="edraft" data-field="unit">' + unitOptions(d.unit) + '</select></label>' +
+        '<label class="field"><span class="cap">Measurement</span>' +
+          '<select data-bind="edraft" data-field="unit">' + exerciseUnitOptions(d.unit) + '</select></label>' +
       '</div>' +
       '<label class="field mt-3"><span class="cap">Notes</span>' +
         '<input type="text" data-bind="edraft" data-field="notes" value="' + esc(d.notes) + '"></label>' +
@@ -6073,9 +6135,9 @@ function viewSettings(){
       historyImportSummaryHTML() +
     '</div>' +
     '<div class="setting-block">' +
-      '<h3 class="danger-heading">Danger zone</h3>' +
-      '<p class="desc">Removes every exercise, routine, workout and preference from this browser.</p>' +
-      '<button type="button" class="btn btn-danger" data-action="clear-all">' + IC.trash + '<span>Clear all data…</span></button>' +
+      '<h3 class="danger-heading">Workout data</h3>' +
+      '<p class="desc">Removes workout history and any workout in progress. Exercises, routines and settings are kept.</p>' +
+      '<button type="button" class="btn btn-danger" data-action="clear-workouts">' + IC.trash + '<span>Clear workout data…</span></button>' +
     '</div>' +
   '</section>' +
   '<section class="panel mt-4 keyboard-only" aria-label="Keyboard shortcuts">' +
@@ -6251,7 +6313,7 @@ const actions = {
       'This removes the stored endpoint and credentials from this browser. It does not delete anything already uploaded to your bucket.',
       'Forget', true).then(ok => { if (!ok) return; clearRemoteConfig(); ui.remoteDraft = null; render(); toast('Remote configuration removed'); });
   },
-  'clear-all'(){ clearAllData(); },
+  'clear-workouts'(){ clearWorkoutData(); },
   'help-open'(){ $('#help-dlg').showModal(); },
   'help-close'(){ $('#help-dlg').close(); },
   /* built on open, not at init: the examples carry a timestamp and a date
@@ -6549,7 +6611,7 @@ const binders = {
   set(t){
     const ex = currentExercise(); if (!ex) return;
     const s = ex.sets.find(x => x.id === t.dataset.id); if (!s) return;
-    s[t.dataset.field] = toNum(t.value);
+    s[t.dataset.field] = normalizeSetNumber(t.dataset.field, t.value);
     save();
   },
   wnotes(t){
@@ -6568,7 +6630,7 @@ const binders = {
   remote(t){ if (ui.remoteDraft) ui.remoteDraft[t.dataset.field] = t.value; },
   hwo(t){ const w = editingWorkout(); if (w){ w[t.dataset.field] = t.value; save(); } },
   hex(t){ const ex = findHEx(t.dataset); if (ex){ ex[t.dataset.field] = t.value; save(); } },
-  hset(t){ const s = findHSet(t.dataset); if (s){ s[t.dataset.field] = toNum(t.value); save(); } },
+  hset(t){ const s = findHSet(t.dataset); if (s){ s[t.dataset.field] = normalizeSetNumber(t.dataset.field, t.value); save(); } },
   exfilter(t){ ui.exerciseFilter = t.value; ui.focus = 'ex-search'; render(); },
   'history-link-filter'(t){ ui.historyLinkFilter = t.value; ui.focus = 'history-link-filter'; render(); }
 };
@@ -6581,7 +6643,6 @@ document.addEventListener('input', e => {
 /* Controls that commit on change rather than per keystroke. Keyed by data-change. */
 const changeHandlers = {
   'routine-pair-first'(){ refreshSecondPairPicker(); },
-  hexsel(t){ const ex = findHEx(t.dataset); if (ex){ ex.unit = t.value; save(); } },
   theme(t){ setTheme(t.value); },
   unit(t){ setUnit(t.value); },
   'effort-metric'(t){
@@ -6632,12 +6693,18 @@ const changeHandlers = {
     const ts = new Date(t.value).getTime();
     if (isNaN(ts)){ toast('Invalid date — change discarded'); t.value = toLocalInput(w[field]); return; }
     w[field] = ts;
+    const adjusted = w.finishedAt != null && w.finishedAt < w.startedAt;
+    if (adjusted) w.finishedAt = w.startedAt;
     sortWorkouts();                                /* a new start time can reorder history */
     save(); render();
-    toast(field === 'startedAt' ? 'Start time updated' : 'End time updated');
+    toast(adjusted ? 'Time updated — the end cannot be before the start' :
+      (field === 'startedAt' ? 'Start time updated' : 'End time updated'));
   },
-  'set-weight'(t){ cascadeWeight(t.dataset.id, toNum(t.value)); },
-  'set-reps'(t){ cascadeReps(t.dataset.id, toNum(t.value)); },
+  'set-weight'(t){ cascadeWeight(t.dataset.id, normalizeSetNumber('weight', t.value)); },
+  'set-reps'(t){
+    const ex = currentExercise();
+    cascadeReps(t.dataset.id, normalizeSetNumber(ex && ex.unit === 'time' ? 'durationSeconds' : 'reps', t.value));
+  },
   'import-all'(t){ withPickedFile(t, importData); },
   'import-routines'(t){ withPickedFile(t, importRoutines); },
   'import-history'(t){ withPickedFile(t, importHistory); },
@@ -6653,7 +6720,7 @@ function withPickedFile(input, fn){
 document.addEventListener('change', e => {
   const t = e.target;
   if (!t.dataset) return;
-  const fn = changeHandlers[t.dataset.change] || (t.dataset.bind === 'hexsel' ? changeHandlers.hexsel : null);
+  const fn = changeHandlers[t.dataset.change];
   if (fn) fn(t);
 });
 document.addEventListener('submit', e => {
