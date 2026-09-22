@@ -333,6 +333,8 @@ state
 │                    equipmentKey, archived, notes, url }
 ├─ exerciseLinks[] { sourceId, targetId } — persisted “same progression series” join
 ├─ historySeparateIds[] historical IDs explicitly kept as their own series
+├─ progressionPreferences[] { exerciseId, loadCuesOff, dismissedExposureKey }
+│                    — per-series load guidance, including historical IDs
 ├─ bodyweights[]   { id, loggedAt, weight, unit } — dated bodyweight log, newest first
 ├─ routines[]      { id, name, items[] }                      — the plan
 │   └─ items[]     { id, exerciseId, sets, repsMin, repsMax, targetRir?, weight, eitherOf? }
@@ -502,6 +504,9 @@ sequence for older data. Startup and file/remote restore all use it:
   movement family to library definitions and workout snapshots; legacy library
   categories are mapped into the broad category vocabulary while finished
   workout category snapshots remain unchanged.
+- **v11 → v12** — adds per-series load cue preferences. The migration starts
+  with no disabled or dismissed cues; full backups and history transfers carry
+  the new field.
 
 Data that cannot be read — corrupt JSON, an unrecognized shape, or a *newer*
 schema version — is never overwritten in place. It is copied to
@@ -514,7 +519,7 @@ save banner and startup message explain this state; explicitly restoring a
 
 ## Import / export
 
-Four flows, all plain JSON (`EXPORT_SCHEMA = '1.9.0'`). Every file names itself
+Four flows, all plain JSON (`EXPORT_SCHEMA = '1.10.0'`). Every file names itself
 with `app: 'liftlog'` and a `kind`:
 
 - **`backup`** — the entire `state`; importing replaces everything. Built by
@@ -543,7 +548,8 @@ with `app: 'liftlog'` and a `kind`:
   Deduplicated by workout id; first write wins. Identical IDs are reported as
   already present, malformed workouts as invalid, and different content under
   an existing ID as a conflict. History files also carry relevant
-  `exerciseLinks` and `historySeparateIds`; links are restored only when their
+  `exerciseLinks`, `historySeparateIds`, and relevant `progressionPreferences`;
+  local cue preferences win when the same series has a setting already. Links are restored only when their
   current Library target exists and has the same measurement, load convention,
   and equipment identity.
 - **`remote-config`** — the remote-storage settings, optionally without the
@@ -760,12 +766,24 @@ otherwise compare reps plus any added load. Timed work is excluded. The flag is 
 from history on render, so history edits and imports update it without a new
 stored field or schema version.
 
-The same latest-exposure calculation produces the positive **Ready to increase
-load** cue when every prescribed working set reaches the upper rep target and,
-when present, its logged RIR meets or exceeds the target. That cue suppresses a
-stall flag for the same exposure. Technique is not recorded, so the copy asks
-the lifter to confirm technique before adding load rather than claiming the app
-can verify it.
+The same latest-exposure calculation produces load guidance in Today for
+exercises in the selected routine and in the active workout. It checks the
+current routine or workout prescription: every prescribed working set must
+reach its upper rep target, and a target RIR must be met when set. Without a
+prescribed RIR, the cue says **Rep target met** and asks for a technique/RIR
+check before adding load. With one, it says **Ready to increase load** while
+still requiring a technique check. A ready exposure suppresses a stall flag
+for that series. History keeps stall warnings before the charts while putting
+historical load results and their settings behind a disclosure. Workout rows
+can be searched by exercise name, and **View last session** opens and focuses
+the exact workout block behind a result.
+
+`progressionPreferences[]` keys a load-suggestion setting to the canonical
+progression ID. A dismissal hashes the latest workout block and expires when
+the next exposure is logged or that result is edited. Turning suggestions off
+persists until turned back on in History's progression analysis. The manager
+also includes historical IDs with no Library definition; linking or merging a
+series carries its preference to the surviving ID.
 
 Sets, not tonnage, and deliberately so. Load is a property of the machine, not
 of the muscle: a dip on an outdoor bar, a plate-loaded press and a cable fly all

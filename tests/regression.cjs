@@ -9,7 +9,7 @@ const fs = require('node:fs');
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
     let html = fs.readFileSync('index.html', 'utf8');
-    html = html.replace('init();\n})();', `window.testAPI = { sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, importHistory, normalizeImportedSet, normalizeImportedWorkout, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, workoutVolume, progressionStatus, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, compatibleHistoryLink, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, setExerciseArchived, mergeExercises, sameProgressionContract, exerciseLoadLabel, setSummary, remoteStartupSync, autoRemoteBackup, flushSave, save, render, get state(){return state}, get ui(){return ui} };\ninit();\n})();`);
+    html = html.replace('init();\n})();', `window.testAPI = { sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, importHistory, normalizeImportedSet, normalizeImportedWorkout, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, workoutVolume, progressionStatus, loadCueFor, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, compatibleHistoryLink, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, setExerciseArchived, mergeExercises, sameProgressionContract, exerciseLoadLabel, setSummary, remoteStartupSync, autoRemoteBackup, flushSave, save, render, get state(){return state}, get ui(){return ui} };\ninit();\n})();`);
     await page.route('https://liftlog.test/**', route => route.fulfill({ contentType:'text/html', body:html }));
     await page.goto('https://liftlog.test/');
     const result = await page.evaluate(async () => {
@@ -19,7 +19,7 @@ const fs = require('node:fs');
       const wait = () => new Promise(r => setTimeout(r, 60));
       t.state.exercises = []; t.state.routines = []; t.state.workouts = [];
       const sample = t.sampleRoutinesFile();
-      check(sample.version === 11 && sample.schemaVersion === '1.9.0', 'sample version markers');
+      check(sample.version === 12 && sample.schemaVersion === '1.10.0', 'sample version markers');
       t.importRoutines(file(sample)); await wait();
       check(t.state.routines.length === 1 && t.state.exercises.length === 3, 'routine sample imports all definitions');
       const r = t.state.routines[0];
@@ -105,7 +105,7 @@ const fs = require('node:fs');
         'rep range is ordered and target RIR is clamped');
       const old = {version:3, settings:{theme:'invalid',effortMetric:'invalid'}, exercises:[], routines:[{items:[{rest:60,sets:3,reps:5}]}],workouts:[{startedAt:1,exercises:[{restSeconds:60,sets:[{rpe:8}]}]}]};
       t.normalizeState(t.migrateState(old));
-      check(old.version === 11 && Array.isArray(old.exerciseLinks) && Array.isArray(old.historySeparateIds) && Array.isArray(old.bodyweights) &&
+      check(old.version === 12 && Array.isArray(old.exerciseLinks) && Array.isArray(old.historySeparateIds) && Array.isArray(old.bodyweights) && Array.isArray(old.progressionPreferences) &&
         old.routines[0].items[0].repsMin === 5 && old.routines[0].items[0].repsMax === 5 &&
         old.settings.effortMetric === 'rpe' && old.settings.theme === 'system' && !('rest' in old.routines[0].items[0]) &&
         !('restSeconds' in old.workouts[0].exercises[0]), 'complete migration chain and settings fallback');
@@ -129,7 +129,7 @@ const fs = require('node:fs');
       t.state.schemaVersion = 'stale'; t.state.source = 'stale'; t.state.exportedAt = 'stale';
       const freshEnvelope = t.backupPayload();
       delete t.state.schemaVersion; delete t.state.source; delete t.state.exportedAt;
-      check(freshEnvelope.schemaVersion === '1.9.0' && freshEnvelope.source === 'liftlog-web' && freshEnvelope.exportedAt !== 'stale',
+      check(freshEnvelope.schemaVersion === '1.10.0' && freshEnvelope.source === 'liftlog-web' && freshEnvelope.exportedAt !== 'stale',
         'fresh export metadata wins over stale state fields');
       t.setUnit('lb');
       check(t.state.exercises.filter(ex => ex.unit === 'kg' || ex.unit === 'lb').every(ex => ex.unit === 'lb'),
@@ -362,7 +362,7 @@ const fs = require('node:fs');
     });
     await page.getByRole('button', {name:'Import & replace', exact:true}).click();
     await page.waitForFunction(() => window.testAPI.state.activeWorkout?.timer?.remaining === 37);
-    assert.equal(await page.evaluate(() => window.testAPI.state.version), 11, 'full backup restore migrates');
+    assert.equal(await page.evaluate(() => window.testAPI.state.version), 12, 'full backup restore migrates');
     assert.equal(await page.evaluate(() => window.testAPI.state.activeWorkout.timer.remaining), 37, 'backup restore retains rest timer');
     await page.reload();
     assert.equal(await page.evaluate(() => window.testAPI.state.activeWorkout.exercises[0].name), 'Leg Press', 'settled workout survives reload');
@@ -445,9 +445,85 @@ const fs = require('node:fs');
       ex.sets.forEach(set => { set.reps = 8; set.rir = 2; });
       window.testAPI.render();
     });
-    assert.equal(await page.locator('#progression-ready').count(), 1,
-      'History shows a ready-to-increase cue after every prescribed set reaches the upper target');
-    assert.match(await page.locator('#progression-ready').innerText(), /Increase load next time/);
+    assert.equal(await page.locator('#progression-ready').count(), 0,
+      'History no longer opens with ready-to-increase notifications');
+    await page.locator('[data-progression-analysis] summary').click();
+    assert.match(await page.locator('.cue-manager').innerText(), /Ready to increase load/,
+      'historical load results remain available in progression analysis');
+    await page.evaluate(() => {
+      const t = window.testAPI, squat = t.state.exercises.find(ex => ex.name === 'Back Squat');
+      const latest = Date.now() - 60000;
+      t.state.workouts = [{id:'cue-session',routineName:'Cue workout',startedAt:latest,finishedAt:latest+30000,
+        exercises:[
+          {exerciseId:squat.id,name:squat.name,unit:'kg',loadMode:squat.loadMode,
+            equipmentKey:squat.equipmentKey,movementFamily:squat.movementFamily,plannedSets:3,
+            targetRepsMin:5,targetRepsMax:8,targetRir:null,
+            sets:[1,2,3].map(i => ({id:'cue-set-'+i,completed:true,unit:'kg',weight:100,reps:8}))},
+          {exerciseId:'historic-only',name:'Historic only',unit:'kg',loadMode:'total',plannedSets:1,
+            targetRepsMin:5,targetRepsMax:8,targetRir:null,
+            sets:[{id:'historic-set',completed:true,unit:'kg',weight:40,reps:8}]}
+        ]}];
+      t.state.activeWorkout = null;
+      t.state.routines.push({id:'cue-routine',name:'Cue routine',items:[
+        {id:'cue-item',exerciseId:squat.id,sets:3,repsMin:5,repsMax:8,targetRir:2,weight:100}]});
+      t.ui.selectedRoutineId='cue-routine'; t.ui.view='today'; t.render();
+    });
+    assert.equal(await page.locator('.today-cues .load-cue').count(), 0,
+      'current routine target RIR prevents a cue when latest sets have no RIR');
+    await page.evaluate(() => { const t=window.testAPI;
+      t.state.routines.find(r => r.id==='cue-routine').items[0].targetRir=null; t.render(); });
+    assert.match(await page.locator('.today-cues').innerText(), /Rep target met.*Confirm good technique/s,
+      'missing target RIR gets a rep cue and technique check rather than an unconditional load increase');
+    await page.locator('.today-cues [data-action="cue-dismiss"]').click();
+    assert.equal(await page.locator('.today-cues .load-cue').count(), 0,
+      'dismissing hides the current exposure');
+    assert.equal(await page.evaluate(() => window.testAPI.prepareBackup(window.testAPI.backupPayload())
+      .progressionPreferences.some(pref => pref.exerciseId==='ex-squat' && pref.dismissedExposureKey)), true,
+      'dismissal survives a full backup round trip');
+    await page.evaluate(() => { const t=window.testAPI;
+      const next=structuredClone(t.state.workouts[0]); next.id='cue-session-2'; next.startedAt+=1000;
+      next.exercises[0].sets.forEach((set,i) => {set.id='cue-set-new-'+i;});
+      next.exercises[1].sets[0].id='historic-set-new';
+      t.state.workouts.unshift(next); t.render(); });
+    assert.equal(await page.locator('.today-cues .load-cue').count(), 1,
+      'a new exposure restores the dismissed cue');
+    await page.locator('.today-cues [data-action="cue-off"]').click();
+    assert.equal(await page.locator('.today-cues .load-cue').count(), 0,
+      'turning suggestions off hides the routine cue');
+    await page.getByRole('button', {name:'History', exact:true}).click();
+    if (!await page.locator('[data-progression-analysis]').evaluate(el => el.open))
+      await page.locator('[data-progression-analysis] summary').click();
+    const historicRow=page.locator('.cue-manager-list li').filter({hasText:'Historic only'});
+    await historicRow.getByRole('button', {name:'Turn off load suggestions'}).click();
+    assert.match(await historicRow.innerText(), /Suggestions off/,
+      'historical IDs without library definitions can disable suggestions');
+    assert.equal(await page.evaluate(() => {
+      const t=window.testAPI;
+      return t.historyPayload(t.state.workouts,t.state.exerciseLinks,t.state.historySeparateIds,
+        t.state.bodyweights,t.state.progressionPreferences).progressionPreferences
+        .some(pref => pref.exerciseId==='historic-only' && pref.loadCuesOff);
+    }), true, 'history transfer carries disabled historical-series suggestions');
+    await historicRow.getByRole('button', {name:'Turn on load suggestions'}).click();
+    assert.match(await historicRow.innerText(), /Rep target met/,
+      'historical series can enable suggestions again');
+    const squatRow=page.locator('.cue-manager-list li').filter({hasText:'Back Squat'});
+    await squatRow.getByRole('button', {name:'Turn on load suggestions'}).click();
+    await page.getByLabel('Find an exercise or session').fill('Historic only');
+    assert.equal(await page.locator('.hist-row').count(), 2,
+      'History exercise search finds sessions by exercise snapshot');
+    await page.getByLabel('Find an exercise or session').fill('no matching exercise');
+    assert.equal(await page.locator('.hist-row').count(), 0,
+      'History search filters unmatched workouts');
+    await page.locator('.cue-manager-list li').filter({hasText:'Back Squat'})
+      .getByRole('button', {name:'View last session'}).click();
+    assert.equal(await page.locator('.hist-ex.is-highlighted').count(), 1,
+      'View last session opens the exact workout exercise');
+    assert.equal(await page.locator('.hist-ex.is-highlighted h4').innerText().then(s => s.startsWith('Back Squat')), true,
+      'the highlighted block is the cue source exercise');
+    await page.getByRole('button', {name:'Today', exact:true}).click();
+    await page.getByRole('button', {name:'Start Cue routine'}).click();
+    assert.equal(await page.locator('.load-cue.is-compact').count(), 1,
+      'active workout shows the cue beside load entry');
 
     await page.getByRole('button', {name:'Settings'}).click();
     const bodyweightsBefore = await page.evaluate(() => window.testAPI.state.bodyweights.length);

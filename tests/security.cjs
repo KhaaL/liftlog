@@ -59,7 +59,11 @@ const fixture = () => ({
       ['control character ID', s => s.routines[0].id = 'a\u0000b'],
       ['string version', s => s.version = '3'],
       ['fractional version', s => s.version = 3.5],
-      ['future version', s => s.version = 12],
+      ['future version', s => s.version = 13],
+      ['duplicate progression preference', s => s.progressionPreferences = [
+        {exerciseId:'ex',loadCuesOff:true,dismissedExposureKey:''},
+        {exerciseId:'ex',loadCuesOff:false,dismissedExposureKey:''}]],
+      ['malformed progression preference', s => s.progressionPreferences = [{exerciseId:'ex',loadCuesOff:'yes',dismissedExposureKey:''}]],
       ['non-boolean archive flag', s => s.exercises[0].archived = 'yes'],
       ['non-string load mode', s => s.exercises[0].loadMode = 7],
       ['non-string workout equipment key', s => s.workouts[0].exercises[0].equipmentKey = {}],
@@ -117,7 +121,7 @@ const fixture = () => ({
     await page.waitForFunction(() => document.getElementById('toast-region').textContent.includes('Could not import'));
     assert.equal(await page.locator('#toast-region').textContent().then(x => x.includes('not valid JSON')),false);
     console.log('PASS JSON parsing errors and import errors are distinct');
-    for (let version=1;version<=11;version++){
+    for (let version=1;version<=12;version++){
       const legacy=fixture(); legacy.version=version; delete legacy.app; delete legacy.kind;
       if(version<=9) delete legacy.bodyweights;
       if(version<=8){delete legacy.exerciseLinks;delete legacy.historySeparateIds;}
@@ -126,7 +130,7 @@ const fixture = () => ({
       if(version<=3) delete legacy.settings.effortMetric;
       if(version<=5){legacy.routines[0].items[0].rest=60;legacy.workouts[0].exercises[0].restSeconds=60;}
       const prepared=await page.evaluate(s => window.testAPI.prepareBackup(s),legacy);
-      assert.equal(prepared.version,11);
+      assert.equal(prepared.version,12);
       assert.equal(prepared.routines[0].items[0].repsMin,version===1 ? 10 : 5);
       assert.equal(prepared.routines[0].items[0].repsMax,version===1 ? 15 : (version<=7 ? 5 : 8));
       assert.equal(prepared.workouts[0].exercises[1].sets[0].durationSeconds,45);
@@ -135,7 +139,7 @@ const fixture = () => ({
       if(version<=3) assert.equal(prepared.settings.effortMetric,'rpe');
       if(version<=5) assert.equal('restSeconds' in prepared.workouts[0].exercises[0],false);
     }
-    console.log('PASS v1–v11 backups migrate and preserve history');
+    console.log('PASS v1–v12 backups migrate and preserve history');
     const beforeCancel=await page.evaluate(() => JSON.stringify(window.testAPI.state));
     await page.evaluate(s => {window.testAPI.applyFullBackup(s);},good);
     await page.getByRole('button',{name:'Cancel',exact:true}).click();
@@ -245,7 +249,7 @@ const fixture = () => ({
     for (const raw of ['{broken',JSON.stringify(cases[1].value),JSON.stringify({...good,version:99})]){
       const recovery=await newPage({raw});
       assert.equal(await recovery.evaluate(()=>localStorage.getItem('liftlog.v1.unreadable')),raw);
-      assert.equal(await recovery.evaluate(()=>window.testAPI.state.version),11);
+      assert.equal(await recovery.evaluate(()=>window.testAPI.state.version),12);
       await recovery.context().close();
     }
     const rescued=await newPage({raw:'{broken'});
