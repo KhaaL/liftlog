@@ -8,8 +8,9 @@ not an exhaustive security or cross-browser audit.
 ## Mobile UX/UI audit — 2026-09-21
 
 Implementation status: findings 1, 3, 4, 6, and the planning fields from 7
-were addressed on 2026-09-21. The notes below retain the measured before-state
-and the rationale for the changes.
+were addressed on 2026-09-21. Mobile Settings disclosure groups from finding 5
+and the advisory load-increase cue from finding 7 were added on 2026-09-22.
+The notes below retain the measured before-state and the rationale for the changes.
 
 Tested the seeded application at 320×568 and 390×844 portrait, and 844×390
 landscape, with the real UI in a touch-enabled Chromium context. Every main
@@ -133,11 +134,13 @@ actually capture.
   and import allow corrections. That is enough to detect repeatable rep/load
   stalls without changing the file schema.
 - **Current limits:** the per-exercise chart shows the best set's estimated 1RM,
-  while the weekly charts show volume or set counts. Neither shows whether reps
-  rose across *all* prescribed sets at one load. Routines have one rep target,
-  not a rep range; there is no technique marker; effort logging defaults off.
-  Bodyweight movements use dated bodyweight plus optional added load; older
-  sessions without a bodyweight entry remain reps-only. The app cannot certify when a load increase is appropriate under the
+  while the weekly charts show volume or set counts. The separate progression
+  analysis now checks all prescribed working sets against the lower/upper rep
+  range and optional target RIR, showing both stalls and a ready-to-increase
+  cue. There is still no technique marker; the cue asks the lifter to confirm
+  technique rather than certifying it. Effort logging defaults off. Bodyweight
+  movements use dated bodyweight plus optional added load; older sessions
+  without a bodyweight entry remain reps-only. The app cannot certify when a load increase is appropriate under the
   stated 1–2 RIR and technique rule. The existing green upward `+0` trend cue was
   misleading and is now neutral.
 - **Flag added:** History shows an amber progression check after a baseline and

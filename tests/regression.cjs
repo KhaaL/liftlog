@@ -9,9 +9,9 @@ const fs = require('node:fs');
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
     let html = fs.readFileSync('index.html', 'utf8');
-    html = html.replace('init();\n})();', `window.testAPI = { sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, importHistory, normalizeImportedSet, normalizeImportedWorkout, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, workoutVolume, progressionStatus, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, compatibleHistoryLink, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, render, get state(){return state}, get ui(){return ui} };\ninit();\n})();`);
-    await page.route('http://liftlog.test/**', route => route.fulfill({ contentType:'text/html', body:html }));
-    await page.goto('http://liftlog.test/');
+    html = html.replace('init();\n})();', `window.testAPI = { sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, importHistory, normalizeImportedSet, normalizeImportedWorkout, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, workoutVolume, progressionStatus, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, compatibleHistoryLink, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, remoteStartupSync, autoRemoteBackup, flushSave, save, render, get state(){return state}, get ui(){return ui} };\ninit();\n})();`);
+    await page.route('https://liftlog.test/**', route => route.fulfill({ contentType:'text/html', body:html }));
+    await page.goto('https://liftlog.test/');
     const result = await page.evaluate(async () => {
       const t = window.testAPI, checks = [];
       const check = (condition, label) => { if (!condition) throw Error(label); checks.push(label); };
@@ -19,7 +19,7 @@ const fs = require('node:fs');
       const wait = () => new Promise(r => setTimeout(r, 60));
       t.state.exercises = []; t.state.routines = []; t.state.workouts = [];
       const sample = t.sampleRoutinesFile();
-      check(sample.version === 10 && sample.schemaVersion === '1.7.0', 'sample version markers');
+      check(sample.version === 10 && sample.schemaVersion === '1.8.0', 'sample version markers');
       t.importRoutines(file(sample)); await wait();
       check(t.state.routines.length === 1 && t.state.exercises.length === 3, 'routine sample imports all definitions');
       const r = t.state.routines[0];
@@ -129,7 +129,7 @@ const fs = require('node:fs');
       t.state.schemaVersion = 'stale'; t.state.source = 'stale'; t.state.exportedAt = 'stale';
       const freshEnvelope = t.backupPayload();
       delete t.state.schemaVersion; delete t.state.source; delete t.state.exportedAt;
-      check(freshEnvelope.schemaVersion === '1.7.0' && freshEnvelope.source === 'liftlog-web' && freshEnvelope.exportedAt !== 'stale',
+      check(freshEnvelope.schemaVersion === '1.8.0' && freshEnvelope.source === 'liftlog-web' && freshEnvelope.exportedAt !== 'stale',
         'fresh export metadata wins over stale state fields');
       t.setUnit('lb');
       check(t.state.exercises.filter(ex => ex.unit === 'kg' || ex.unit === 'lb').every(ex => ex.unit === 'lb'),
@@ -166,6 +166,7 @@ const fs = require('node:fs');
       return checks;
     });
     await page.getByRole('button', {name:'Settings'}).click();
+    await page.locator('[data-settings-section="transfer"] summary').click();
     await page.getByRole('button', {name:'Review exercise links', exact:true}).click();
     await page.getByRole('button', {name:'Show reviewed'}).click();
     const historyLinkSelect = page.locator('[data-change="history-link"][data-source="old-back-squat"]');
@@ -339,8 +340,10 @@ const fs = require('node:fs');
       const t = window.testAPI, check = (ok, label) => { if (!ok) throw Error(label); return label; };
       const make = (day, reps, weight = 100, opts = {}) => ({
         startedAt:day, exercises:[{ exerciseId:'lift', unit:opts.kind || 'kg', plannedSets:3,
+          ...(opts.targetMax == null ? {} : {targetRepsMin:opts.targetMin || 5,targetRepsMax:opts.targetMax,targetRir:opts.targetRir}),
           sets:[...(opts.warmup ? [{completed:true, countForVolume:false, countForPR:false, unit:'kg', weight:50, reps:10}] : []),
-            ...reps.map(r => ({completed:true, unit:opts.unit || 'kg', weight, reps:r}))] }]
+            ...reps.map(r => ({completed:true, unit:opts.unit || 'kg', weight, reps:r,
+              ...(opts.rir == null ? {} : {rir:opts.rir})}))] }]
       });
       const a = [make(1,[8,8,8]),make(2,[8,8,8]),make(3,[8,8,8]),make(4,[8,8,8])];
       const labels = [];
@@ -372,6 +375,10 @@ const fs = require('node:fs');
         'bodyweight rep exposures can flag'));
       labels.push(check(!t.progressionStatus('lift',a.map(w => ({...w,exercises:w.exercises.map(ex => ({...ex,unit:'time'}))}))).flagged,
         'timed work does not receive a double-progression flag'));
+      labels.push(check(t.progressionStatus('lift',[make(1,[8,8,8],100,{targetMax:8,targetRir:2,rir:2})]).ready,
+        'upper target on every prescribed set at target RIR is ready for more load'));
+      labels.push(check(!t.progressionStatus('lift',[make(1,[8,8,8],100,{targetMax:8,targetRir:2,rir:1})]).ready,
+        'missing the target RIR does not advise a load increase'));
       const squat = t.state.exercises.find(ex => ex.name === 'Back Squat');
       t.state.workouts = a.map((w,i) => ({...w,id:'plateau-'+i,routineName:'Lower body',
         startedAt:Date.now() - (4-i)*86400000,finishedAt:Date.now() - (4-i)*86400000 + 1800000,
@@ -402,6 +409,15 @@ const fs = require('node:fs');
     });
     assert.equal(await page.locator('#progression-flags').count(), 0,
       'correcting a logged set clears a stale flag without stored flag state');
+    await page.evaluate(() => {
+      const ex = window.testAPI.state.workouts[0].exercises[0];
+      ex.targetRepsMin = 5; ex.targetRepsMax = 8; ex.targetRir = 2;
+      ex.sets.forEach(set => { set.reps = 8; set.rir = 2; });
+      window.testAPI.render();
+    });
+    assert.equal(await page.locator('#progression-ready').count(), 1,
+      'History shows a ready-to-increase cue after every prescribed set reaches the upper target');
+    assert.match(await page.locator('#progression-ready').innerText(), /Increase load next time/);
 
     await page.getByRole('button', {name:'Settings'}).click();
     const bodyweightsBefore = await page.evaluate(() => window.testAPI.state.bodyweights.length);
@@ -430,8 +446,10 @@ const fs = require('node:fs');
       theme:window.testAPI.state.settings.theme,
       bodyweights:window.testAPI.state.bodyweights.length
     }));
+    await page.locator('[data-settings-section="danger"] summary').click();
     await page.getByRole('button', {name:'Clear workout data…'}).click();
     await page.getByRole('dialog', {name:'Clear workout data?'}).getByRole('button', {name:'Clear workout data', exact:true}).click();
+    await page.waitForFunction(() => window.testAPI.state.workouts.length === 0 && window.testAPI.state.activeWorkout === null);
     assert.deepEqual(await page.evaluate(() => ({
       exercises:window.testAPI.state.exercises.length,
       routines:window.testAPI.state.routines.length,
@@ -440,6 +458,38 @@ const fs = require('node:fs');
       workouts:window.testAPI.state.workouts.length,
       active:window.testAPI.state.activeWorkout
     })), {...beforeClear,workouts:0,active:null}, 'clear workout data preserves library, routines and settings');
+
+    const remoteChecks = await page.evaluate(async () => {
+      const t=window.testAPI, checks=[];
+      const check=(ok,label)=>{ if(!ok) throw Error(label); checks.push(label); };
+      localStorage.setItem('liftlog.v1.remote',JSON.stringify({endpoint:'https://storage.test',bucket:'test',region:'test',accessKeyId:'test',secretAccessKey:'test',pathStyle:true}));
+      t.state.settings.lastModifiedAt=1000;
+      const remote=t.backupPayload();
+      remote.settings.lastModifiedAt=2000;
+      remote.routines[0].name='Remote newest';
+      const requests=[];
+      window.fetch=async (_url,options={})=>{
+        requests.push(options.method || 'GET');
+        return options.method === 'PUT' ? new Response('',{status:200}) :
+          new Response(JSON.stringify(remote),{status:200,headers:{'content-type':'application/json'}});
+      };
+      await t.remoteStartupSync();
+      check(t.state.routines[0].name==='Remote newest' && t.state.settings.lastModifiedAt===2000,
+        'startup restores the newer remote snapshot');
+      check(localStorage.getItem('liftlog.v1.before-remote-restore')!==null,
+        'automatic restore preserves the replaced local state');
+      const oldTheme=JSON.parse(localStorage.getItem('liftlog.v1')).settings.theme;
+      t.state.settings.theme=oldTheme==='dark'?'light':'dark';
+      t.save();
+      check(JSON.parse(localStorage.getItem('liftlog.v1')).settings.theme===oldTheme,
+        'ordinary saves are debounced off the input path');
+      t.flushSave();
+      check(JSON.parse(localStorage.getItem('liftlog.v1')).settings.theme===t.state.settings.theme,
+        'a lifecycle flush persists a queued local save');
+      await t.autoRemoteBackup();
+      check(requests.includes('PUT'),'automatic backup uploads the current full snapshot');
+      return checks;
+    });
 
     const touch = await browser.newPage({ viewport:{width:320,height:568}, isMobile:true, hasTouch:true });
     touch.on('pageerror', e => errors.push(e.message));
@@ -461,6 +511,12 @@ const fs = require('node:fs');
     await touch.getByRole('button', {name:'Settings'}).click();
     assert.equal(await touch.locator('[aria-label="Keyboard shortcuts"]').evaluate(el => getComputedStyle(el).display), 'none',
       'shortcut table is hidden on touch');
+    assert.deepEqual(await touch.locator('.settings-disclosure').evaluateAll(nodes => nodes.map(node => node.open)), [false,false,false],
+      'secondary data controls are collapsed in mobile Settings');
+    await touch.locator('[data-settings-section="transfer"] summary').click();
+    assert.equal(await touch.locator('[data-settings-section="transfer"]').evaluate(node => node.open), true,
+      'mobile Settings disclosures open on demand');
+    await touch.screenshot({path:'/tmp/liftlog-settings-mobile.png',fullPage:true});
     await touch.getByRole('button', {name:'History', exact:true}).click();
     assert.equal(await touch.locator('.stats').evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length), 2,
       'history summary stays a two-column grid at 320px');
@@ -482,7 +538,7 @@ const fs = require('node:fs');
       'either-of dialog describes in-session completion behavior');
     await touch.close();
     assert.deepEqual(errors, []);
-    console.log([...result, ...progressionChecks, 'clear workout data preserves library, routines and settings',
+    console.log([...result, ...progressionChecks, ...remoteChecks, 'clear workout data preserves library, routines and settings',
       'mobile editor pairing and in-session alternative completion', 'History progression flag and navigation',
       'no browser errors'].map(s => 'PASS ' + s).join('\n'));
   } finally { await browser.close(); }

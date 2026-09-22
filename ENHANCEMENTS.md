@@ -150,7 +150,7 @@ the licence text, which means a second file or a large comment block. Worth
 doing only if the typeface matters more than the single-file size; otherwise
 the current preference list is the honest compromise.
 
-### 3.5 Storage headroom — **reporting done, IndexedDB still open**
+### 3.5 Storage headroom — **reporting and write debouncing done, IndexedDB still open**
 `save()` no longer fails silently: it sets `saveFailed` and shows a permanent
 banner offering a download, and Settings reports bytes used, the browser's
 quota estimate, and which of four durability states this browser is in —
@@ -160,11 +160,12 @@ granted, askable, refused outright (Brave), or unable to say because
 act on; each now names the one thing that still helps, and the request button
 is only offered where pressing it can change the answer.
 
-What remains is the storage engine itself. `localStorage` is still a few MB,
-synchronous, and rewritten in full on every keystroke. IndexedDB would remove
-the whole-state-per-write cost and raise the ceiling; it is a bigger change
-than the reporting was, and no longer urgent now that hitting the ceiling is
-visible rather than silent.
+What remains is the storage engine itself. `localStorage` is still a few MB and
+synchronous, but input bursts now coalesce behind a 300 ms debounce and flush
+at lifecycle boundaries instead of serializing the entire state on every
+keystroke. IndexedDB would remove the remaining whole-state write cost and
+raise the ceiling; it is a bigger change and is no longer urgent at the current
+data scale.
 
 ---
 

@@ -328,7 +328,7 @@ the end of the stylesheet:
 state
 ├─ version         schema version (SCHEMA_VERSION)
 ├─ settings        { theme, unit, defaultRest, autoRest, sound, vibrate, effortMetric,
-│                    lastFileBackupAt, seededAt, historyLinksDismissedKey }
+│                    lastFileBackupAt, lastModifiedAt, seededAt, historyLinksDismissedKey }
 ├─ exercises[]     { id, name, category, unit, notes, url }   — the library; kg/lb means weighted
 ├─ exerciseLinks[] { sourceId, targetId } — historical ID → current Library ID
 ├─ historySeparateIds[] historical IDs explicitly kept as their own series
@@ -365,9 +365,11 @@ entry retain reps-only progress and do not invent tonnage.
 
 ### Durability
 
-The log lives under one `localStorage` key (`liftlog.v1`), rewritten in full by
-`save()` on every mutation. Three things guard it, because `localStorage` is
-neither guaranteed nor permanent:
+The log lives under one `localStorage` key (`liftlog.v1`). `save()` marks the
+state dirty and coalesces bursts into one write after 300 ms; lifecycle exits,
+restores, and other durability boundaries call `flushSave()` immediately.
+Three things guard it, because `localStorage` is neither guaranteed nor
+permanent:
 
 - **Failed writes are visible.** `save()` still keeps the app working from
   memory when a write throws (quota exhausted, or storage blocked as in private
@@ -500,7 +502,7 @@ save banner and startup message explain this state; explicitly restoring a
 
 ## Import / export
 
-Four flows, all plain JSON (`EXPORT_SCHEMA = '1.7.0'`). Every file names itself
+Four flows, all plain JSON (`EXPORT_SCHEMA = '1.8.0'`). Every file names itself
 with `app: 'liftlog'` and a `kind`:
 
 - **`backup`** — the entire `state`; importing replaces everything. Built by
@@ -653,10 +655,14 @@ credentials that don't work. Typed-but-unsaved fields are also kept in memory
 across re-renders, so switching another setting (theme, unit, …) while the
 form is open no longer clears it.
 
-Once configured, **Backup now** and **Restore from remote** are manual,
-on-demand actions — there is no background sync, and restore always confirms
-before it overwrites what's on this device (the same confirmation as a local
-file import).
+Once configured, state changes are backed up automatically after a short
+debounce. On launch the app reads the remote object and compares
+`settings.lastModifiedAt`; a newer remote snapshot is restored, while a newer
+local state is uploaded. The local state replaced by an automatic restore is
+kept under `liftlog.v1.before-remote-restore` until the user downloads,
+restores, or discards it. **Backup now** and the confirming **Restore from
+remote** remain available as explicit controls. This is single-writer,
+whole-state synchronization: it deliberately does not merge concurrent edits.
 
 ### Bucket CORS policy
 
@@ -690,8 +696,8 @@ you can.
   only available under `https://` or `localhost`. Remote storage disables
   itself with an explanatory message otherwise (e.g. plain `file://` in some
   browsers).
-- **Manual, not sync.** There's no conflict resolution because there's no
-  automatic sync — each Backup/Restore fully overwrites one side, on request.
+- **Single writer.** Automatic backup and startup restore compare whole-state
+  timestamps. They do not merge concurrent edits from multiple devices.
 
 ### Links out
 
@@ -742,9 +748,12 @@ otherwise compare reps plus any added load. Timed work is excluded. The flag is 
 from history on render, so history edits and imports update it without a new
 stored field or schema version.
 
-This is an objective rep/load check, not an instruction to add weight. Routines
-store lower and upper targets plus optional target RIR, but technique is not
-recorded. The app therefore cannot verify good technique automatically.
+The same latest-exposure calculation produces the positive **Ready to increase
+load** cue when every prescribed working set reaches the upper rep target and,
+when present, its logged RIR meets or exceeds the target. That cue suppresses a
+stall flag for the same exposure. Technique is not recorded, so the copy asks
+the lifter to confirm technique before adding load rather than claiming the app
+can verify it.
 
 Sets, not tonnage, and deliberately so. Load is a property of the machine, not
 of the muscle: a dip on an outdoor bar, a plate-loaded press and a cable fly all

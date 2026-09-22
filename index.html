@@ -788,6 +788,9 @@ kbd{
 .trend-delta.up{ color:var(--success); }
 .trend-delta.down{ color:var(--danger); }
 .progression-panel{ padding:var(--sp-4); border-left:3px solid var(--warning); }
+.progression-panel.ready{ border-left-color:var(--accent); }
+.progression-panel.ready .progression-list button{ text-decoration-color:var(--accent); }
+.progression-count.ready{ color:var(--accent); font-weight:650; }
 .progression-list{ list-style:none; margin:var(--sp-3) 0 0; padding:0; }
 .progression-list li{ display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:var(--sp-1) var(--sp-3); padding:var(--sp-2) 0; border-top:1px solid var(--border); }
 .progression-list button{ appearance:none; border:0; background:none; padding:0; color:var(--text); font:inherit; font-weight:650; text-align:left; text-decoration:underline; text-decoration-color:var(--warning); cursor:pointer; }
@@ -893,6 +896,22 @@ html.is-reordering{ user-select:none; -webkit-user-select:none; }
 .setting-block h3{ margin-bottom:var(--sp-1); }
 .setting-block .desc{ color:var(--muted); font-size:var(--fs-sm); margin-bottom:var(--sp-3); }
 .setting-block .danger-heading{ color:var(--danger); }
+.settings-disclosure{ border-bottom:1px solid var(--border); }
+.settings-disclosure:last-child{ border-bottom:0; }
+.settings-disclosure > summary{
+  list-style:none; cursor:pointer; padding:var(--sp-4); display:flex; align-items:center;
+  justify-content:space-between; gap:var(--sp-3); font-weight:650;
+}
+.settings-disclosure > summary::-webkit-details-marker{ display:none; }
+.settings-disclosure > summary::after{ content:'›'; color:var(--muted); font-size:22px; line-height:1; transform:rotate(90deg); transition:transform .12s ease; }
+.settings-disclosure[open] > summary::after{ transform:rotate(-90deg); }
+.settings-summary{ min-width:0; }
+.settings-summary small{ display:block; color:var(--muted); font-size:var(--fs-xs); font-weight:400; margin-top:2px; }
+.settings-disclosure[open] > summary{ background:var(--surface-2); border-bottom:1px solid var(--border); }
+.settings-disclosure > .setting-block:last-child{ border-bottom:0; }
+@media (max-width:600px){
+  .settings-disclosure > summary{ min-height:52px; }
+}
 .bodyweight-list{ border-top:1px solid var(--border); }
 .bodyweight-row{ display:grid; grid-template-columns:1fr auto 44px; gap:var(--sp-3); align-items:center; padding:var(--sp-2) 0; border-bottom:1px solid var(--border); font-size:var(--fs-sm); }
 .bodyweight-row:last-child{ border-bottom:0; }
@@ -1209,7 +1228,7 @@ pre.code code{ background:none; border:0; padding:0; font-size:inherit; white-sp
 /* iOS Safari zooms the page in whenever a field under 16px takes focus, and
    does not zoom back out. At 13px that fired on every weight and rep field,
    several times per exercise. 16px is a threshold, not a type choice. */
-@media (pointer:coarse){
+@media (pointer:coarse), (max-width:600px){
   .keyboard-only,.app-footer{ display:none !important; }
   input[type="text"],input[type="number"],input[type="search"],input[type="datetime-local"],select,textarea{
     font-size:16px; min-height:44px;
@@ -1712,6 +1731,7 @@ const SHORTCUTS = [
    ============================================================ */
 const LS_KEY = 'liftlog.v1';
 const LS_RESCUE_KEY = 'liftlog.v1.unreadable';  /* holds data we could not load, so nothing is lost silently */
+const LS_REMOTE_RESTORE_KEY = 'liftlog.v1.before-remote-restore';
 const SCHEMA_VERSION = 10;  /* v3: sets carry durationSeconds (time no longer overloads reps)
                                + countForVolume / countForPR split execution from analytics
                                v4: settings carry effortMetric ('none'|'rpe'|'rir'), sets carry rir
@@ -1722,14 +1742,16 @@ const SCHEMA_VERSION = 10;  /* v3: sets carry durationSeconds (time no longer ov
                                v8: routine/workout targets carry a rep range and optional target RIR
                                v9: exerciseLinks connect historical IDs to current Library exercises
                                v10: dated bodyweights and added load on bodyweight sets */
-const EXPORT_SCHEMA = '1.7.0'; /* version of the documented import/export contract — 1.1: sets[].rir;
+const EXPORT_SCHEMA = '1.8.0'; /* version of the documented import/export contract — 1.1: sets[].rir;
                                   1.2: exercises[].url; 1.3: per-item rest dropped; 1.4: items[].eitherOf;
                                   1.5: lower/upper rep targets and optional target RIR;
                                   1.6: reversible historical exercise links;
-                                  1.7: bodyweights plus sets[].addedWeight/unit, distance removed */
+                                  1.7: bodyweights plus sets[].addedWeight/unit, distance removed;
+                                  1.8: settings.lastModifiedAt for automatic remote backup/restore */
 
 /* Set by load() when stored data could not be used, surfaced once after init. */
 let loadWarning = '';
+let loadedExistingState = false;
 /* True while writes are failing (storage full, or blocked as in private mode).
    The app keeps working in memory either way, but silently doing so is how a
    session gets lost without anyone noticing — so it is shown, not swallowed. */
@@ -1738,18 +1760,40 @@ let saveFailed = false;
    when init(), a timer, or an edit tries to save the temporary seed state. */
 let storageRecoveryBlocked = false;
 
-function save(){
+/* Most edits arrive as a short burst: typing notes, cascading a set value, or
+   settling several fields while finishing a workout. Serializing the complete
+   log for every input event made localStorage part of the keystroke path.
+   Coalesce those writes, while still flushing at lifecycle boundaries and
+   before operations whose durability is part of their result. */
+const LOCAL_SAVE_DELAY = 300;
+let saveTimer = 0, savePending = false;
+function flushSave(){
+  clearTimeout(saveTimer); saveTimer = 0;
+  if (!savePending) return !saveFailed;
+  savePending = false;
   if (storageRecoveryBlocked){ saveFailed = true; updateSaveBanner(); return; }
   try{
     localStorage.setItem(LS_KEY, JSON.stringify(state));
     if (saveFailed){ saveFailed = false; updateSaveBanner(); }
+    return true;
   }catch(e){
+    savePending = true; /* keep the newest in-memory state available to retry */
     if (!saveFailed){
       saveFailed = true;
       updateSaveBanner();
       announce('Warning: changes are no longer being saved to this browser.');
     }
+    return false;
   }
+}
+function save(options){
+  const opts = options || {};
+  if (opts.touch !== false) state.settings.lastModifiedAt = Date.now();
+  savePending = true;
+  clearTimeout(saveTimer);
+  if (opts.immediate) flushSave();
+  else saveTimer = setTimeout(flushSave, LOCAL_SAVE_DELAY);
+  if (opts.remote !== false) scheduleRemoteBackup();
 }
 /* The banner lives in the static body, not in #main, because render() replaces
    that wholesale — a warning about losing data must not depend on the render
@@ -1894,7 +1938,11 @@ function load(){
   let raw = null;
   try{ raw = localStorage.getItem(LS_KEY); }catch(e){ return seedState(); }
   if (!raw) return seedState();
-  try{ return prepareBackup(JSON.parse(raw)); }
+  try{
+    const candidate = prepareBackup(JSON.parse(raw));
+    loadedExistingState = true;
+    return candidate;
+  }
   catch(e){
     rescueUnreadable(raw, 'Saved data could not be loaded: ' + e.message);
     return seedState();
@@ -1945,7 +1993,7 @@ function validateBackup(s){
   if (s.settings != null){
     object(s.settings, 'settings');
     fields(s.settings, 'settings', ['theme', 'unit', 'effortMetric', 'historyLinksDismissedKey'], text);
-    fields(s.settings, 'settings', ['defaultRest', 'lastFileBackupAt', 'seededAt'], number);
+    fields(s.settings, 'settings', ['defaultRest', 'lastFileBackupAt', 'lastModifiedAt', 'seededAt'], number);
     fields(s.settings, 'settings', ['autoRest', 'sound', 'vibrate'], bool);
   }
   const exercises = new Set(), routines = new Set(), workouts = new Set(), bodyweights = new Set();
@@ -2166,6 +2214,7 @@ function normalizeState(s){
   set.vibrate = !!set.vibrate;
   set.effortMetric = EFFORT_METRICS.includes(set.effortMetric) ? set.effortMetric : d.effortMetric;
   set.lastFileBackupAt = toNum(set.lastFileBackupAt);
+  set.lastModifiedAt = toNum(set.lastModifiedAt);
   set.seededAt = toNum(set.seededAt);
   set.historyLinksDismissedKey = typeof set.historyLinksDismissedKey === 'string' ? set.historyLinksDismissedKey : '';
   s.settings = set;
@@ -2242,7 +2291,7 @@ function normalizeState(s){
 const EFFORT_METRICS = ['none', 'rpe', 'rir'];
 function defaultSettings(){
   return { theme:'system', unit:'kg', defaultRest:90, autoRest:true, sound:true, vibrate:true, effortMetric:'none',
-           lastFileBackupAt:null, seededAt:null, historyLinksDismissedKey:'' };
+           lastFileBackupAt:null, lastModifiedAt:null, seededAt:null, historyLinksDismissedKey:'' };
 }
 /* History is kept newest-first everywhere; every mutation that can change a
    start time re-establishes that instead of sorting again at each read. */
@@ -2397,11 +2446,13 @@ function freshUI(){
     editWorkoutId:null,         /* history session currently being edited */
     focus:null,                 /* element id to focus after render */
     remoteFormOpen:false,       /* remote-storage config form expanded in Settings */
-    remoteDraft:null,           /* config loaded from a file but still missing its secret key */
     remoteError:'',
     remoteBusy:false,           /* a remote backup/restore/test request is in flight */
+    remoteStatus:'idle',        /* checking | pending | synced | error */
+    remoteStatusText:'',
+    settingsSections:{},        /* disclosure choices survive settings re-renders */
     backupNagged:false,         /* the stale-backup reminder is shown once per page load */
-    remoteDraft:null            /* live-edited config fields, kept here so an unrelated re-render never drops them */
+    remoteDraft:null            /* loaded/live config fields survive unrelated Settings renders */
   };
 }
 const ui = freshUI();
@@ -4065,7 +4116,7 @@ function applyFullBackup(obj){
       cancelRestBeep();
       if (state.activeWorkout) restoreTimer();
       else loadTimer(state.settings.defaultRest);
-      save();
+      save({ immediate:true });
       resetUI();
       render(); toast('Import complete');
     });
@@ -4084,6 +4135,8 @@ function applyFullBackup(obj){
    ============================================================ */
 const LS_REMOTE_KEY = 'liftlog.v1.remote';
 const REMOTE_OBJECT_KEY_DEFAULT = 'liftlog-backup.json';
+const REMOTE_BACKUP_DELAY = 3000;
+let remoteBackupTimer = 0, remoteBackupInFlight = false, remoteStartupInFlight = false;
 
 function loadRemoteConfig(){
   try{
@@ -4097,6 +4150,7 @@ function saveRemoteConfig(cfg){
   catch(e){ toast('Could not save remote configuration — storage unavailable'); }
 }
 function clearRemoteConfig(){
+  clearTimeout(remoteBackupTimer); remoteBackupTimer = 0;
   try{ localStorage.removeItem(LS_REMOTE_KEY); }catch(e){ /* nothing more we can do */ }
 }
 /* The secret is never pre-filled (its input just carries a "leave blank to
@@ -4178,14 +4232,59 @@ async function remoteRunAction(fn){
   catch(e){ toast(e && e.message ? e.message : 'Remote storage request failed'); }
   finally{ ui.remoteBusy = false; render(); }
 }
+function setRemoteStatus(status, text){
+  ui.remoteStatus = status; ui.remoteStatusText = text || '';
+}
+function remoteSnapshotTime(obj){
+  const changed = toNum(obj && obj.settings && obj.settings.lastModifiedAt);
+  if (changed) return changed;
+  const exported = obj && obj.exportedAt ? new Date(obj.exportedAt).getTime() : 0;
+  return Number.isFinite(exported) ? exported : 0;
+}
+/* save() calls this for every meaningful state mutation. A single timer
+   coalesces input bursts, and an upload already in flight simply causes one
+   more pass afterwards if the state changed while it was being sent. */
+function scheduleRemoteBackup(delay){
+  const cfg = loadRemoteConfig();
+  if (!cfg || !remoteCryptoAvailable()) return;
+  clearTimeout(remoteBackupTimer);
+  setRemoteStatus('pending', navigator.onLine === false ? 'Waiting for a connection' : 'Changes waiting to back up');
+  remoteBackupTimer = setTimeout(() => autoRemoteBackup(), delay == null ? REMOTE_BACKUP_DELAY : delay);
+}
+async function putRemoteBackup(cfg){
+  if (!toNum(state.settings.lastModifiedAt)){
+    state.settings.lastModifiedAt = toNum(state.settings.seededAt) || Date.now();
+    save({ touch:false, remote:false, immediate:true });
+  }
+  flushSave();
+  const uploadedModifiedAt = toNum(state.settings.lastModifiedAt) || 0;
+  const res = await s3Request(cfg, 'PUT', JSON.stringify(backupPayload()));
+  if (!res.ok) throw new Error('Backup failed: HTTP ' + res.status);
+  cfg.lastBackupAt = Date.now();
+  cfg.lastUploadedModifiedAt = uploadedModifiedAt;
+  saveRemoteConfig(cfg);
+  setRemoteStatus('synced', 'Up to date');
+  if ((toNum(state.settings.lastModifiedAt) || 0) > uploadedModifiedAt) scheduleRemoteBackup();
+}
+async function autoRemoteBackup(){
+  remoteBackupTimer = 0;
+  const cfg = loadRemoteConfig();
+  if (!cfg || !remoteCryptoAvailable() || remoteBackupInFlight) return;
+  if (navigator.onLine === false){ setRemoteStatus('pending', 'Waiting for a connection'); return; }
+  remoteBackupInFlight = true;
+  try{ await putRemoteBackup(cfg); }
+  catch(e){ setRemoteStatus('error', e && e.message ? e.message : 'Automatic backup failed'); }
+  finally{ remoteBackupInFlight = false; }
+}
 function remoteBackup(){
   const cfg = loadRemoteConfig();
   if (!cfg) return;
   return remoteRunAction(async () => {
-    const res = await s3Request(cfg, 'PUT', JSON.stringify(backupPayload()));
-    if (!res.ok) throw new Error('Backup failed: HTTP ' + res.status);
-    cfg.lastBackupAt = Date.now();
-    saveRemoteConfig(cfg);
+    clearTimeout(remoteBackupTimer); remoteBackupTimer = 0;
+    if (remoteBackupInFlight) throw new Error('A remote backup is already in progress');
+    remoteBackupInFlight = true;
+    try{ await putRemoteBackup(cfg); }
+    finally{ remoteBackupInFlight = false; }
     toast('Backed up to remote storage');
   });
 }
@@ -4193,14 +4292,75 @@ function remoteRestore(){
   const cfg = loadRemoteConfig();
   if (!cfg) return;
   return remoteRunAction(async () => {
+    clearTimeout(remoteBackupTimer); remoteBackupTimer = 0;
+    if (remoteBackupInFlight) throw new Error('Wait for the current remote backup before restoring');
     const res = await s3Request(cfg, 'GET', '');
     if (res.status === 404) throw new Error('No backup found at that location yet');
     if (!res.ok) throw new Error('Restore failed: HTTP ' + res.status);
     let obj;
     try{ obj = JSON.parse(await res.text()); }
     catch(e){ throw new Error('Remote file is not valid JSON'); }
-    applyFullBackup(obj);
+    return applyFullBackup(obj);
   });
+}
+function preserveBeforeRemoteRestore(){
+  try{
+    localStorage.setItem(LS_REMOTE_RESTORE_KEY, JSON.stringify(backupPayload()));
+    return true;
+  }catch(e){
+    setRemoteStatus('error', 'Could not preserve local data before remote restore');
+    return false;
+  }
+}
+function installRemoteSnapshot(candidate, remoteAt){
+  if (!preserveBeforeRemoteRestore()) return false;
+  clearTimeout(saveTimer); saveTimer = 0; savePending = false;
+  state = candidate;
+  storageRecoveryBlocked = false;
+  applyTheme(); cancelRestBeep();
+  if (state.activeWorkout) restoreTimer();
+  else loadTimer(state.settings.defaultRest);
+  save({ touch:false, remote:false, immediate:true });
+  const cfg = loadRemoteConfig();
+  if (cfg){ cfg.lastBackupAt = remoteAt || Date.now(); cfg.lastUploadedModifiedAt = toNum(state.settings.lastModifiedAt); saveRemoteConfig(cfg); }
+  resetUI(); render();
+  toast('Restored newer remote backup');
+  return true;
+}
+/* On launch, remote wins only when its data timestamp is newer. A fresh device
+   has no local timestamp, so it restores; a device with newer offline edits
+   keeps them and schedules their upload. This is intentionally single-writer
+   whole-state behavior, not a record merge. */
+async function remoteStartupSync(){
+  const cfg = loadRemoteConfig();
+  if (!cfg || !remoteCryptoAvailable() || remoteStartupInFlight) return;
+  remoteStartupInFlight = true;
+  setRemoteStatus('checking', 'Checking remote backup…');
+  try{
+    const res = await s3Request(cfg, 'GET', '');
+    if (res.status === 404){ scheduleRemoteBackup(0); return; }
+    if (!res.ok) throw new Error('Remote check failed: HTTP ' + res.status);
+    let obj;
+    try{ obj = JSON.parse(await res.text()); }
+    catch(e){ throw new Error('Remote file is not valid JSON'); }
+    const candidate = prepareBackup(obj);
+    const remoteAt = remoteSnapshotTime(obj);
+    const localAt = toNum(state.settings.lastModifiedAt) || 0;
+    if (remoteAt > localAt){
+      if (!toNum(candidate.settings.lastModifiedAt)) candidate.settings.lastModifiedAt = remoteAt;
+      if (!installRemoteSnapshot(candidate, remoteAt)) return;
+      setRemoteStatus('synced', 'Restored from remote');
+    } else if (localAt > remoteAt){
+      scheduleRemoteBackup(0);
+    } else {
+      cfg.lastBackupAt = remoteAt || cfg.lastBackupAt;
+      cfg.lastUploadedModifiedAt = localAt;
+      saveRemoteConfig(cfg);
+      setRemoteStatus('synced', 'Up to date');
+    }
+  }catch(e){
+    setRemoteStatus('error', e && e.message ? e.message : 'Remote check failed');
+  }finally{ remoteStartupInFlight = false; }
 }
 function remoteTestConnection(){
   const cfg = loadRemoteConfig();
@@ -4234,7 +4394,8 @@ function saveRemoteConfigForm(form){
     endpoint, region, bucket, accessKeyId, secretAccessKey,
     objectKey: (d.objectKey || '').trim() || REMOTE_OBJECT_KEY_DEFAULT,
     pathStyle: !!d.pathStyle,
-    lastBackupAt: existing ? existing.lastBackupAt : null
+    lastBackupAt: existing ? existing.lastBackupAt : null,
+    lastUploadedModifiedAt: existing ? existing.lastUploadedModifiedAt : null
   });
 }
 /* Tries the connection with the candidate config before writing anything to
@@ -4250,6 +4411,8 @@ async function testAndSaveRemoteConfig(candidate){
     saveRemoteConfig(candidate);
     ui.remoteFormOpen = false; ui.remoteDraft = null;
     toast(res.status === 404 ? 'Connected — configuration saved (no backup there yet)' : 'Connected — configuration saved');
+    if (res.status === 404) scheduleRemoteBackup(0);
+    else remoteStartupSync();
   }catch(e){
     ui.remoteError = (e && e.message ? e.message : 'Connection failed — configuration was not saved.');
   }finally{
@@ -5741,8 +5904,15 @@ function progressionExposure(block, at){
     if (loads.some(n => Math.abs(n - loads[0]) > 0.05)) return { comparable:false };
     load = loads[0];
   }
+  const targetMax = toNum(block.targetRepsMax);
+  const targetRir = toNum(block.targetRir);
+  const efforts = sets.map(s => s.rir != null ? toNum(s.rir) :
+    (s.rpe != null ? 10 - toNum(s.rpe) : null));
+  const effortMet = targetRir == null || (efforts.every(n => n != null) && efforts.every(n => n >= targetRir));
+  const ready = targetMax != null && targetMax > 0 && reps.every(n => n >= targetMax) && effortMet;
   return { comparable:true, kind:block.unit === 'bw' ? 'bw' : 'loaded',
-    count, load, reps, totalReps:reps.reduce((a,n) => a + n, 0) };
+    count, load, reps, totalReps:reps.reduce((a,n) => a + n, 0),
+    targetMax, targetRir, effortKnown:efforts.every(n => n != null), ready };
 }
 /* The baseline is the best total at the current working load. Returning to an
    older rep count is not a new gain; a higher load resets the rep climb even
@@ -5765,7 +5935,7 @@ function progressionStatus(exId, workouts = state.workouts){
       best = exposure; streak = 0;
     } else streak++;
   });
-  return { streak, flagged:streak >= 3, latest };
+  return { streak, flagged:streak >= 3 && !(latest && latest.ready), ready:!!(latest && latest.ready), latest };
 }
 function progressionFlagsPanel(){
   const names = new Map();
@@ -5773,14 +5943,11 @@ function progressionFlagsPanel(){
     const id = ex.exerciseId && canonicalExerciseId(ex.exerciseId);
     if (id && !names.has(id)) names.set(id, (historyExerciseById(id) || ex).name);
   }));
-  const flags = [...names].map(([id, fallback]) => ({ id, fallback, status:progressionStatus(id) }))
-    .filter(x => x.status.flagged).sort((a,b) => b.status.latest.date - a.status.latest.date ||
-      b.status.streak - a.status.streak || a.fallback.localeCompare(b.fallback));
-  if (!flags.length) return '';
-  return '<section class="panel progression-panel mt-4" id="progression-flags" aria-label="Progression flags">' +
-    '<h2 class="panel-title">Progression check</h2>' +
-    '<p class="muted small">Flagged after three comparable sessions in a row without more total reps or a higher working load. Warm-ups do not count; incomplete or mixed-load prescribed sets restart the check. Technique and RIR can improve without triggering this measure.</p>' +
-    '<ul class="progression-list">' + flags.map(({id, fallback, status}) => {
+  const items = [...names].map(([id, fallback]) => ({ id, fallback, status:progressionStatus(id) }));
+  const byLatest = (a,b) => b.status.latest.date - a.status.latest.date || a.fallback.localeCompare(b.fallback);
+  const ready = items.filter(x => x.status.ready).sort(byLatest);
+  const flags = items.filter(x => x.status.flagged).sort((a,b) => byLatest(a,b) || b.status.streak - a.status.streak);
+  const rows = (list, kind) => '<ul class="progression-list">' + list.map(({id, fallback, status}) => {
       const def = historyExerciseById(id), name = def ? def.name : fallback;
       const last = status.latest;
       const load = last.load > 0 ? fmtNum(convertWeight(last.load, 'kg', unitLabel())) + ' ' + unitLabel() +
@@ -5790,8 +5957,20 @@ function progressionFlagsPanel(){
         ? '<button type="button" data-action="progression-select" data-id="' + esc(id) + '" aria-label="Show progress for ' + esc(name) + '">' + esc(name) + '</button>'
         : '<strong>' + esc(name) + '</strong>') +
         '<span class="muted xs">Last: ' + esc(summary) + '</span></span>' +
-        '<span class="progression-count">' + plural(status.streak, 'exposure') + ' without rep/load gain</span></li>';
-    }).join('') + '</ul></section>';
+        (kind === 'ready'
+          ? '<span class="progression-count ready">Increase ' + (last.kind === 'bw' ? 'added load' : 'load') + ' next time</span>'
+          : '<span class="progression-count">' + plural(status.streak, 'exposure') + ' without rep/load gain</span>') + '</li>';
+    }).join('') + '</ul>';
+  let html = '';
+  if (ready.length) html += '<section class="panel progression-panel ready mt-4" id="progression-ready" aria-label="Ready to increase load">' +
+    '<h2 class="panel-title">Ready to increase load</h2>' +
+    '<p class="muted small">All prescribed working sets reached the upper rep target and, when prescribed, met the target RIR. If technique was good, increase the load slightly next time and let reps return toward the lower target.</p>' +
+    rows(ready, 'ready') + '</section>';
+  if (flags.length) html += '<section class="panel progression-panel mt-4" id="progression-flags" aria-label="Progression flags">' +
+    '<h2 class="panel-title">Progression check</h2>' +
+    '<p class="muted small">Flagged after three comparable sessions in a row without more total reps or a higher working load. Warm-ups do not count; incomplete or mixed-load prescribed sets restart the check. Technique and RIR can improve without triggering this measure.</p>' +
+    rows(flags, 'flag') + '</section>';
+  return html;
 }
 /* The Progress panel has two readings of the same log: one movement over time,
    or one muscle group across every movement that trains it. */
@@ -6145,6 +6324,22 @@ function rescuedDataHTML(){
       '<button type="button" class="btn btn-danger" data-action="rescue-discard">Discard rescued data…</button>' +
     '</div></div>';
 }
+function remoteRestoreRescueRaw(){
+  try{ return localStorage.getItem(LS_REMOTE_RESTORE_KEY); }
+  catch(e){ return null; }
+}
+function remoteRestoreRescueHTML(){
+  const raw = remoteRestoreRescueRaw();
+  if (raw == null) return '';
+  return '<div class="setting-block" role="status">' +
+    '<h3>Before the last automatic restore</h3>' +
+    '<p class="desc">The local state that was replaced by a newer remote backup is preserved until you discard it.</p>' +
+    '<div class="form-actions">' +
+      '<button type="button" class="btn" data-action="remote-rescue-download">' + IC.down + '<span>Download</span></button>' +
+      '<button type="button" class="btn" data-action="remote-rescue-restore">Restore this copy…</button>' +
+      '<button type="button" class="btn btn-danger" data-action="remote-rescue-discard">Discard</button>' +
+    '</div></div>';
+}
 function bodyweightSettingsHTML(){
   const entries = state.bodyweights || [];
   const latest = entries[0];
@@ -6176,23 +6371,24 @@ function addBodyweightEntry(form){
   state.bodyweights.sort((a,b) => b.loggedAt - a.loggedAt);
   clearStatsCache(); save(); render(); toast(existing ? 'Bodyweight entry updated' : 'Bodyweight entry added');
 }
-/* Manual, user-initiated backup/restore against a bucket the user configures
-   themselves. Nothing here runs unless a config exists; see the comment on
-   the REMOTE STORAGE section above for what stays local vs. what is sent. */
+/* Automatic whole-state backup/restore against a bucket the user configures.
+   Nothing runs unless a config exists; local state remains authoritative while
+   offline, then the newest timestamp wins when the app can reach the bucket. */
 function remoteStorageHTML(){
   const cfg = loadRemoteConfig();
   const cryptoOk = remoteCryptoAvailable();
   let html = '<div class="setting-block">' +
     '<h3>Remote storage <span class="hint">(optional, S3-compatible)</span></h3>' +
-    '<p class="desc">The same backup file as above, kept in a bucket you own instead of your downloads folder. ' +
-    'Off by default; requests go straight from this device to your storage provider using your own credentials — ' +
+    '<p class="desc">The same complete backup is uploaded automatically after changes. On opening Liftlog, a newer remote copy is restored automatically. ' +
+    'Requests go straight from this device to your storage provider using your own credentials — ' +
     'this app has no server to relay them through. Credentials are stored in this browser’s local storage in plain text.</p>';
   if (!cryptoOk){
     html += '<p class="error-text">Remote storage needs the Web Crypto API, only available in a secure context (https:// or localhost). It is unavailable here.</p></div>';
     return html;
   }
+  const live = ui.remoteStatusText ? ' · ' + esc(ui.remoteStatusText) : '';
   html += '<p class="desc">Status: ' + (cfg
-      ? 'Configured — <strong>' + esc(cfg.bucket) + '</strong>' + (cfg.lastBackupAt ? ' · last backup ' + esc(new Date(cfg.lastBackupAt).toLocaleString()) : ' · never backed up yet')
+      ? 'Configured — <strong>' + esc(cfg.bucket) + '</strong>' + live + (cfg.lastBackupAt ? ' · last backup ' + esc(new Date(cfg.lastBackupAt).toLocaleString()) : ' · never backed up yet')
       : 'Not configured') + '</p>';
   if (cfg){
     html += '<div class="form-actions">' +
@@ -6243,6 +6439,14 @@ function remoteStorageHTML(){
   }
   html += '</div>';
   return html;
+}
+function settingsDisclosure(id, title, summary, body){
+  const remembered = ui.settingsSections[id];
+  const compact = window.matchMedia && window.matchMedia('(max-width:600px)').matches;
+  const open = remembered == null ? !compact : remembered;
+  return '<details class="settings-disclosure" data-settings-section="' + esc(id) + '"' + (open ? ' open' : '') + '>' +
+    '<summary><span class="settings-summary">' + esc(title) + '<small>' + esc(summary) + '</small></span></summary>' +
+    body + '</details>';
 }
 function viewSettings(){
   const s = state.settings;
@@ -6303,6 +6507,7 @@ function viewSettings(){
        here, the same file in a bucket below — then the partial transfer files,
        which are a different job and not a second way to do this one. */
     rescuedDataHTML() +
+    remoteRestoreRescueHTML() +
     '<div class="setting-block">' +
       '<h3>Backup &amp; restore</h3>' +
       '<p class="desc">Everything in one file: exercises, routines, history and preferences. ' +
@@ -6315,8 +6520,10 @@ function viewSettings(){
         '<label class="file-btn"><span>' + IC.up + ' Restore from file</span><input type="file" accept=".json,application/json" data-change="import-all" aria-label="Restore from a backup file"></label>' +
       '</div>' +
     '</div>' +
-    storageHTML() +
-    remoteStorageHTML() +
+    settingsDisclosure('storage', 'Cloud backup & device storage',
+      loadRemoteConfig() ? 'Automatic S3 backup is configured' : 'Storage durability and optional automatic S3 backup',
+      storageHTML() + remoteStorageHTML()) +
+    settingsDisclosure('transfer', 'Transfer routines & history', 'Import or export either data set',
     '<div class="setting-block">' +
       '<div class="block-head">' +
         '<h3>Transfer routines &amp; history</h3>' +
@@ -6345,12 +6552,13 @@ function viewSettings(){
         '</div>' +
       '</div>' +
       historyImportSummaryHTML() +
-    '</div>' +
+    '</div>') +
+    settingsDisclosure('danger', 'Advanced & destructive actions', 'Clear workout history',
     '<div class="setting-block">' +
       '<h3 class="danger-heading">Workout data</h3>' +
       '<p class="desc">Removes workout history and any workout in progress. Bodyweight entries, exercises, routines and settings are kept.</p>' +
       '<button type="button" class="btn btn-danger" data-action="clear-workouts">' + IC.trash + '<span>Clear workout data…</span></button>' +
-    '</div>' +
+    '</div>') +
   '</section>' +
   '<section class="panel mt-4 keyboard-only" aria-label="Keyboard shortcuts">' +
     '<div class="setting-block">' +
@@ -6523,6 +6731,29 @@ const actions = {
         try{ localStorage.removeItem(LS_RESCUE_KEY); }
         catch(e){ toast('Could not remove rescued data'); return; }
         render(); toast('Rescued data discarded');
+      });
+  },
+  'remote-rescue-download'(){
+    const raw = remoteRestoreRescueRaw();
+    if (raw == null){ toast('No previous local copy is available'); return; }
+    downloadBlob(new Blob([raw], {type:'application/json'}), dateStamp('liftlog-before-remote-restore'));
+    toast('Previous local copy downloaded');
+  },
+  'remote-rescue-restore'(){
+    const raw = remoteRestoreRescueRaw();
+    if (raw == null){ toast('No previous local copy is available'); return; }
+    let obj;
+    try{ obj = JSON.parse(raw); }
+    catch(e){ toast('Previous local copy is not valid JSON'); return; }
+    applyFullBackup(obj);
+  },
+  'remote-rescue-discard'(){
+    confirmDlg('Discard previous local copy?', 'This removes the state preserved before the last automatic remote restore.', 'Discard', true)
+      .then(ok => {
+        if (!ok) return;
+        try{ localStorage.removeItem(LS_REMOTE_RESTORE_KEY); }
+        catch(e){ toast('Could not remove previous local copy'); return; }
+        render(); toast('Previous local copy discarded');
       });
   },
   'bodyweight-del'(d){
@@ -6966,6 +7197,11 @@ document.addEventListener('change', e => {
   const fn = changeHandlers[t.dataset.change];
   if (fn) fn(t);
 });
+document.addEventListener('toggle', e => {
+  const d = e.target;
+  if (d && d.dataset && d.dataset.settingsSection)
+    ui.settingsSections[d.dataset.settingsSection] = d.open;
+}, true);
 document.addEventListener('submit', e => {
   const form = e.target;
   const kind = form.dataset && form.dataset.form;
@@ -7037,6 +7273,13 @@ document.addEventListener('keydown', e => {
    INIT
    ============================================================ */
 function init(){
+  /* Older local states predate the modification timestamp used to choose
+     between local and remote. Treat an existing, readable local log as a new
+     local revision once, rather than silently replacing data whose age cannot
+     be established. A genuinely fresh install still has no timestamp, so its
+     configured remote snapshot restores on first launch. */
+  if (loadedExistingState && !toNum(state.settings.lastModifiedAt))
+    state.settings.lastModifiedAt = Date.now();
   applyTheme();
   /* restoreTimer() reads activeWorkout.timer, and loadTimer() overwrites it —
      so a running rest timer must be restored instead of, not after, a reset. */
@@ -7048,18 +7291,25 @@ function init(){
   wireOverviewSheet();
   $('#help-shortcuts').innerHTML = shortcutTable();
 
-  save();            /* persist the seed so a first visit survives a reload */
+  save({ touch:false, remote:false, immediate:true }); /* persist a first seed without making it newer than remote */
   render();
+  remoteStartupSync();
   setInterval(tickTimer, 250);
   /* the browser drops a wake lock whenever the page is hidden, and a rest that
      ended while backgrounded needs settling on the way back */
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') return;
+    if (document.visibilityState !== 'visible'){
+      flushSave();
+      if (remoteBackupTimer){ clearTimeout(remoteBackupTimer); remoteBackupTimer = 0; autoRemoteBackup(); }
+      return;
+    }
     wakeLockDenied = false;
     syncWakeLock();
     if (timer.running && (timer.endsAt - Date.now()) / 1000 <= 0) completeRest();
     else drawTimer();
   });
+  window.addEventListener('pagehide', flushSave);
+  window.addEventListener('online', remoteStartupSync);
 
   updateSaveBanner();   /* init()'s own save() above may already have failed */
   refreshStorageState();

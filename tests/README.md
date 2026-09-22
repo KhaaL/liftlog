@@ -19,9 +19,10 @@ also mocks remote storage to exercise the real restore/validation path.
 
 - `regression.cjs`: samples, routine pairing, targets, historical exercise
   reconciliation, measurement semantics, bodyweight/added-load analytics,
-  migration, restore, reload, and mobile layout. Screenshots
-  are written to `/tmp/liftlog-pair-picker.png`, `/tmp/liftlog-editor.png`, and
-  `/tmp/liftlog-workout.png`.
+  progression stalls/load-increase cues, debounced persistence, automatic
+  remote backup/startup restore, migration, restore, reload, and mobile layout.
+  Screenshots are written under `/tmp`, including the routine editor, workout,
+  history progression, and mobile Settings views.
 - `security.cjs`: nested backup validation, duplicate ID scopes, legacy versions,
   cancellation, hostile IDs through imports and UI actions, remote validation,
   startup recovery download/discard, and failure to save a recovery copy.

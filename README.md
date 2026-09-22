@@ -14,8 +14,9 @@ in the browser's own storage, works with the network off, and can be
 installed to a home screen so it survives exactly like a native app — while
 still being, underneath, a single HTML file.
 
-If you ever want a copy elsewhere, you point it at your own S3-compatible
-bucket. 
+If you want an off-device copy, point it at your own S3-compatible bucket.
+Changes are backed up automatically, and a newer remote snapshot is restored
+when the app opens.
 
 ## Design principles
 
