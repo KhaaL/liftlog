@@ -9,7 +9,7 @@ const fs = require('node:fs');
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
     let html = fs.readFileSync('index.html', 'utf8');
-    html = html.replace('init();\n})();', `window.testAPI = { sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, importHistory, normalizeImportedSet, normalizeImportedWorkout, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, workoutVolume, progressionStatus, loadCueFor, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, compatibleHistoryLink, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, setExerciseArchived, mergeExercises, sameProgressionContract, exerciseLoadLabel, setSummary, remoteStartupSync, autoRemoteBackup, flushSave, save, render, supersetRun, currentMemberIndex, isSettledRow, switchSupersetMember, navigate, currentExercise, settleSupersets, pauseTimer, finishWorkout, get timer(){return timer}, get state(){return state}, get ui(){return ui} };\ninit();\n})();`);
+    html = html.replace('init();\n})();', `window.testAPI = { sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, importHistory, normalizeImportedSet, normalizeImportedWorkout, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, workoutVolume, progressionStatus, loadCueFor, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, compatibleHistoryLink, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, setExerciseArchived, mergeExercises, sameProgressionContract, exerciseLoadLabel, setSummary, remoteStartupSync, autoRemoteBackup, flushSave, save, render, supersetRun, currentMemberIndex, isSettledRow, switchSupersetMember, navigate, currentExercise, settleSupersets, pauseTimer, finishWorkout, sampleExercises, sampleRoutines, get timer(){return timer}, get state(){return state}, get ui(){return ui} };\ninit();\n})();`);
     await page.route('https://liftlog.test/**', route => route.fulfill({ contentType:'text/html', body:html }));
     await page.goto('https://liftlog.test/');
     const result = await page.evaluate(async () => {
@@ -693,6 +693,16 @@ const fs = require('node:fs');
       const restored = t.prepareBackup(t.backupPayload());
       check(!restored.workouts[0].exercises.some(ex => 'supersetOf' in ex) && !('supersetSide' in restored.workouts[0]),
         'finished workouts do not keep superset data');
+      const seedExs = t.sampleExercises();
+      const seedRoutines = t.sampleRoutines(seedExs);
+      const [seedUpper, seedLower] = seedRoutines;
+      const seedSuperset = t.routineGroups(seedUpper.items).find(g => g.length === 2 && g[0].supersetOf);
+      check(!!seedSuperset && seedSuperset.map(it => seedExs.find(e => e.id === it.exerciseId).name).sort().join(',') ===
+        'Bicep Curl Machine,Triceps Extension Machine', 'the seeded Upper Body routine supersets biceps and triceps');
+      const seedEither = t.routineGroups(seedLower.items).find(g => g.length === 2 && g[0].eitherOf);
+      check(!!seedEither && seedEither.map(it => seedExs.find(e => e.id === it.exerciseId).name).sort().join(',') ===
+        'Leg Extension Machine,Leg Press Machine', 'the seeded Lower Body routine offers leg press or leg extension');
+      check(t.routineSummary(seedUpper.items) === '6 exercises · 15 planned sets', 'seeded superset counts both members in the routine summary');
       t.state.workouts = [];
       return checks;
     });

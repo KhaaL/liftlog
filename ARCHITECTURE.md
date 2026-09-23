@@ -1165,9 +1165,11 @@ range if targets differ.
 
 `cleanRoutinePairs` removes singleton, oversized, and same-exercise pair keys
 on load, import, and save. Routine export and backup retain keys. The sample
-routines JSON demonstrates Back Squat or Leg Press followed by Plank. Old
-state migrates through the shared `migrateState` chain; v6 to v7 only advances
-the version because the new field is optional.
+routines JSON demonstrates Back Squat or Leg Press followed by Plank, and the
+seeded first-run library pairs Leg Press Machine or Leg Extension Machine in
+its Lower Body routine, so a fresh install shows the feature without a trip to
+the editor. Old state migrates through the shared `migrateState` chain; v6 to
+v7 only advances the version because the new field is optional.
 
 ### Supersets (state v13, transfer schema 1.11.0)
 
@@ -1191,6 +1193,10 @@ the cursor onto a block. A superset in a workout is a run of adjacent blocks
 (`supersetRun`); `settleSupersets` ends any superset whose members were
 separated or orphaned by a reorder or removal, for that session only, with a
 toast.
+
+The seeded first-run library demonstrates a superset too: Bicep Curl Machine
+and Triceps Extension Machine in the Upper Body routine, the standard
+antagonist-pair combination.
 
 Logging a set asks `supersetTurn` for the next member with work left. A
 hand-over to a later member does not rest; wrapping back to the first member
