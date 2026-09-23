@@ -17,7 +17,8 @@ Both scripts launch an isolated browser profile and intercept HTTP requests;
 they do not touch your real workout data or a remote backup. The security suite
 also mocks remote storage to exercise the real restore/validation path.
 
-- `regression.cjs`: samples, routine pairing, targets, historical exercise
+- `regression.cjs`: samples, routine pairing, supersets (pair rules, group
+  cursor, rest per round, session-only lifetime), targets, historical exercise
   reconciliation, measurement semantics, bodyweight/added-load analytics,
   archive/merge behavior, progression-series compatibility and movement-family
   metadata, progression stalls/load-increase cues, debounced persistence, automatic

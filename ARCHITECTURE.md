@@ -337,11 +337,12 @@ state
 │                    — per-series load guidance, including historical IDs
 ├─ bodyweights[]   { id, loggedAt, weight, unit } — dated bodyweight log, newest first
 ├─ routines[]      { id, name, items[] }                      — the plan
-│   └─ items[]     { id, exerciseId, sets, repsMin, repsMax, targetRir?, weight, eitherOf? }
+│   └─ items[]     { id, exerciseId, sets, repsMin, repsMax, targetRir?, weight, eitherOf?, supersetOf? }
 ├─ workouts[]      logged sessions, newest first              — the log
 │   └─ exercises[] { exerciseId, name, category, movementFamily, unit, loadMode,
 │                    equipmentKey, targetRepsMin, targetRepsMax,
-│                    targetRir?, skipped, eitherOf?, sets[] }
+│                    targetRir?, skipped, eitherOf?, supersetOf?, sets[] }
+│                    — supersetOf only while active; activeWorkout also has supersetSide
 │       └─ sets[]  { id, weight, addedWeight?, addedWeightUnit?, reps, durationSeconds, rpe, rir,
 │                    unit, completed, completedAt,
 │                    countForVolume?, countForPR? }   — absent means "counts"
@@ -507,6 +508,7 @@ sequence for older data. Startup and file/remote restore all use it:
 - **v11 → v12** — adds per-series load cue preferences. The migration starts
   with no disabled or dismissed cues; full backups and history transfers carry
   the new field.
+- **v12 → v13** — introduces the optional `supersetOf` key; no conversion needed.
 
 Data that cannot be read — corrupt JSON, an unrecognized shape, or a *newer*
 schema version — is never overwritten in place. It is copied to
@@ -1150,7 +1152,7 @@ Existing pairs are listed there with **Unpair** controls. Deleting one item also
 dissolves its pair. Targets remain on each item; reordering and duplication
 preserve the pair. Pairing moves the two items next to each other. A violet
 bracket with one **OR** pill between the rows marks the choice without using
-green, which is reserved for supersets. The session overview uses the same
+green, which supersets use. The session overview uses the same
 marker while both alternatives remain; if they are separated by reordering,
 each keeps an inline **OR** cue. Dragging or using the arrow buttons moves the
 pair as a unit in the routine editor.
@@ -1166,6 +1168,43 @@ on load, import, and save. Routine export and backup retain keys. The sample
 routines JSON demonstrates Back Squat or Leg Press followed by Plank. Old
 state migrates through the shared `migrateState` chain; v6 to v7 only advances
 the version because the new field is optional.
+
+### Supersets (state v13, transfer schema 1.11.0)
+
+Supersets reuse the either-of pair machinery with a second key. Two routine
+items can share an optional `supersetOf` string; the same rules apply (exactly
+two items, different exercises, routine-scoped). An item belongs to at most one
+pair: `cleanRoutinePairs` keeps `eitherOf` and drops `supersetOf` when an item
+carries both. `routineGroups` groups by a kind-prefixed key (`pairKeyOf`), so
+adjacency, reordering, duplication and the arrow buttons treat both kinds
+alike. Only counting differs: an either-of pair plans its larger alternative,
+a superset plans both members (`groupPlannedSets`, `routineSummary`). The
+editor's **Superset…** button opens the same dialog as **Pair exercises…**,
+reworded through `PAIR_KINDS`. The marker is the either-of bracket in green
+(`--superset`, derived from each theme's `--success`) with a **+** pill.
+
+**The group cursor.** `currentExerciseIndex` always names the first block of a
+superset, and `activeWorkout.supersetSide` selects the member on screen, so
+`isSettledRow`'s "before the cursor is settled" rule holds without change.
+`currentExercise()` resolves the member; `pointAt()` is the one way to move
+the cursor onto a block. A superset in a workout is a run of adjacent blocks
+(`supersetRun`); `settleSupersets` ends any superset whose members were
+separated or orphaned by a reorder or removal, for that session only, with a
+toast.
+
+Logging a set asks `supersetTurn` for the next member with work left. A
+hand-over to a later member does not rest; wrapping back to the first member
+(or staying because the partner is finished) ends the round and starts the
+auto-rest. Unequal set counts therefore finish as straight sets. Once every
+member is finished the cursor moves past the whole run, and the pager's `›`
+and **Next** also step a superset at a time. The panel's **Superset with**
+button switches member by hand. Skipping a member hands over to its partner.
+
+Supersets describe how a session is performed, not what was logged:
+`finishWorkout` strips `supersetOf` and `supersetSide`, and normalization
+removes them from any finished workout. History and history transfers never
+carry them; routine export, routine import and full backups (including an
+active workout) do.
 
 ### Double-progression targets (state v8, transfer schema 1.5.0)
 
