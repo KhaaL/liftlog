@@ -9,7 +9,7 @@ const fs = require('node:fs');
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
     let html = fs.readFileSync('index.html', 'utf8');
-    html = html.replace('init();\n})();', `window.testAPI = { sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, importHistory, normalizeImportedSet, normalizeImportedWorkout, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, workoutVolume, progressionStatus, loadCueFor, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, compatibleHistoryLink, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, setExerciseArchived, mergeExercises, sameProgressionContract, exerciseLoadLabel, setSummary, remoteStartupSync, autoRemoteBackup, flushSave, save, render, get state(){return state}, get ui(){return ui} };\ninit();\n})();`);
+    html = html.replace('init();\n})();', `window.testAPI = { sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, importHistory, normalizeImportedSet, normalizeImportedWorkout, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, workoutVolume, progressionStatus, loadCueFor, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, compatibleHistoryLink, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, setExerciseArchived, mergeExercises, sameProgressionContract, exerciseLoadLabel, setSummary, remoteStartupSync, autoRemoteBackup, flushSave, save, render, supersetRun, currentMemberIndex, isSettledRow, switchSupersetMember, navigate, currentExercise, settleSupersets, pauseTimer, finishWorkout, get timer(){return timer}, get state(){return state}, get ui(){return ui} };\ninit();\n})();`);
     await page.route('https://liftlog.test/**', route => route.fulfill({ contentType:'text/html', body:html }));
     await page.goto('https://liftlog.test/');
     const result = await page.evaluate(async () => {
@@ -19,7 +19,7 @@ const fs = require('node:fs');
       const wait = () => new Promise(r => setTimeout(r, 60));
       t.state.exercises = []; t.state.routines = []; t.state.workouts = [];
       const sample = t.sampleRoutinesFile();
-      check(sample.version === 12 && sample.schemaVersion === '1.10.0', 'sample version markers');
+      check(sample.version === 13 && sample.schemaVersion === '1.11.0', 'sample version markers');
       t.importRoutines(file(sample)); await wait();
       check(t.state.routines.length === 1 && t.state.exercises.length === 3, 'routine sample imports all definitions');
       const r = t.state.routines[0];
@@ -105,7 +105,7 @@ const fs = require('node:fs');
         'rep range is ordered and target RIR is clamped');
       const old = {version:3, settings:{theme:'invalid',effortMetric:'invalid'}, exercises:[], routines:[{items:[{rest:60,sets:3,reps:5}]}],workouts:[{startedAt:1,exercises:[{restSeconds:60,sets:[{rpe:8}]}]}]};
       t.normalizeState(t.migrateState(old));
-      check(old.version === 12 && Array.isArray(old.exerciseLinks) && Array.isArray(old.historySeparateIds) && Array.isArray(old.bodyweights) && Array.isArray(old.progressionPreferences) &&
+      check(old.version === 13 && Array.isArray(old.exerciseLinks) && Array.isArray(old.historySeparateIds) && Array.isArray(old.bodyweights) && Array.isArray(old.progressionPreferences) &&
         old.routines[0].items[0].repsMin === 5 && old.routines[0].items[0].repsMax === 5 &&
         old.settings.effortMetric === 'rpe' && old.settings.theme === 'system' && !('rest' in old.routines[0].items[0]) &&
         !('restSeconds' in old.workouts[0].exercises[0]), 'complete migration chain and settings fallback');
@@ -129,7 +129,7 @@ const fs = require('node:fs');
       t.state.schemaVersion = 'stale'; t.state.source = 'stale'; t.state.exportedAt = 'stale';
       const freshEnvelope = t.backupPayload();
       delete t.state.schemaVersion; delete t.state.source; delete t.state.exportedAt;
-      check(freshEnvelope.schemaVersion === '1.10.0' && freshEnvelope.source === 'liftlog-web' && freshEnvelope.exportedAt !== 'stale',
+      check(freshEnvelope.schemaVersion === '1.11.0' && freshEnvelope.source === 'liftlog-web' && freshEnvelope.exportedAt !== 'stale',
         'fresh export metadata wins over stale state fields');
       t.setUnit('lb');
       check(t.state.exercises.filter(ex => ex.unit === 'kg' || ex.unit === 'lb').every(ex => ex.unit === 'lb'),
@@ -362,7 +362,7 @@ const fs = require('node:fs');
     });
     await page.getByRole('button', {name:'Import & replace', exact:true}).click();
     await page.waitForFunction(() => window.testAPI.state.activeWorkout?.timer?.remaining === 37);
-    assert.equal(await page.evaluate(() => window.testAPI.state.version), 12, 'full backup restore migrates');
+    assert.equal(await page.evaluate(() => window.testAPI.state.version), 13, 'full backup restore migrates');
     assert.equal(await page.evaluate(() => window.testAPI.state.activeWorkout.timer.remaining), 37, 'backup restore retains rest timer');
     await page.reload();
     assert.equal(await page.evaluate(() => window.testAPI.state.activeWorkout.exercises[0].name), 'Leg Press', 'settled workout survives reload');
@@ -596,6 +596,142 @@ const fs = require('node:fs');
       check(requests.includes('PUT'),'automatic backup uploads the current full snapshot');
       return checks;
     });
+
+    /* Supersets: the shared pair rules, the group cursor, rest per round, and
+       the session-only lifetime of the link. A fresh page so earlier steps
+       cannot leak in. */
+    const ss = await browser.newPage({ viewport:{ width:390, height:844 } });
+    ss.on('pageerror', e => errors.push(e.message));
+    await ss.route('https://liftlog.test/**', route => route.fulfill({ contentType:'text/html', body:html }));
+    await ss.goto('https://liftlog.test/');
+    const supersetUnits = await ss.evaluate(async () => {
+      const t = window.testAPI, checks = [];
+      const check = (condition, label) => { if (!condition) throw Error(label); checks.push(label); };
+      const three = [{exerciseId:'a',supersetOf:'s'}, {exerciseId:'b',supersetOf:'s'}, {exerciseId:'c',supersetOf:'s'}];
+      t.cleanRoutinePairs(three);
+      check(three.every(it => !it.supersetOf), 'oversized supersets become independent');
+      const same = [{exerciseId:'a',supersetOf:'s'}, {exerciseId:'a',supersetOf:'s'}];
+      t.cleanRoutinePairs(same);
+      check(same.every(it => !it.supersetOf), 'a superset needs two different exercises');
+      const both = [{exerciseId:'a',eitherOf:'e',supersetOf:'s'}, {exerciseId:'b',eitherOf:'e'}, {exerciseId:'c',supersetOf:'s'}];
+      t.cleanRoutinePairs(both);
+      check(both[0].eitherOf === 'e' && both[1].eitherOf === 'e' && both.every(it => !it.supersetOf),
+        'an item in both kinds keeps either-of and orphans the superset');
+      const shared = [{exerciseId:'a',eitherOf:'k'}, {exerciseId:'b',eitherOf:'k'}, {exerciseId:'c',supersetOf:'k'}, {exerciseId:'d',supersetOf:'k'}];
+      t.cleanRoutinePairs(shared);
+      check(t.routineGroups(shared).length === 2, 'either-of and superset keys never join each other');
+      check(t.routineSummary([{exerciseId:'a',sets:3,supersetOf:'s'}, {exerciseId:'b',sets:2,supersetOf:'s'}, {exerciseId:'c',sets:2}]) ===
+        '3 exercises · 7 planned sets', 'superset summary counts both members and adds their sets');
+      t.ui.routineDraft = { id:null, name:'Draft', items:[
+        {id:'i1',exerciseId:'ex-a',sets:3,repsMin:8,repsMax:8},
+        {id:'i2',exerciseId:'ex-c',sets:2,repsMin:8,repsMax:8},
+        {id:'i3',exerciseId:'ex-b',sets:2,repsMin:8,repsMax:8}] };
+      check(t.pairRoutineItems('i1', 'i3', 'supersetOf') && t.ui.routineDraft.items.map(it => it.id).join() === 'i1,i3,i2',
+        'creating a superset moves its members together');
+      check(!t.pairRoutineItems('i1', 'i2', 'eitherOf'), 'a superset member cannot also be paired');
+      t.unpairRoutineItems(t.ui.routineDraft.items[0].supersetOf);
+      check(!t.ui.routineDraft.items.some(it => it.supersetOf), 'splitting removes both superset keys');
+      t.ui.routineDraft = null;
+
+      t.state.workouts = []; t.state.activeWorkout = null;
+      t.state.exercises = [
+        {id:'ex-a',name:'Bench',category:'Push',unit:'kg',notes:'',archived:false},
+        {id:'ex-b',name:'Row',category:'Pull',unit:'kg',notes:'',archived:false},
+        {id:'ex-c',name:'Plank',category:'Core',unit:'time',notes:'',archived:false}];
+      t.state.routines = [{id:'rt-ss',name:'Upper',items:[
+        {id:'s1',exerciseId:'ex-a',sets:3,repsMin:8,repsMax:8,weight:60,supersetOf:'ss'},
+        {id:'s2',exerciseId:'ex-b',sets:2,repsMin:8,repsMax:8,weight:50,supersetOf:'ss'},
+        {id:'s3',exerciseId:'ex-c',sets:1,repsMin:30,repsMax:30}]}];
+      const payload = structuredClone(t.routinesPayload(t.state.exercises, t.state.routines));
+      check(payload.routines[0].items[0].supersetOf === 'ss', 'routine export carries the superset key');
+      payload.routines[0].id = 'rt-ss-copy'; payload.routines[0].name = 'Upper copy';
+      t.importRoutines(new File([JSON.stringify(payload)], 'r.json', {type:'application/json'}));
+      await new Promise(r => setTimeout(r, 60));
+      const copy = t.state.routines.find(r => r.name === 'Upper copy');
+      check(copy && copy.items[0].supersetOf && copy.items[0].supersetOf === copy.items[1].supersetOf,
+        'routine import preserves the superset');
+      t.state.routines = t.state.routines.filter(r => r !== copy);
+      const legacy = t.backupPayload(); legacy.version = 12;
+      check(t.prepareBackup(legacy).version === 13, 'v12 data migrates to v13 unchanged');
+
+      t.state.settings.autoRest = true;
+      const resting = () => { const on = t.timer.running; t.pauseTimer(); t.timer.remaining = 0; return on; };
+      t.startRoutine('rt-ss');
+      const w = t.state.activeWorkout;
+      check(w.exercises[0].supersetOf === w.exercises[1].supersetOf && w.currentExerciseIndex === 0 && w.supersetSide === 0,
+        'a started routine opens on the first superset member');
+      check(t.workoutPlannedSets(w) === 6, 'planned sets count every superset member');
+      const log = () => t.toggleSet(t.currentExercise().sets.find(s => !s.completed).id);
+      log();
+      check(t.currentExercise().name === 'Row' && w.currentExerciseIndex === 0 && w.supersetSide === 1 && !resting(),
+        'a set on the first member hands over to the partner without rest');
+      check(t.isSettledRow(w, w.exercises[0], 0) === false, 'the waiting member is not treated as settled');
+      log();
+      check(t.currentExercise().name === 'Bench' && resting(), 'finishing the round rests and returns to the first member');
+      log(); log();
+      check(t.currentExercise().name === 'Bench' && resting() && w.exercises[1].sets.every(s => s.completed),
+        'with the partner finished the remaining sets run straight, with rest');
+      t.validateBackup(t.backupPayload());
+      const reloaded = t.prepareBackup(t.backupPayload()).activeWorkout;
+      check(reloaded.supersetSide === 0 && reloaded.exercises[0].supersetOf, 'the group cursor survives a save and reload');
+      log();
+      check(t.currentExercise().name === 'Plank' && w.currentExerciseIndex === 2, 'finishing both members moves past the superset');
+      t.state.activeWorkout = null;
+      t.startRoutine('rt-ss');
+      const w2 = t.state.activeWorkout;
+      t.switchSupersetMember(1);
+      check(t.currentExercise().name === 'Row', 'the switcher selects the other member');
+      t.state.activeWorkout.exercises.splice(2, 0, t.state.activeWorkout.exercises.splice(1, 1)[0]);
+      check(t.settleSupersets(w2) && !w2.exercises.some(ex => ex.supersetOf), 'separated members end the superset for this session');
+      check(t.state.routines[0].items[0].supersetOf === 'ss', 'the saved routine keeps its superset');
+      t.state.activeWorkout = null;
+      t.startRoutine('rt-ss');
+      t.state.activeWorkout.exercises[0].sets.forEach(s => { s.completed = true; });
+      t.state.activeWorkout.exercises[1].sets[0].completed = true;
+      const finishedShape = structuredClone(t.state.activeWorkout);
+      t.state.workouts.push(finishedShape); finishedShape.id = 'fin'; finishedShape.finishedAt = finishedShape.startedAt + 1;
+      const restored = t.prepareBackup(t.backupPayload());
+      check(!restored.workouts[0].exercises.some(ex => 'supersetOf' in ex) && !('supersetSide' in restored.workouts[0]),
+        'finished workouts do not keep superset data');
+      t.state.workouts = [];
+      return checks;
+    });
+    await ss.evaluate(() => { const t = window.testAPI; t.state.activeWorkout = null; t.startRoutine('rt-ss'); t.render(); });
+    assert.match(await ss.locator('.superset-note').innerText(), /Superset with\s*Row/, 'workout panel names the superset partner');
+    await ss.locator('#ss-switch-1').click();
+    assert.equal(await ss.locator('#workout-title').innerText(), 'Row', 'switch button changes the member on screen');
+    await ss.locator('#overview-toggle-btn').click();
+    assert.equal(await ss.evaluate(() => {
+      const rows = [...document.querySelectorAll('#overview-dlg-body .overview-row')];
+      return rows.length === 3 && rows[0].classList.contains('superset-first') &&
+        rows[1].classList.contains('superset-last') && rows[1].classList.contains('is-current-row') &&
+        getComputedStyle(rows[1], '::after').content === '"+"';
+    }), true, 'session sheet brackets the superset with a + and marks the member on screen');
+    await ss.getByRole('button', {name:'Move Row later'}).click();
+    assert.equal(await ss.locator('#overview-dlg-body .superset-pair').count(), 0, 'moving a member out splits the superset');
+    await ss.getByRole('button', {name:'Back to workout'}).click();
+    await ss.evaluate(() => {
+      const t = window.testAPI;
+      t.state.activeWorkout = null; t.navigate('routines');
+      t.ui.routineDraft = structuredClone(t.state.routines[0]); t.render();
+    });
+    assert.equal(await ss.locator('#routine-form .superset-pair').count(), 2, 'routine editor draws the superset bracket');
+    await ss.getByRole('button', {name:'Superset…'}).click();
+    const ssDialog = ss.getByRole('dialog', {name:'Superset'});
+    await ssDialog.getByRole('button', {name:'Split'}).click();
+    assert.equal(await ss.locator('#routine-form .superset-pair').count(), 0, 'split removes both superset markers');
+    await ss.getByRole('button', {name:'Superset…'}).click();
+    await ssDialog.getByLabel('First exercise').selectOption({label:'Bench · #1'});
+    await ssDialog.getByLabel('Alternate with').selectOption({label:'Plank · #3'});
+    await ssDialog.getByRole('button', {name:'Create superset'}).click();
+    assert.deepEqual(await ss.locator('#routine-form .item-name').allTextContents().then(n => n.map(x => x.replace(/ in a superset with .*/, ''))),
+      ['Bench', 'Plank', 'Row'], 'creating a superset from the dialog places the members together');
+    assert.equal(await ss.evaluate(() => document.activeElement && document.activeElement.id), 'routine-superset-open',
+      'focus returns to the superset button');
+    await ss.screenshot({path:'/tmp/liftlog-superset-editor.png'});
+    assert.equal(await ss.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'superset editor fits phone width');
+    await ss.close();
+    console.log('PASS supersets: ' + supersetUnits.length + ' state checks and the editor, workout and sheet flows');
 
     const touch = await browser.newPage({ viewport:{width:320,height:568}, isMobile:true, hasTouch:true });
     touch.on('pageerror', e => errors.push(e.message));

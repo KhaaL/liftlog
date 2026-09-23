@@ -41,6 +41,8 @@
   --success:#1e7a44;
   --success-soft:#e4f3ea;
   --either:#7650a8;
+  /* resolved on :root, so every theme's own --success carries through */
+  --superset:var(--success);
   --warning:#8a5800;
   --warning-soft:#f9efd9;
   --focus:#2b5fd9;
@@ -713,11 +715,12 @@ kbd{
 /* .item-name and .item-actions carry bottom padding for the routine editor's
    baseline-aligned grid; here it is 13px of nothing, once per row. */
 .overview-row .item-name,.overview-row .item-actions{ padding-bottom:0; }
-.either-inline{
+.either-inline,.superset-inline{
   display:inline-block; margin-right:5px; padding:1px 5px;
   border:1px solid var(--either); border-radius:99px;
   color:var(--either); font-size:10px; font-weight:750; vertical-align:1px;
 }
+.superset-inline{ border-color:var(--superset); color:var(--superset); }
 @media (max-width:480px){
   /* Three controls and a name do not fit a 320px line without truncating the
      name, which is the one thing the running order exists to show. The buttons
@@ -837,21 +840,27 @@ kbd{
 .item-row{ display:grid; grid-template-columns:44px minmax(120px,1fr) repeat(5,minmax(58px,82px)) 84px; gap:var(--sp-2); align-items:end; padding:var(--sp-3) 0; border-top:1px solid var(--border); }
 .item-row:first-child{ border-top:0; }
 .item-row .item-actions{ grid-column:-2 / -1; }
-/* Shape and label carry the meaning; violet keeps green free for supersets. */
-.either-pair{ position:relative; }
-.either-pair::before{
+/* Shape and label carry the meaning: a violet OR bracket for either-of, a
+   green + bracket for a superset. --pair picks the colour per kind. */
+.either-pair{ --pair:var(--either); }
+.superset-pair{ --pair:var(--superset); }
+.either-pair,.superset-pair{ position:relative; }
+.either-pair::before,.superset-pair::before{
   content:""; position:absolute; left:10px; top:0; bottom:0; width:15px;
-  border-left:2px solid var(--either); pointer-events:none;
+  border-left:2px solid var(--pair); pointer-events:none;
 }
-.either-first::before{ border-top:2px solid var(--either); border-top-left-radius:7px; }
-.either-last::before{ border-bottom:2px solid var(--either); border-bottom-left-radius:7px; }
-.either-last::after{
+.either-first::before,.superset-first::before{ border-top:2px solid var(--pair); border-top-left-radius:7px; }
+.either-last::before,.superset-last::before{ border-bottom:2px solid var(--pair); border-bottom-left-radius:7px; }
+.either-last::after,.superset-last::after{
   content:"OR"; position:absolute; left:0; top:0; transform:translateY(-50%);
   width:22px; height:20px; display:grid; place-items:center; z-index:1;
-  border:1px solid var(--either); border-radius:99px;
-  background:var(--surface); color:var(--either); font-size:10px; font-weight:750;
+  border:1px solid var(--pair); border-radius:99px;
+  background:var(--surface); color:var(--pair); font-size:10px; font-weight:750;
   line-height:1; pointer-events:none;
 }
+.superset-last::after{ content:"+"; font-size:13px; }
+.routine-pair-toolbar{ display:flex; flex-wrap:wrap; gap:var(--sp-2); }
+.superset-note{ display:flex; flex-wrap:wrap; align-items:center; gap:var(--sp-2); margin-top:var(--sp-3); font-size:var(--fs-sm); }
 .item-name{ font-weight:600; font-size:var(--fs-sm); padding-bottom:9px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .routine-pair-toolbar{ margin:0 0 var(--sp-3); }
 .routine-pair-fields{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--sp-3); margin-top:var(--sp-3); }
@@ -1374,11 +1383,11 @@ button,.btn,.icon-btn,.nav-btn,.strip-step,.strip-num,.set-num,.done-ex-row,.his
 <dialog id="routine-pair-dlg" class="dlg-wide" aria-labelledby="routine-pair-title">
   <div class="dlg-body">
     <h2 id="routine-pair-title">Either of</h2>
-    <p class="desc">Choose two exercises already in this routine. Completing either one removes the other from that workout only.</p>
+    <p class="desc" id="routine-pair-desc">Choose two exercises already in this routine. Completing either one removes the other from that workout only.</p>
     <div id="routine-pair-existing" class="routine-pair-existing"></div>
     <div id="routine-pair-picker" class="routine-pair-fields">
       <label class="field"><span class="cap">First exercise</span><select id="routine-pair-first" data-change="routine-pair-first"></select></label>
-      <label class="field"><span class="cap">Or this exercise</span><select id="routine-pair-second"></select></label>
+      <label class="field"><span class="cap" id="routine-pair-second-cap">Or this exercise</span><select id="routine-pair-second"></select></label>
     </div>
     <p id="routine-pair-empty" class="hint" hidden>Add two unpaired exercises to create another pair.</p>
     <p id="routine-pair-error" class="error-text" role="alert" hidden></p>
@@ -1775,6 +1784,11 @@ const REST_MIN = 15, REST_MAX = 600;
 
 /* Routine item bounds, applied on save and on import alike. */
 const ITEM_LIMITS = { sets:[1,12], reps:[0,999] };
+/* Two kinds of routine pair share one set of rules. Either-of: perform one of
+   the two. Superset: perform both, alternating set by set. An item belongs to
+   at most one pair; either-of wins a conflict because it is the older contract.
+   Here rather than beside its helpers because load() runs before they do. */
+const PAIR_KEYS = ['eitherOf', 'supersetOf'];
 
 /* Single-key view switches, shared by the shortcut handler. */
 const NAV_KEYS = { t:'today', r:'routines', h:'history', e:'exercises' };
@@ -1804,7 +1818,7 @@ const SHORTCUTS = [
 const LS_KEY = 'liftlog.v1';
 const LS_RESCUE_KEY = 'liftlog.v1.unreadable';  /* holds data we could not load, so nothing is lost silently */
 const LS_REMOTE_RESTORE_KEY = 'liftlog.v1.before-remote-restore';
-const SCHEMA_VERSION = 12;  /* v3: sets carry durationSeconds (time no longer overloads reps)
+const SCHEMA_VERSION = 13;  /* v3: sets carry durationSeconds (time no longer overloads reps)
                                + countForVolume / countForPR split execution from analytics
                                v4: settings carry effortMetric ('none'|'rpe'|'rir'), sets carry rir
                                v5: library exercises carry url (how to perform the movement)
@@ -1815,15 +1829,17 @@ const SCHEMA_VERSION = 12;  /* v3: sets carry durationSeconds (time no longer ov
                                v9: exerciseLinks connect historical IDs to current Library exercises
                                v10: dated bodyweights and added load on bodyweight sets
                                v11: archive, load convention, equipment and movement family
-                               v12: per-series load cue preferences */
-const EXPORT_SCHEMA = '1.10.0'; /* version of the documented import/export contract — 1.1: sets[].rir;
+                               v12: per-series load cue preferences
+                               v13: routine items can share a supersetOf pair key */
+const EXPORT_SCHEMA = '1.11.0'; /* version of the documented import/export contract — 1.1: sets[].rir;
                                   1.2: exercises[].url; 1.3: per-item rest dropped; 1.4: items[].eitherOf;
                                   1.5: lower/upper rep targets and optional target RIR;
                                   1.6: reversible historical exercise links;
                                   1.7: bodyweights plus sets[].addedWeight/unit, distance removed;
                                   1.8: settings.lastModifiedAt for automatic remote backup/restore;
                                   1.9: archived/loadMode/equipmentKey/movementFamily exercise metadata;
-                                  1.10: progressionPreferences in full backups and history transfers */
+                                  1.10: progressionPreferences in full backups and history transfers;
+                                  1.11: items[].supersetOf */
 
 /* Set by load() when stored data could not be used, surfaced once after init. */
 let loadWarning = '';
@@ -2118,6 +2134,7 @@ function validateBackup(s){
       id(it.id, at + '.id', items); id(it.exerciseId, at + '.exerciseId');
       fields(it, at, ['sets', 'reps', 'repsMin', 'repsMax', 'targetRir', 'weight', 'rest'], number);
       text(it.eitherOf, at + '.eitherOf');
+      text(it.supersetOf, at + '.supersetOf');
     });
   });
   const workout = (w, path, active = false) => {
@@ -2130,6 +2147,8 @@ function validateBackup(s){
     if (w.currentExerciseIndex != null && (!Number.isInteger(w.currentExerciseIndex) ||
         w.currentExerciseIndex < 0 || (active && w.currentExerciseIndex > w.exercises.length)))
       fail(path + '.currentExerciseIndex', 'an exercise index from 0 to ' + w.exercises.length);
+    if (w.supersetSide != null && (!Number.isInteger(w.supersetSide) || w.supersetSide < 0))
+      fail(path + '.supersetSide', 'a nonnegative integer');
     if (w.timer != null){
       object(w.timer, path + '.timer');
       fields(w.timer, path + '.timer', ['seconds', 'total', 'remaining', 'endsAt'], number);
@@ -2139,7 +2158,7 @@ function validateBackup(s){
     w.exercises.forEach((ex, i) => {
       const at = path + '.exercises[' + i + ']'; object(ex, at);
       if (ex.exerciseId != null) id(ex.exerciseId, at + '.exerciseId');
-      fields(ex, at, ['name', 'category', 'unit', 'notes', 'eitherOf', 'loadMode', 'equipmentKey', 'movementFamily'], text);
+      fields(ex, at, ['name', 'category', 'unit', 'notes', 'eitherOf', 'supersetOf', 'loadMode', 'equipmentKey', 'movementFamily'], text);
       fields(ex, at, ['plannedSets', 'targetReps', 'targetRepsMin', 'targetRepsMax', 'targetRir', 'targetWeight', 'restSeconds'], number);
       bool(ex.skipped, at + '.skipped');
       array(ex.sets, at + '.sets');
@@ -2181,6 +2200,7 @@ function migrateState(s){
   if (s.version === 9) migrateToV10(s);
   if (s.version === 10) migrateToV11(s);
   if (s.version === 11) migrateToV12(s);
+  if (s.version === 12) s.version = 13; // optional supersetOf: old routines need no conversion
   return s;
 }
 /* v1 shipped an earlier seed library/routines. v2 refreshes both to the
@@ -2382,6 +2402,16 @@ function normalizeState(s){
         normalizeSetMeasurements(set);
       });
     });
+    /* A superset is a way of performing a plan, not part of the record: only
+       the workout in progress carries it, and only while its members touch. */
+    if (active){
+      settleSupersets(w);
+      w.supersetSide = Number.isInteger(w.supersetSide) && w.supersetSide > 0 ? w.supersetSide : 0;
+      pointAt(w, currentMemberIndex(w));
+    } else {
+      delete w.supersetSide;
+      w.exercises.forEach(ex => { delete ex.supersetOf; });
+    }
   };
   s.workouts.forEach(w => normalizeWorkout(w, false));
   if (s.activeWorkout) normalizeWorkout(s.activeWorkout, true);
@@ -2569,6 +2599,7 @@ function freshUI(){
     notesOpen:false,            /* session-notes field expanded (auto if a note exists) */
     routineDraft:null,          /* object while editing a routine */
     routineError:'',
+    pairKind:'eitherOf',
     exerciseDraft:null,         /* object while editing one exercise row */
     showArchivedExercises:false,
     mergeExerciseId:null,
@@ -3338,7 +3369,7 @@ function workoutSets(w){
     a + Math.max(...group.map(ex => ex.sets.filter(s => s.completed).length)), 0);
 }
 function workoutPlannedSets(w){
-  return routineGroups(w.exercises).reduce((a, group) => a + Math.max(...group.map(ex => ex.sets.length)), 0);
+  return routineGroups(w.exercises).reduce((a, group) => a + groupPlannedSets(group, ex => ex.sets.length), 0);
 }
 /* Minutes left, measured from this session's own pace: the median gap between
    consecutive completed sets, times the sets still to do. Returns null until
@@ -3404,6 +3435,7 @@ function buildWorkoutExercise(item){
     targetRir:item.targetRir != null ? item.targetRir : null,
     targetWeight:item.weight != null ? item.weight : null,
     ...(item.eitherOf ? { eitherOf:item.eitherOf } : {}),
+    ...(item.supersetOf ? { supersetOf:item.supersetOf } : {}),
     notes:exDef.notes || '', skipped:false, sets:[]
   };
   const n = Math.max(1, item.sets || 3);
@@ -3451,7 +3483,7 @@ function newWorkout(routine){
     id:uid(),
     routineId:routine ? routine.id : null,
     routineName:routine ? routine.name : 'Quick session',
-    startedAt:Date.now(), finishedAt:null, notes:'', currentExerciseIndex:0,
+    startedAt:Date.now(), finishedAt:null, notes:'', currentExerciseIndex:0, supersetSide:0,
     exercises:routine ? routine.items.map(buildWorkoutExercise) : [],
     timer:null
   };
@@ -3490,14 +3522,78 @@ function addExerciseToWorkout(exId){
     return;
   }
   w.exercises.push(buildWorkoutExercise(newRoutineItem(exId)));
-  if (w.currentExerciseIndex >= w.exercises.length - 1 || allSetsDone(w.exercises[w.currentExerciseIndex]))
-    w.currentExerciseIndex = w.exercises.length - 1;
+  if (w.currentExerciseIndex >= w.exercises.length - 1 || allSetsDone(currentExercise()))
+    pointAt(w, w.exercises.length - 1);
   save(); render();
   toast('Added ' + (def ? def.name : 'exercise'));
 }
+/* The group cursor. currentExerciseIndex always names the first block of a
+   superset (or a lone block), so everything that reasons about "before the
+   cursor is settled" keeps working unchanged; supersetSide picks which member
+   of that superset is on screen. A superset is a run of adjacent blocks
+   sharing supersetOf — settleSupersets() keeps that true. */
+function supersetRun(w, i){
+  const ex = w.exercises[i];
+  if (!ex || !ex.supersetOf) return [i];
+  let lo = i, hi = i;
+  while (lo > 0 && w.exercises[lo - 1].supersetOf === ex.supersetOf) lo--;
+  while (hi < w.exercises.length - 1 && w.exercises[hi + 1].supersetOf === ex.supersetOf) hi++;
+  const run = [];
+  for (let k = lo; k <= hi; k++) run.push(k);
+  return run;
+}
+function currentMemberIndex(w){
+  const run = supersetRun(w, w.currentExerciseIndex);
+  return run[Math.min(w.supersetSide || 0, run.length - 1)];
+}
+/* The one way to move the cursor to a block: it lands on that block's
+   superset and selects the block within it. */
+function pointAt(w, idx){
+  const run = supersetRun(w, idx);
+  w.currentExerciseIndex = run[0];
+  w.supersetSide = idx - run[0];
+}
+/* Moving onto a superset starts with its first member that still has work. */
+function enterAt(w, idx){
+  const run = supersetRun(w, idx);
+  const open = run.find(i => !w.exercises[i].skipped && !allSetsDone(w.exercises[i]));
+  pointAt(w, open != null ? open : idx);
+}
+/* Alternation only works between neighbours. A session change that separates
+   or orphans a member (a reorder, a removal) ends that superset for this
+   session only; the saved routine keeps it. Returns whether any ended. */
+function settleSupersets(w){
+  const members = new Map();
+  w.exercises.forEach((ex, i) => {
+    if (typeof ex.supersetOf !== 'string' || !ex.supersetOf){ delete ex.supersetOf; return; }
+    if (!members.has(ex.supersetOf)) members.set(ex.supersetOf, []);
+    members.get(ex.supersetOf).push(i);
+  });
+  let ended = false;
+  members.forEach(idx => {
+    if (idx.length >= 2 && idx[idx.length - 1] - idx[0] === idx.length - 1) return;
+    idx.forEach(i => delete w.exercises[i].supersetOf);
+    ended = true;
+  });
+  return ended;
+}
+/* Whose turn it is after a set in the current superset: the next member, in
+   order, that still has work. `wrapped` means the round is over — the one
+   point at which a superset rests. Null outside a superset or once every
+   member is finished. */
+function supersetTurn(w){
+  const run = supersetRun(w, w.currentExerciseIndex);
+  if (run.length < 2) return null;
+  const side = run.indexOf(currentMemberIndex(w));
+  for (let k = 1; k <= run.length; k++){
+    const j = (side + k) % run.length, ex = w.exercises[run[j]];
+    if (!ex.skipped && !allSetsDone(ex)) return { index:run[j], wrapped:j <= side };
+  }
+  return null;
+}
 function currentExercise(){
   const w = state.activeWorkout;
-  return w ? w.exercises[w.currentExerciseIndex] : null;
+  return w ? w.exercises[currentMemberIndex(w)] || null : null;
 }
 function allSetsDone(ex){ return ex && ex.sets.length > 0 && ex.sets.every(s => s.completed); }
 /* Finishing one alternative settles only this session's copy of the plan.
@@ -3539,16 +3635,23 @@ function toggleSet(setId){
   const i = ex.sets.findIndex(x => x.id === setId);
   if (i === -1) return;
   const s = ex.sets[i];
+  const w = state.activeWorkout;
   s.completed = !s.completed;
   if (s.completed){ s.completedAt = Date.now(); fillSetDefaults(ex, s); }
   else s.completedAt = null;
-  const finished = s.completed && allSetsDone(ex);
-  const removed = finished ? settleEitherOf(state.activeWorkout, ex) : null;
+  let finished = s.completed && allSetsDone(ex);
+  const removed = finished ? settleEitherOf(w, ex) : null;
+  /* In a superset a logged set hands over to the partner, and rest waits for
+     the end of the round. The superset is finished only when every member is. */
+  const inSuperset = s.completed && supersetRun(w, w.currentExerciseIndex).length > 1;
+  const turn = inSuperset ? supersetTurn(w) : null;
+  if (inSuperset) finished = !turn;
+  const handOver = turn && turn.index !== currentMemberIndex(w) ? w.exercises[turn.index] : null;
   save();
   if (removed) toast('Either of: removed ' + removed.name + ' from this workout');
   if (s.completed){
-    announce('Set ' + (i+1) + ' of ' + ex.sets.length + ' complete.');
-    if (state.settings.autoRest){
+    announce('Set ' + (i+1) + ' of ' + ex.sets.length + ' complete.' + (handOver ? ' Now: ' + handOver.name + '.' : ''));
+    if (state.settings.autoRest && (!turn || turn.wrapped)){
       loadTimer(currentRestSeconds());
       startTimer();
     }
@@ -3556,7 +3659,20 @@ function toggleSet(setId){
   /* checking the last open box leaves nothing to log here, so move on rather
      than sit on a fully-done set list */
   if (finished) advanceExercise(false);
+  else if (handOver){ pointAt(w, turn.index); save(); ui.focus = 'ex-panel-top'; render(); }
   else { ui.focus = 'sd-' + setId; render(); }
+}
+/* The manual override: work on another member of the current superset now,
+   say because its station just came free. */
+function switchSupersetMember(idx){
+  const w = state.activeWorkout; if (!w) return;
+  if (!supersetRun(w, w.currentExerciseIndex).includes(idx) || idx === currentMemberIndex(w)) return;
+  pointAt(w, idx);
+  w.exercises[idx].skipped = false;
+  save();
+  ui.focus = 'ex-panel-top';
+  render();
+  announce('Now: ' + w.exercises[idx].name + '.');
 }
 /* Setting a weight or a rep/duration target is nearly always a decision about
    the rest of the exercise rather than about one row, so it flows down to
@@ -3631,7 +3747,7 @@ function deleteSet(setId){
    a routine, the user may well mean the plan itself, so that is offered as a
    separate, clearly-labelled choice rather than assumed either way. */
 function confirmExerciseRemoval(w, ex){
-  const idx = w.currentExerciseIndex;
+  const idx = w.exercises.indexOf(ex);
   const routine = w.routineId ? routineById(w.routineId) : null;
   const inRoutine = routine ? routine.items.filter(it => it.exerciseId === ex.exerciseId).length : 0;
 
@@ -3653,12 +3769,19 @@ function confirmExerciseRemoval(w, ex){
     if (v !== 'session' && v !== 'routine') return;
     /* ui.expandedDone is keyed by position in w.exercises, and every index
        after this one is about to shift — so the expand state goes with it */
+    const run = supersetRun(w, idx);
+    const partners = run.filter(i => i !== idx).map(i => w.exercises[i]);
     w.exercises.splice(idx, 1);
     if (ex.eitherOf){
       const partner = w.exercises.find(other => other.eitherOf === ex.eitherOf);
       if (partner) delete partner.eitherOf;
     }
-    w.currentExerciseIndex = Math.min(idx, w.exercises.length);
+    settleSupersets(w);
+    /* a superset partner with work left takes over; otherwise move on past
+       whatever remains of it, which for a lone block is the old position */
+    const heir = partners.find(p => !p.skipped && !allSetsDone(p));
+    if (heir) pointAt(w, w.exercises.indexOf(heir));
+    else pointAt(w, Math.min(run[run.length - 1], w.exercises.length));
     ui.expandedDone.clear();
     let msg = 'Removed ' + ex.name + ' from this session';
     if (v === 'routine'){
@@ -3693,10 +3816,19 @@ function advanceExercise(markSkipped){
   const w = state.activeWorkout; const ex = currentExercise();
   if (!w || !ex) return;
   if (markSkipped){ ex.skipped = true; announce(ex.name + ' skipped.'); }
-  w.currentExerciseIndex = Math.min(w.exercises.length, w.currentExerciseIndex + 1);
+  /* a skipped superset member leaves its partner to finish as straight sets */
+  const turn = markSkipped ? supersetTurn(w) : null;
+  if (turn) pointAt(w, turn.index);
+  else {
+    /* the cursor moves a superset at a time, so "next" is past its last member */
+    const run = supersetRun(w, w.currentExerciseIndex);
+    const next = run[run.length - 1] + 1;
+    if (next >= w.exercises.length){ w.currentExerciseIndex = w.exercises.length; w.supersetSide = 0; }
+    else enterAt(w, next);
+  }
   save();
   if (!markSkipped && w.currentExerciseIndex < w.exercises.length)
-    announce('Now: ' + w.exercises[w.currentExerciseIndex].name);
+    announce('Now: ' + currentExercise().name);
   ui.focus = 'ex-panel-top';
   render();
 }
@@ -3715,7 +3847,7 @@ function reopenExercise(idx){
   const w = state.activeWorkout; if (!w) return;
   if (idx < 0 || idx >= w.exercises.length) return;
   w.exercises[idx].skipped = false;
-  w.currentExerciseIndex = idx;
+  pointAt(w, idx);
   ui.expandedDone.delete(String(idx));
   save();
   ui.focus = 'ex-panel-top';
@@ -3730,7 +3862,7 @@ function reopenExercise(idx){
    negation and overviewSheetHTML() branches on it, so the list that can be
    dragged and the list drawn with a grip cannot drift apart. */
 function isSettledRow(w, ex, i){
-  return i < w.currentExerciseIndex || ex.skipped || (allSetsDone(ex) && i !== w.currentExerciseIndex);
+  return i < w.currentExerciseIndex || ex.skipped || (allSetsDone(ex) && i !== currentMemberIndex(w));
 }
 /* The exercises the sheet draws with a grip, by index: the current one and
    everything still to come that has not been skipped or already finished.
@@ -3786,6 +3918,9 @@ function finishWorkout(){
       toast('Workout discarded'); return;
     }
     w.finishedAt = Date.now();
+    /* how the plan was performed stays with the session in progress */
+    delete w.supersetSide;
+    w.exercises.forEach(ex => { delete ex.supersetOf; });
     /* drop rows never touched, then exercises left with nothing to show */
     w.exercises.forEach(ex => {
       ex.sets = ex.sets.filter(s => s.completed || s.weight != null || s.reps != null || s.durationSeconds != null);
@@ -3822,35 +3957,51 @@ function discardWorkout(){
 /* ============================================================
    ACTIONS — routines
    ============================================================ */
+function pairKeyOf(it){
+  return it.eitherOf ? 'e:' + it.eitherOf : it.supersetOf ? 's:' + it.supersetOf : '';
+}
 /* A pair key is local to a routine, independent of item order and IDs. */
 function cleanRoutinePairs(items){
-  const groups = new Map();
-  items.forEach(it => {
-    if (typeof it.eitherOf !== 'string' || !it.eitherOf.trim()){ delete it.eitherOf; return; }
-    if (!groups.has(it.eitherOf)) groups.set(it.eitherOf, []);
-    groups.get(it.eitherOf).push(it);
-  });
-  groups.forEach(pair => {
-    if (pair.length !== 2 || pair[0].exerciseId === pair[1].exerciseId)
-      pair.forEach(it => delete it.eitherOf);
+  items.forEach(it => PAIR_KEYS.forEach(key => {
+    if (typeof it[key] !== 'string' || !it[key].trim()) delete it[key];
+  }));
+  items.forEach(it => { if (it.eitherOf) delete it.supersetOf; });
+  PAIR_KEYS.forEach(key => {
+    const groups = new Map();
+    items.forEach(it => {
+      if (!it[key]) return;
+      if (!groups.has(it[key])) groups.set(it[key], []);
+      groups.get(it[key]).push(it);
+    });
+    groups.forEach(pair => {
+      if (pair.length !== 2 || pair[0].exerciseId === pair[1].exerciseId)
+        pair.forEach(it => delete it[key]);
+    });
   });
 }
 function routineGroups(items){
   const groups = [], pairs = new Map();
   items.forEach(it => {
-    if (it.eitherOf && pairs.has(it.eitherOf)) pairs.get(it.eitherOf).push(it);
-    else { const group = [it]; groups.push(group); if (it.eitherOf) pairs.set(it.eitherOf, group); }
+    const key = pairKeyOf(it);
+    if (key && pairs.has(key)) pairs.get(key).push(it);
+    else { const group = [it]; groups.push(group); if (key) pairs.set(key, group); }
   });
   return groups;
+}
+/* Either-of plans the larger alternative; a superset plans every member. */
+function groupPlannedSets(group, count){
+  return group[0].supersetOf ? group.reduce((n, it) => n + count(it), 0) : Math.max(...group.map(count));
 }
 function keepRoutinePairsAdjacent(items){
   items.splice(0, items.length, ...routineGroups(items).flat());
 }
 function routineSummary(items){
   const groups = routineGroups(items);
-  const low = groups.reduce((n, g) => n + Math.min(...g.map(it => it.sets)), 0);
-  const high = groups.reduce((n, g) => n + Math.max(...g.map(it => it.sets)), 0);
-  return plural(groups.length, 'exercise') + ' · ' + low + (high !== low ? '–' + high : '') + ' planned sets';
+  const sum = (g, pick) => g[0].supersetOf ? g.reduce((n, it) => n + it.sets, 0) : pick(...g.map(it => it.sets));
+  const low = groups.reduce((n, g) => n + sum(g, Math.min), 0);
+  const high = groups.reduce((n, g) => n + sum(g, Math.max), 0);
+  const exercises = groups.reduce((n, g) => n + (g[0].supersetOf ? g.length : 1), 0);
+  return plural(exercises, 'exercise') + ' · ' + low + (high !== low ? '–' + high : '') + ' planned sets';
 }
 function normalizeRoutineItem(it){
   it.sets = clamp(parseInt(it.sets, 10) || ITEM_LIMITS.sets[0], ...ITEM_LIMITS.sets);
@@ -3900,14 +4051,14 @@ function targetRangeLabel(ex){
   if (low == null || high == null || low === high) return fmtNum(low == null ? high : low);
   return fmtNum(low) + '–' + fmtNum(high);
 }
-function pairRoutineItems(firstId, secondId){
+function pairRoutineItems(firstId, secondId, key = 'eitherOf'){
   const items = ui.routineDraft && ui.routineDraft.items;
-  if (!items) return false;
+  if (!items || !PAIR_KEYS.includes(key)) return false;
   const first = items.find(it => it.id === firstId);
   const second = items.find(it => it.id === secondId);
-  if (!first || !second || first === second || first.eitherOf || second.eitherOf ||
+  if (!first || !second || first === second || pairKeyOf(first) || pairKeyOf(second) ||
       first.exerciseId === second.exerciseId) return false;
-  first.eitherOf = second.eitherOf = uid();
+  first[key] = second[key] = uid();
   keepRoutinePairsAdjacent(items);
   return true;
 }
@@ -3915,14 +4066,23 @@ function unpairRoutineItems(groupId){
   const items = ui.routineDraft && ui.routineDraft.items;
   if (!items || !groupId) return false;
   let removed = false;
-  items.forEach(it => {
-    if (it.eitherOf === groupId){ delete it.eitherOf; removed = true; }
-  });
+  items.forEach(it => PAIR_KEYS.forEach(key => {
+    if (it[key] === groupId){ delete it[key]; removed = true; }
+  }));
   return removed;
 }
 function unpairedRoutineItems(){
-  return ui.routineDraft ? ui.routineDraft.items.filter(it => !it.eitherOf && exerciseById(it.exerciseId)) : [];
+  return ui.routineDraft ? ui.routineDraft.items.filter(it => !pairKeyOf(it) && exerciseById(it.exerciseId)) : [];
 }
+/* One dialog serves both kinds of pair; only its words change. */
+const PAIR_KINDS = {
+  eitherOf:{ title:'Either of', opener:'routine-pair-open', second:'Or this exercise', add:'Pair exercises',
+    desc:'Choose two exercises already in this routine. Completing either one removes the other from that workout only.',
+    current:'Current pairs', join:' or ', unpair:'Unpair', empty:'Add two unpaired exercises to create another pair.' },
+  supersetOf:{ title:'Superset', opener:'routine-superset-open', second:'Alternate with', add:'Create superset',
+    desc:'Choose two exercises already in this routine. In a workout you alternate between them set by set, resting after each round.',
+    current:'Current supersets', join:' + ', unpair:'Split', empty:'Add two unpaired exercises to create a superset.' }
+};
 function pairPickerOptions(items){
   const all = ui.routineDraft.items;
   return items.map(it => '<option value="' + esc(it.id) + '">' +
@@ -3937,16 +4097,23 @@ function refreshSecondPairPicker(){
   second.innerHTML = pairPickerOptions(choices);
   if (choices.some(it => it.id === selected)) second.value = selected;
 }
-function openRoutinePairDialog(){
+function openRoutinePairDialog(kind){
   const d = ui.routineDraft;
   if (!d || d.items.length < 2) return;
-  const paired = routineGroups(d.items).filter(group => group.length === 2);
+  ui.pairKind = PAIR_KINDS[kind] ? kind : 'eitherOf';
+  const copy = PAIR_KINDS[ui.pairKind];
+  $('#routine-pair-title').textContent = copy.title;
+  $('#routine-pair-desc').textContent = copy.desc;
+  $('#routine-pair-second-cap').textContent = copy.second;
+  $('#routine-pair-add').textContent = copy.add;
+  $('#routine-pair-empty').textContent = copy.empty;
+  const paired = routineGroups(d.items).filter(group => group.length === 2 && group[0][ui.pairKind]);
   $('#routine-pair-existing').innerHTML = paired.length
-    ? '<h3>Current pairs</h3>' + paired.map(group =>
+    ? '<h3>' + copy.current + '</h3>' + paired.map(group =>
       '<div class="routine-pair-existing-row"><span>' +
-        group.map(it => esc((exerciseById(it.exerciseId) || {}).name || '(removed exercise)')).join(' or ') +
+        group.map(it => esc((exerciseById(it.exerciseId) || {}).name || '(removed exercise)')).join(copy.join) +
         '</span><button type="button" class="btn btn-sm" data-action="routine-pair-unpair" data-group="' +
-        esc(group[0].eitherOf) + '">Unpair</button></div>').join('') : '';
+        esc(group[0][ui.pairKind]) + '">' + copy.unpair + '</button></div>').join('') : '';
   const available = unpairedRoutineItems();
   const firstChoices = available.filter(it => available.some(other => other !== it && other.exerciseId !== it.exerciseId));
   const canPair = firstChoices.length > 0;
@@ -3960,12 +4127,13 @@ function openRoutinePairDialog(){
   (canPair ? $('#routine-pair-first') : $('#routine-pair-dlg [data-action="routine-pair-close"]')).focus();
 }
 function closeRoutinePairDialog(changed){
+  const opener = PAIR_KINDS[ui.pairKind].opener;
   $('#routine-pair-dlg').close();
-  if (changed){ ui.focus = 'routine-pair-open'; render(); }
-  else $('#routine-pair-open').focus();
+  if (changed){ ui.focus = opener; render(); }
+  else $('#' + opener).focus();
 }
 function addRoutinePair(){
-  if (pairRoutineItems($('#routine-pair-first').value, $('#routine-pair-second').value)){
+  if (pairRoutineItems($('#routine-pair-first').value, $('#routine-pair-second').value, ui.pairKind)){
     closeRoutinePairDialog(true);
     return;
   }
@@ -4751,7 +4919,7 @@ function importRoutines(file){
           sets:it.sets == null ? 3 : it.sets,
           repsMin:it.repsMin == null ? (it.reps == null ? 8 : it.reps) : it.repsMin,
           repsMax:it.repsMax == null ? (it.reps == null ? (it.repsMin == null ? 8 : it.repsMin) : it.reps) : it.repsMax,
-          targetRir:it.targetRir, weight:it.weight, eitherOf:it.eitherOf });
+          targetRir:it.targetRir, weight:it.weight, eitherOf:it.eitherOf, supersetOf:it.supersetOf });
       }).filter(Boolean);
       cleanRoutinePairs(items);
       keepRoutinePairsAdjacent(items);
@@ -4853,6 +5021,7 @@ function schemaHelpHTML(){
       ['items[].repsMax', 'integer', 'Upper rep target, clamped to the same range. Values below <code>repsMin</code> are reordered.'],
       ['items[].targetRir', 'integer | null', 'Optional target reps in reserve, clamped to 0\u201310. When set, RIR is shown while logging this exercise.'],
       ['items[].eitherOf', 'optional string', 'Exactly two different exercises in a routine share a key to form an either-of pair. They are placed together; completing one removes the other from that workout only. Invalid or incomplete pairs become independent exercises.'],
+      ['items[].supersetOf', 'optional string', 'Exactly two different exercises in a routine share a key to form a superset. They are placed together; a workout alternates between them set by set and rests after each round. An item cannot be in an either-of pair and a superset at once. Invalid or incomplete supersets become independent exercises. Finished workouts do not record supersets.'],
       ['items[].weight', 'number | null', 'Planned load, or added load for a bodyweight exercise. <code>null</code> uses last time\u2019s figure.'],
       ['exercises[]', 'optional', 'Definitions for the ids above, including broad <code>category</code>, <code>movementFamily</code>, <code>loadMode</code>, optional <code>equipmentKey</code>, <code>archived</code>, notes and URL.'],
       ['exercises[].unit', 'enum', 'One of ' + units + '. <code>kg</code> and <code>lb</code> both mean weighted; a created Library exercise follows this browser’s global weight unit.'],
@@ -5368,8 +5537,9 @@ function htmlSessionStrip(w){
   const doneSets = workoutSets(w);
   const planned = workoutPlannedSets(w);
   const total = w.exercises.length;
-  const idx = w.currentExerciseIndex;
+  const idx = currentMemberIndex(w);
   const cur = w.exercises[idx];
+  const run = supersetRun(w, w.currentExerciseIndex);
   const mins = sessionEstimate(w);
 
   const where = cur ? '<span class="ex-of">' + (idx+1) + '/' + total + '</span>'
@@ -5387,9 +5557,9 @@ function htmlSessionStrip(w){
   /* On the last exercise, forward means wrap up rather than "next" — the
      button says so in its label and carries the finish icon, so the arrow is
      never a lie about what is on the other side of it. */
-  const canPrev = Math.min(idx, total) > 0;
+  const canPrev = Math.min(w.currentExerciseIndex, total) > 0;
   const atEnd = idx >= total;
-  const last = !!cur && idx + 1 >= total;
+  const last = !!cur && run[run.length - 1] + 1 >= total;
 
   return '<div class="session-strip">' +
     '<div class="strip-line">' +
@@ -5431,7 +5601,8 @@ function htmlSessionNote(w){
 }
 
 function htmlCurrentExercise(w, ex){
-  const next = w.exercises[w.currentExerciseIndex + 1] || null;
+  const run = supersetRun(w, w.currentExerciseIndex);
+  const next = w.exercises[run[run.length - 1] + 1] || null;
   const stats = exerciseStats(ex.exerciseId);
   const prev = stats.last;
   const showWeight = ex.unit !== 'time';
@@ -5543,6 +5714,7 @@ function htmlCurrentExercise(w, ex){
          yesterday, and the workout block already duplicates enough. */
       htmlHowTo((exerciseById(ex.exerciseId) || {}).url, ex.name) +
     '</div>' +
+    htmlSupersetNote(w, ex, run) +
     prevHTML +
     (ex.notes ? '<p class="ex-notes">“' + esc(ex.notes) + '”</p>' : '') +
     (cue ? loadCueHTML(cue, ex.name, true) : '') +
@@ -5554,17 +5726,34 @@ function htmlCurrentExercise(w, ex){
   '</div>';
 }
 
+/* Which superset this is and how to switch to its partner. Logging a set
+   switches on its own; the button is for doing things out of order. */
+function htmlSupersetNote(w, ex, run){
+  if (run.length < 2) return '';
+  const others = run.filter(i => w.exercises[i] !== ex);
+  return '<div class="superset-note"><span class="superset-inline" aria-hidden="true">+</span>' +
+    '<span>Superset with</span>' +
+    others.map(i => {
+      const o = w.exercises[i];
+      const done = o.sets.filter(sx => sx.completed).length;
+      return '<button type="button" class="btn btn-sm" id="ss-switch-' + i + '" data-action="superset-switch" data-idx="' + i + '" ' +
+        'aria-label="Switch to ' + esc(o.name) + ', ' + done + ' of ' + o.sets.length + ' sets done">' +
+        esc(o.name) + ' <span class="muted xs">' + done + '/' + o.sets.length + '</span></button>';
+    }).join('') +
+    '<span class="muted xs">Rest after each round</span></div>';
+}
+
 /* A completed/skipped exercise row, expandable via ui.expandedDone (keyed by
    array index — safe because upcoming-only reordering never moves a done
    exercise's index). Lives in the session-overview drawer. */
-function htmlDoneRow(ex, i, showEither){
+function htmlDoneRow(ex, i, marker){
   const open = ui.expandedDone.has(String(i));
   const completed = ex.sets.filter(s => s.completed);
   const status = ex.skipped ? '<span class="status-chip skip">Skipped</span>'
     : '<span class="status-chip ok">' + (allSetsDone(ex) ? icon('check','ic-xs') + ' ' : '') +
       completed.length + '/' + ex.sets.length + '</span>';
   let html = '<button type="button" class="done-ex-row" data-action="toggle-done-ex" data-idx="' + i + '" aria-expanded="' + open + '">' +
-    status + (showEither ? '<span class="either-inline">OR</span>' : '') + '<strong>' + esc(ex.name) + '</strong>' +
+    status + marker + '<strong>' + esc(ex.name) + '</strong>' +
     '<span class="muted small">' + completed.map(s => setSummary(s, ex)).join(', ') + '</span>' +
     IC.chev + '</button>';
   if (open){
@@ -5595,14 +5784,17 @@ function overviewSheetHTML(w){
   let html = '';
 
   w.exercises.forEach((ex, i) => {
-    const partnerIndex = ex.eitherOf
-      ? w.exercises.findIndex((other, j) => j !== i && other.eitherOf === ex.eitherOf) : -1;
+    const pairKey = ex.eitherOf ? 'eitherOf' : ex.supersetOf ? 'supersetOf' : '';
+    const pairStyle = pairKey === 'supersetOf' ? 'superset' : 'either';
+    const partnerIndex = pairKey
+      ? w.exercises.findIndex((other, j) => j !== i && other[pairKey] === ex[pairKey]) : -1;
     const joined = partnerIndex >= 0 && Math.abs(partnerIndex - i) === 1 &&
       !isSettledRow(w, ex, i) && !isSettledRow(w, w.exercises[partnerIndex], partnerIndex);
-    const pairClass = joined ? ' either-pair ' + (i < partnerIndex ? 'either-first' : 'either-last') : '';
-    const showEither = partnerIndex >= 0 && !joined;
+    const pairClass = joined ? ' ' + pairStyle + '-pair ' + pairStyle + (i < partnerIndex ? '-first' : '-last') : '';
+    const marker = partnerIndex >= 0 && !joined
+      ? (pairKey === 'supersetOf' ? '<span class="superset-inline" aria-label="Superset">+</span>' : '<span class="either-inline">OR</span>') : '';
     if (isSettledRow(w, ex, i)){
-      html += htmlDoneRow(ex, i, showEither);
+      html += htmlDoneRow(ex, i, marker);
       return;
     }
     /* The grip is the drag handle and nothing else — a whole draggable row
@@ -5611,7 +5803,7 @@ function overviewSheetHTML(w){
        the arrow keys too, so the gesture is never the only way to move a
        row; the buttons beside it stay because a grip does not announce what
        it can do to anyone who is not already holding it. */
-    const isNow = i === w.currentExerciseIndex;
+    const isNow = i === currentMemberIndex(w);
     const done = ex.sets.filter(s => s.completed).length;
     html += '<div class="overview-row' + (isNow ? ' is-current-row' : '') + pairClass + '" data-idx="' + i + '"' +
         (isNow ? ' aria-current="step"' : '') + '>' +
@@ -5620,9 +5812,10 @@ function overviewSheetHTML(w){
         'title="Drag to reorder">' + IC.grip + '</button>' +
       '<span class="item-name">' +
         (isNow ? '<span class="status-chip current">Now</span> ' : '') +
-        (showEither ? '<span class="either-inline">OR</span> ' : '') +
+        (marker ? marker + ' ' : '') +
         esc(ex.name) +
-        (joined && i < partnerIndex ? '<span class="sr-only"> or ' + esc(w.exercises[partnerIndex].name) + '</span>' : '') +
+        (joined && i < partnerIndex ? '<span class="sr-only">' + (pairKey === 'supersetOf' ? ' in a superset with ' : ' or ') +
+          esc(w.exercises[partnerIndex].name) + '</span>' : '') +
         ' <span class="muted xs">· ' + (isNow ? done + '/' + ex.sets.length + ' sets'
                                               : plural(ex.sets.length, 'set') + ' planned') + '</span></span>' +
       '<span class="item-actions">' +
@@ -5649,7 +5842,7 @@ function overviewSheetHTML(w){
 function overviewSubtitle(w){
   const n = w.exercises.length;
   if (!n) return 'Nothing planned yet';
-  const at = Math.min(w.currentExerciseIndex + 1, n);
+  const at = Math.min(currentMemberIndex(w) + 1, n);
   return 'Exercise ' + at + ' of ' + n + ' · ' + workoutSets(w) + '/' + workoutPlannedSets(w) + ' sets done';
 }
 
@@ -5754,8 +5947,11 @@ function htmlRoutineEditor(){
       (ui.routineError ? '<p class="error-text mt-2" role="alert">' + esc(ui.routineError) + '</p>' : '') +
       '<div class="section-title mt-5"><h2>Exercises</h2><span class="rule"></span>' +
         '<span class="muted xs">sets × rep range · target RIR / weight</span></div>' +
-      '<div class="routine-pair-toolbar"><button type="button" class="btn btn-sm" id="routine-pair-open" ' +
-        'data-action="routine-pair-open"' + (d.items.length < 2 ? ' disabled' : '') + '>Pair exercises…</button></div>';
+      '<div class="routine-pair-toolbar">' +
+        '<button type="button" class="btn btn-sm" id="routine-pair-open" data-action="routine-pair-open" data-kind="eitherOf"' +
+          (d.items.length < 2 ? ' disabled' : '') + '>Pair exercises…</button>' +
+        '<button type="button" class="btn btn-sm" id="routine-superset-open" data-action="routine-pair-open" data-kind="supersetOf"' +
+          (d.items.length < 2 ? ' disabled' : '') + '>Superset…</button></div>';
 
   if (!d.items.length){
     html += '<p class="muted small empty-line">No exercises yet — add the first one below.</p>';
@@ -5763,10 +5959,13 @@ function htmlRoutineEditor(){
   d.items.forEach((it, i) => {
     const e = exerciseById(it.exerciseId);
     const name = e ? e.name : '(removed exercise)';
-    const partner = it.eitherOf && d.items.find(other => other !== it && other.eitherOf === it.eitherOf);
+    const pairKey = it.eitherOf ? 'eitherOf' : it.supersetOf ? 'supersetOf' : '';
+    const partner = pairKey && d.items.find(other => other !== it && other[pairKey] === it[pairKey]);
     const partnerDef = partner && exerciseById(partner.exerciseId);
     const groupIndex = groups.findIndex(group => group.includes(it));
     const moveName = partner ? name + ' and ' + (partnerDef ? partnerDef.name : 'alternative') : name;
+    const pairStyle = pairKey === 'supersetOf' ? 'superset' : 'either';
+    const pairSr = pairKey === 'supersetOf' ? ' in a superset with ' : ' or ';
     const timed = e && e.unit === 'time';
     const loaded = e && e.unit !== 'time';
     const bodyweight = e && e.unit === 'bw';
@@ -5781,13 +5980,13 @@ function htmlRoutineEditor(){
       numberField(countLabel + ' max', 'repsMax', it.repsMax, 'max="999" step="1" inputmode="numeric"') +
       numberField('Target RIR', 'targetRir', it.targetRir, 'max="10" step="1" inputmode="numeric"') +
       (loaded ? numberField((bodyweight ? 'Added ' : '') + exerciseLoadLabel(e), 'weight', it.weight, 'step="0.5" inputmode="decimal"') : '');
-    const pairClass = partner ? ' either-pair ' + (groups[groupIndex][0] === it ? 'either-first' : 'either-last') : '';
+    const pairClass = partner ? ' ' + pairStyle + '-pair ' + pairStyle + (groups[groupIndex][0] === it ? '-first' : '-last') : '';
     html += '<div class="item-row' + pairClass + '">' +
       '<button type="button" class="grip" id="ri-grip-' + i + '" data-drag="routine-items" ' +
         'aria-label="Reorder ' + esc(moveName) + '. Drag it, or use the up and down arrow keys." ' +
         'title="Drag to reorder">' + IC.grip + '</button>' +
       '<span class="item-name" title="' + esc(name) + '">' + esc(name) +
-        (partner && groups[groupIndex][0] === it ? '<span class="sr-only"> or ' + esc(partnerDef ? partnerDef.name : 'alternative') + '</span>' : '') + '</span>' +
+        (partner && groups[groupIndex][0] === it ? '<span class="sr-only">' + pairSr + esc(partnerDef ? partnerDef.name : 'alternative') + '</span>' : '') + '</span>' +
       targetFields +
       '<span class="item-actions">' +
         '<button type="button" class="icon-btn" id="ri-up-' + i + '" data-action="ritem-up" data-idx="' + i + '" aria-label="Move ' + esc(moveName) + ' up" ' + (groupIndex === 0 ? 'disabled' : '') + '>' + IC.up + '</button>' +
@@ -7042,6 +7241,7 @@ const actions = {
   /* same underlying jump as "Reopen exercise" — the drawer just also closes,
      since the point of jumping is to get back to the main logging flow */
   'overview-jump'(d){ ui.overviewOpen = false; reopenExercise(Number(d.idx)); },
+  'superset-switch'(d){ switchSupersetMember(Number(d.idx)); },
   'finish-workout'(){ finishWorkout(); },
   'discard-workout'(){ discardWorkout(); },
 
@@ -7054,7 +7254,7 @@ const actions = {
   'routine-dup'(d){ duplicateRoutine(d.id); },
   'routine-del'(d){ deleteRoutine(d.id); },
   'routine-cancel'(){ ui.routineDraft = null; ui.routineError=''; render(); },
-  'routine-pair-open'(){ openRoutinePairDialog(); },
+  'routine-pair-open'(d){ openRoutinePairDialog(d.kind); },
   'routine-pair-close'(){ closeRoutinePairDialog(false); },
   'routine-pair-add'(){ addRoutinePair(); },
   'routine-pair-unpair'(d){ if (unpairRoutineItems(d.group)) closeRoutinePairDialog(true); },
@@ -7398,12 +7598,22 @@ const SORTABLES = {
          "Now" to whatever is dealt into its place. Captured before the move so
          the announcement can tell the difference, because the screen behind
          the sheet changes exercise and that must not be silent. */
-      const wasCurrent = w.exercises[w.currentExerciseIndex];
-      const landed = reorderMovable(w, from, to);
+      const wasCurrent = currentExercise();
+      const position = currentMemberIndex(w);
+      let landed = reorderMovable(w, from, to);
+      const moved = w.exercises[landed];
+      /* A move within a superset keeps the same member on screen; a move that
+         separates one ends it for this session. Otherwise "Now" is a position,
+         as for any exercise. */
+      const ended = settleSupersets(w);
+      const kept = wasCurrent && supersetRun(w, position).includes(w.exercises.indexOf(wasCurrent));
+      pointAt(w, kept ? w.exercises.indexOf(wasCurrent) : position);
+      landed = w.exercises.indexOf(moved);
       save();
+      if (ended) toast('Superset split for this workout');
       ui.focus = focus || ('ov-grip-' + landed);
       render();
-      const nowCurrent = w.exercises[w.currentExerciseIndex];
+      const nowCurrent = currentExercise();
       announce(w.exercises[landed].name + ' moved to position ' + (to+1) + ' of ' + slots.length + '.' +
         (nowCurrent && nowCurrent !== wasCurrent ? ' Now: ' + nowCurrent.name + '.' : ''));
     }
