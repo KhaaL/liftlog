@@ -174,17 +174,22 @@ const fixture = () => ({
     assert.equal(await page.evaluate(() => window.testAPI.state.activeWorkout.exercises[0].sets[0].completed),true);
     await page.evaluate(() => window.testAPI.navigate('routines'));
     await assertInert();
+    await page.locator('[data-action="detail-open"][data-kind="routine"]').first().click();
+    await assertInert();
     await page.getByRole('button',{name:'Edit Routine',exact:true}).click();
     assert.equal(await page.locator('#routine-add-select option').filter({hasText:'Squat'}).getAttribute('value'),malicious.exercises[0].id);
     await page.getByRole('button',{name:'Cancel',exact:true}).click();
     await page.evaluate(() => window.testAPI.navigate('exercises'));
+    await assertInert();
+    await page.locator('[data-action="detail-open"][data-kind="exercise"]').filter({hasText:'Squat'}).first().click();
     await assertInert();
     await page.getByRole('button',{name:'Edit Squat',exact:true}).click();
     await assertInert();
     await page.evaluate(() => window.testAPI.navigate('history'));
     await assertInert();
     assert.equal(await page.locator('option').evaluateAll((els,id)=>els.some(e=>e.value===id),malicious.exercises[0].id),true);
-    await page.locator('[data-action="history-toggle"]').click();
+    await page.locator('[data-action="detail-open"][data-kind="workout"]').click();
+    await assertInert();
     await page.getByRole('button',{name:'Edit session',exact:true}).click();
     await assertInert();
     assert.equal(await page.locator('select[data-bind="hexsel"]').count(),0,
@@ -218,7 +223,7 @@ const fixture = () => ({
     await page.waitForFunction(id=>window.testAPI.state.workouts.some(w=>w.id===id),imported.id);
     await page.evaluate(() => window.testAPI.navigate('history'));
     await assertInert();
-    await page.locator('[data-action="history-toggle"]').evaluateAll((els,id)=>els.find(e=>e.dataset.id===id).click(),imported.id);
+    await page.locator('[data-action="detail-open"][data-kind="workout"]').evaluateAll((els,id)=>els.find(e=>e.dataset.id===id).click(),imported.id);
     await page.locator('[data-action="history-edit"]').click();
     await assertInert();
     await page.evaluate(() => window.testAPI.prepareBackup(window.testAPI.backupPayload()));

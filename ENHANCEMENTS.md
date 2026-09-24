@@ -218,7 +218,17 @@ clear workout data) is cheap. Currently every one of them is a confirm-and-hope.
   ~40px of an edge, and it would serve both lists at once.
 - **Exercise search scope.** `/` filters by name and category only; searching
   notes would help now that notes carry machine codes and cues.
-- **Focus after deletion.** Deleting a row returns focus to `<body>`; it should
+- **Swipe a sheet down to close it.** Both sheets close by the X, Esc, the
+  scrim and Android's back gesture, but iOS has no back gesture and the X is at
+  the far edge from the thumb. A downward drag on `.sheet-head` would be one
+  more recogniser in `GESTURES`; it was left out of the detail sheet so the
+  pattern could land before a gesture that needs tuning on real devices.
+- **Sheets that open each other.** A routine's sheet lists exercises that have
+  sheets of their own, and an exercise's sheet lists sessions that do too.
+  Following them needs a back stack in `ui.detail` (and a back control), since
+  closing the second sheet should return to the first rather than to the list.
+- **Focus after deletion.** Deleting a row — or deleting from its detail sheet,
+  which closes the sheet with it — returns focus to `<body>`; it should
   land on the next row or the list heading. Reordering no longer has this
   problem in either list — a move puts focus back on the control that made it —
   so `overviewStep()` / `routineStep()` are the pattern to copy.
