@@ -2490,25 +2490,31 @@ function sampleExercises(){
   ];
 }
 /* Three beginner-friendly routines (upper / lower / full body). Guideline:
-   2-3 sets of 10-15 reps, 45-120s rest, weight challenging but not maxing out. */
+   2-3 sets of 10-15 reps, 45-120s rest, weight challenging but not maxing out.
+   A - Upper Body pairs the arm isolation work as a superset (the standard
+   biceps/triceps combination) and B - Lower Body offers a compound-or-isolation
+   either-of choice, so both routine features are visible on a fresh install
+   rather than only discoverable through the editor. */
 function sampleRoutines(exs){
   const find = n => exs.find(e => e.name === n).id;
-  const item = (name, sets, repsMin, repsMax, weight, targetRir) =>
+  const item = (name, sets, repsMin, repsMax, weight, targetRir, pair) =>
     ({ id:uid(), exerciseId:find(name), sets, repsMin, repsMax, weight,
-       ...(targetRir == null ? {} : { targetRir }) });
+       ...(targetRir == null ? {} : { targetRir }),
+       ...(pair ? { [pair.kind]:pair.id } : {}) });
+  const armsSuperset = uid(), legAlternative = uid();
   return [
     { id:uid(), name:'A - Upper Body (Machine Focus)', items:[
       item('Chest Press Machine',3,10,15,null,2),
       item('Pec Fly Machine',2,12,15,null,2),
       item('Shoulder Press Machine',3,10,15,null,2),
       item('Seated Row Machine',3,10,15,null,2),
-      item('Bicep Curl Machine',2,12,15,null,2),
-      item('Triceps Extension Machine',2,12,15,null,2)
+      item('Bicep Curl Machine',2,12,15,null,2,{kind:'supersetOf',id:armsSuperset}),
+      item('Triceps Extension Machine',2,12,15,null,2,{kind:'supersetOf',id:armsSuperset})
     ]},
     { id:uid(), name:'B - Lower Body (Machine Focus)', items:[
       item('Glute Bridge (Bodyweight)',2,10,15,null,2),
-      item('Leg Press Machine',3,10,15,null,2),
-      item('Leg Extension Machine',2,12,15,null,2),
+      item('Leg Press Machine',3,10,15,null,2,{kind:'eitherOf',id:legAlternative}),
+      item('Leg Extension Machine',2,12,15,null,2,{kind:'eitherOf',id:legAlternative}),
       item('Leg Curl Machine',2,12,15,null,2),
       item('Calf Raise Machine',2,12,15,null,2)
     ]},
