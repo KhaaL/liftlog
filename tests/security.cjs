@@ -1,8 +1,7 @@
-// Node + Playwright; optionally set BROWSER_PATH to an installed Chromium.
-const { chromium } = require('playwright');
+// Security and recovery suite: `npm test`, or node tests/security.cjs. See tests/README.md.
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const html = fs.readFileSync('index.html', 'utf8').replace('init();\n})();', `window.testAPI = { prepareBackup, validateBackup, backupPayload, applyFullBackup, importData, importHistory, readJSONFile, remoteRestore, navigate, render, save, get state(){return state}, get ui(){return ui} };\ninit();\n})();`);
+const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
+const html = appWithTestAPI(`{ prepareBackup, validateBackup, backupPayload, applyFullBackup, importData, importHistory, readJSONFile, remoteRestore, navigate, render, save, get state(){return state}, get ui(){return ui} }`);
 const origin = 'https://liftlog.test/';
 const fixture = () => ({
   app:'liftlog', kind:'backup', version:11,
@@ -16,7 +15,7 @@ const fixture = () => ({
   activeWorkout:null
 });
 (async () => {
-  const browser = await chromium.launch({headless:true, ...(process.env.BROWSER_PATH ? {executablePath:process.env.BROWSER_PATH} : {})});
+  const browser = await launchBrowser();
   const errors = [];
   const newPage = async (options = {}) => {
     const context = await browser.newContext({serviceWorkers:'block'});

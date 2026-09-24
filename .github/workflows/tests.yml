@@ -1,0 +1,50 @@
+# Runs both browser suites (tests/README.md) on every pull request and on main.
+#
+# The job runs inside Playwright's own image rather than on a bare runner: the
+# suites assert layout at phone widths, and those results depend on which fonts
+# are installed. The image fixes the font set as well as the browser, so a run
+# means the same thing every time. Its tag must match the playwright version in
+# package.json — on a mismatch Playwright stops with "Executable doesn't exist"
+# and says which image to use.
+name: Browser tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      options: --user 1001
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Regression suite
+        run: npm run test:regression
+      # runs even when the regression suite failed, so one red run reports both
+      - name: Security suite
+        if: ${{ !cancelled() }}
+        run: npm run test:security
+      - name: Keep screenshots from a failed run
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: /tmp/liftlog-*.png
+          if-no-files-found: ignore

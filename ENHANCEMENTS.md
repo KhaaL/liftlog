@@ -10,28 +10,20 @@ is the thing most of them trade against.
 
 ## 1. Correctness and data safety
 
-### 1.1 Stabilize the browser-test seam and run it in CI
-**Why:** `tests/regression.cjs` and `tests/security.cjs` now cover migrations,
-imports, unit conversion, analytics, mobile workflows and hostile files. They
-inject their API by replacing the literal end of the document's IIFE, and the
-repository has no dependency lock or CI workflow, so a harmless formatting
-change can break the seam and regressions are still easy to miss before merge.
+### 1.1 Stabilize the browser-test seam and run it in CI — **done**
+The suites no longer depend on the literal last lines of the script: they
+replace one marker, `/* @test-seam */`, through `tests/harness.cjs`, which
+refuses to run when it is missing. `package.json` pins Playwright as a dev
+dependency (the app still has none), and `.github/workflows/tests.yml` runs both
+suites on every pull request inside Playwright's image, which fixes the fonts as
+well as the browser. That mattered at once: on a bare Linux machine the font
+stack fell back to DejaVu Sans, whose width overflowed the header tabs at
+320px, so the stack now tries Liberation Sans first.
 
-**How:** expose a small test-only surface intentionally, pin Playwright and its
-browser in development tooling, and run both suites in CI. The shipped app can
-remain dependency-free; these dependencies belong to verification rather than
-runtime.
-
-### 1.2 Re-link history when v1 data is migrated
-**Why:** `migrateToV2()` replaces the whole exercise library with new ids, so
-every logged workout from a v1 install keeps pointing at exercise ids that no
-longer exist. Their history still displays (the workout stores a `name`), but
-previous-session lookups, bests and trends all silently return nothing for those
-movements.
-
-**How:** after swapping the library, walk `state.workouts` and re-point
-`exerciseId` by case-insensitive name match, leaving genuinely unknown movements
-unlinked.
+### 1.2 Re-link history when v1 data is migrated — **withdrawn**
+Not worth the code: it only helps a v1 install that has never been opened
+since, and there is no reason to think one exists. `migrateToV2()` stays as it
+is.
 
 ### 1.3 Surface the rescued-data escape hatch in the UI — **done**
 When `localStorage['liftlog.v1.unreadable']` exists, Settings shows its size and
@@ -91,9 +83,9 @@ Per-muscle-group volume over time, set/rep tonnage per week, PR history for a
 movement, and estimated 1RM trend lines against a target. The aggregation
 helpers (`exerciseStats`, `sumVolume`) already do the hard part.
 
-### 2.6 Plate calculator
-Given a target weight, a bar weight and available plates, show the loading per
-side. Small, self-contained, and genuinely useful mid-session.
+### 2.6 Plate calculator — **withdrawn**
+The program Liftlog is used for is built on machines with pin-selected stacks,
+so a calculator for loading a barbell would have little to calculate.
 
 ---
 
