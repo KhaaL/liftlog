@@ -204,14 +204,19 @@ const fs = require('node:fs');
     await page.getByRole('button', {name:'Exercises', exact:true}).click();
     assert.deepEqual(await page.locator('#ex-list .list-name').allTextContents(), ['Back Squat','Leg Press','Plank'],
       'exercise list is alphabetical regardless of stored order');
-    const legPressRow = page.locator('#ex-list .ex-row').filter({hasText:'Leg Press'});
-    await legPressRow.getByRole('button', {name:'Archive'}).click();
+    await page.locator('#ex-list .ex-row').filter({hasText:'Leg Press'}).locator('.list-open').click();
+    const legPressSheet = page.getByRole('dialog', {name:'Leg Press'});
+    await legPressSheet.getByRole('button', {name:'Archive Leg Press'}).click();
+    assert.equal(await legPressSheet.getByRole('button', {name:'Restore Leg Press'}).count(), 1,
+      'archiving from the sheet keeps it open and offers Restore');
+    await legPressSheet.getByRole('button', {name:'Close exercise'}).click();
     assert.equal(await page.locator('#ex-list .ex-row').filter({hasText:'Leg Press'}).count(), 0,
       'archived exercises leave the normal Exercises view');
     await page.getByRole('button', {name:/Show archived/}).click();
     assert.equal(await page.locator('#ex-list .ex-row').filter({hasText:'Leg Press'}).count(), 1,
       'archived exercises can be reviewed and restored');
     await page.getByRole('button', {name:'Routines'}).click();
+    await page.getByRole('button', {name:'Lower body', exact:true}).click();
     await page.getByRole('button', { name:'Edit Lower body', exact:true }).click();
     assert.equal(await page.locator('#routine-add-select option', {hasText:'Leg Press'}).count(), 0,
       'routine picker only offers active exercises');
@@ -520,6 +525,11 @@ const fs = require('node:fs');
       'View last session opens the exact workout exercise');
     assert.equal(await page.locator('.hist-ex.is-highlighted h4').innerText().then(s => s.startsWith('Back Squat')), true,
       'the highlighted block is the cue source exercise');
+    assert.equal(await page.evaluate(() => {
+      const el = document.activeElement;
+      return !!el && el.classList.contains('is-highlighted') && !!el.closest('#detail-dlg[open]');
+    }), true, 'View last session opens that workout in its sheet, focused on the exercise');
+    await page.keyboard.press('Escape');
     await page.getByRole('button', {name:'Today', exact:true}).click();
     await page.getByRole('button', {name:'Start Cue routine'}).click();
     assert.equal(await page.locator('.load-cue.is-compact').count(), 1,
@@ -742,6 +752,130 @@ const fs = require('node:fs');
     assert.equal(await ss.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'superset editor fits phone width');
     await ss.close();
     console.log('PASS supersets: ' + supersetUnits.length + ' state checks and the editor, workout and sheet flows');
+
+    /* Detail sheets: a routine, an exercise and a logged session all open in
+       the same read-only sheet, and Edit hands over to the editor in the page. */
+    const ds = await browser.newPage({ viewport:{width:390,height:844}, isMobile:true, hasTouch:true });
+    ds.on('pageerror', e => errors.push(e.message));
+    await ds.route('https://liftlog.test/**', route => route.fulfill({contentType:'text/html',body:html}));
+    await ds.goto('https://liftlog.test/');
+    const sheetChecks = [];
+    const sheetCheck = (ok, label) => { assert.equal(ok, true, label); sheetChecks.push(label); };
+    const sheetState = () => ds.evaluate(() => ({
+      open: document.querySelector('#detail-dlg').open,
+      focus: document.activeElement && document.activeElement.id,
+      locked: document.documentElement.classList.contains('sheet-open')
+    }));
+    const fitsWidth = () => ds.evaluate(() => {
+      const d = document.querySelector('#detail-dlg');
+      return document.documentElement.scrollWidth <= innerWidth && d.scrollWidth <= d.clientWidth;
+    });
+    await ds.evaluate(() => {
+      const t = window.testAPI;
+      t.state.exercises = [
+        {id:'ds-bench',name:'Bench Press',category:'Push',movementFamily:'horizontal_push',unit:'kg',loadMode:'total',equipmentKey:'',notes:'Pause on the chest',url:'https://example.com/bench',archived:false},
+        {id:'ds-dip',name:'Dip',category:'Push',movementFamily:'vertical_push',unit:'bw',loadMode:'bodyweight_added',equipmentKey:'',notes:'',url:'',archived:false},
+        {id:'ds-row',name:'Cable Row',category:'Pull',movementFamily:'horizontal_pull',unit:'kg',loadMode:'machine_stack',equipmentKey:'',notes:'',url:'',archived:false},
+        {id:'ds-plank',name:'Plank',category:'Core',movementFamily:'core',unit:'time',loadMode:'duration',equipmentKey:'',notes:'',url:'',archived:false}
+      ];
+      t.state.routines = [{id:'ds-push',name:'Push day',items:[
+        {id:'ds-i1',exerciseId:'ds-bench',sets:3,repsMin:5,repsMax:8,targetRir:2,weight:80},
+        {id:'ds-i2',exerciseId:'ds-dip',sets:3,repsMin:8,repsMax:12,targetRir:null,weight:10,supersetOf:'ds-ss'},
+        {id:'ds-i3',exerciseId:'ds-row',sets:3,repsMin:10,repsMax:12,targetRir:null,weight:null,supersetOf:'ds-ss'},
+        {id:'ds-i4',exerciseId:'ds-plank',sets:2,repsMin:45,repsMax:45,targetRir:null,weight:null}
+      ]}];
+      t.state.workouts = [{id:'ds-w1',routineId:'ds-push',routineName:'Push day',startedAt:Date.now()-86400000,
+        finishedAt:Date.now()-86400000+2700000,notes:'Felt strong',exercises:[
+          {exerciseId:'ds-bench',name:'Bench Press',category:'Push',unit:'kg',loadMode:'total',targetRepsMin:5,targetRepsMax:8,
+            sets:[{id:'ds-s1',weight:80,reps:8,unit:'kg',completed:true},{id:'ds-s2',weight:80,reps:7,unit:'kg',completed:true}]}]}];
+      t.state.activeWorkout = null;
+      t.navigate('routines');
+    });
+
+    await ds.locator('[data-kind="routine"]').click();
+    const pushSheet = ds.getByRole('dialog', {name:'Push day'});
+    const opened = await sheetState();
+    sheetCheck(opened.open && opened.focus === 'detail-title' && opened.locked,
+      'tapping a routine opens its sheet, focused on the title, with the page locked behind it');
+    sheetCheck(await pushSheet.locator('input, select, textarea').count() === 0,
+      'the routine sheet is read-only');
+    sheetCheck(JSON.stringify(await pushSheet.locator('.detail-item-name').evaluateAll(n => n.map(x => x.firstChild.textContent))) ===
+      JSON.stringify(['Bench Press','Dip','Cable Row','Plank']), 'the routine sheet lists every exercise in order');
+    sheetCheck(JSON.stringify(await pushSheet.locator('.detail-item-target').allTextContents()) ===
+      JSON.stringify(['3 × 5–8 reps @ 80 kg · RIR 2','3 × 8–12 reps @ +10 kg','3 × 10–12 reps','2 × 45 s']),
+      'targets read sets × range, load and RIR, with seconds for timed work');
+    sheetCheck(await pushSheet.locator('.superset-pair').count() === 2, 'a superset keeps the editor bracket in the sheet');
+    sheetCheck((await pushSheet.locator('.detail-item-last').first().innerText()).includes('80 kg × 8'),
+      'the sheet shows what was lifted last time');
+    sheetCheck(await fitsWidth(), 'the routine sheet fits phone width');
+    await ds.screenshot({path:'/tmp/liftlog-routine-sheet.png'});
+    await ds.keyboard.press('Escape');
+    /* a dialog's close event is queued, so this waits for it to land */
+    sheetCheck(await ds.waitForFunction(() => !document.querySelector('#detail-dlg').open &&
+        document.activeElement.id === 'open-routine-ds-push' && !document.documentElement.classList.contains('sheet-open'),
+        null, {timeout:2000}).then(() => true, () => false),
+      'Escape closes the sheet and returns focus to the row');
+
+    const rowBox = await ds.locator('.list-row.is-openable').boundingBox();
+    await ds.mouse.click(rowBox.x + rowBox.width - 8, rowBox.y + rowBox.height - 8);
+    sheetCheck((await sheetState()).open, 'the whole row opens the sheet, not only its text');
+    await pushSheet.getByRole('button', {name:'Close routine'}).click();
+    await ds.locator('[data-kind="routine"]').click();
+    await pushSheet.getByRole('button', {name:'Duplicate Push day'}).click();
+    sheetCheck(await ds.locator('#detail-title').innerText() === 'Push day (copy)' && (await sheetState()).focus === 'detail-dup',
+      'duplicating from the sheet shows the copy, keeping focus on the button');
+    await ds.getByRole('dialog', {name:'Push day (copy)'}).getByRole('button', {name:'Edit Push day (copy)'}).click();
+    sheetCheck(!(await sheetState()).open && (await sheetState()).focus === 'routine-form' &&
+      await ds.locator('[data-bind="rdraft"][data-field="name"]').inputValue() === 'Push day (copy)',
+      'Edit closes the sheet and opens the routine editor in the page');
+    await ds.getByRole('button', {name:'Cancel', exact:true}).click();
+
+    await ds.getByRole('button', {name:'Exercises', exact:true}).click();
+    await ds.locator('[data-kind="exercise"]').filter({hasText:'Bench Press'}).click();
+    const benchSheet = ds.getByRole('dialog', {name:'Bench Press'});
+    sheetCheck(await benchSheet.locator('input, select, textarea').count() === 0, 'the exercise sheet is read-only');
+    sheetCheck((await benchSheet.locator('.detail-facts').first().innerText()).includes('horizontal push') &&
+      await benchSheet.getByRole('link', {name:/How to perform Bench Press/}).count() === 1 &&
+      (await benchSheet.innerText()).includes('Pause on the chest'),
+      'the exercise sheet shows its definition, note and how-to link');
+    sheetCheck((await benchSheet.innerText()).includes('Best e1RM') &&
+      await benchSheet.locator('[aria-label="Recent sessions"] li').count() === 1 &&
+      JSON.stringify(await benchSheet.locator('.detail-section').last().locator('li').allTextContents()) === JSON.stringify(['Push day','Push day (copy)']),
+      'the exercise sheet shows bests, recent sessions and the routines using it');
+    sheetCheck(await fitsWidth(), 'the exercise sheet fits phone width');
+    await benchSheet.getByRole('button', {name:'Archive Bench Press'}).click();
+    sheetCheck(await ds.evaluate(() => document.getElementById('toast-region').matches(':popover-open')) &&
+      (await ds.locator('#toast-region').innerText()).includes('Exercise archived'),
+      'a toast raised from a sheet is restacked above it');
+    sheetCheck((await sheetState()).open && (await sheetState()).focus === 'detail-archive' &&
+      await ds.locator('#detail-sub').innerText() === 'Push · archived',
+      'archiving keeps the sheet open, marked archived, focus on the same control');
+    await benchSheet.getByRole('button', {name:'Edit Bench Press'}).click();
+    sheetCheck(!(await sheetState()).open && (await sheetState()).focus === 'ex-edit-form' &&
+      await ds.locator('#ex-edit-form [data-field="name"]').inputValue() === 'Bench Press',
+      'editing an archived exercise from its sheet reveals its row and opens the editor there');
+    await ds.getByRole('button', {name:'Cancel', exact:true}).click();
+
+    await ds.getByRole('button', {name:'History', exact:true}).click();
+    await ds.locator('.hist-row').click();
+    const sessionSheet = ds.getByRole('dialog', {name:'Push day'});
+    sheetCheck((await sessionSheet.locator('.detail-stats').innerText()).includes('2 sets') &&
+      (await sessionSheet.innerText()).includes('Felt strong') && await sessionSheet.locator('.hist-ex').count() === 1,
+      'a logged session opens in the same sheet with its totals, note and exercises');
+    await sessionSheet.getByRole('button', {name:'Edit session'}).click();
+    sheetCheck(!(await sheetState()).open && (await sheetState()).focus === 'hedit' && await ds.locator('#hedit input').count() > 0,
+      'Edit session closes the sheet and opens the editor under the row');
+    await ds.getByRole('button', {name:'Done', exact:true}).click();
+
+    await ds.evaluate(() => { window.testAPI.state.exercises.find(e => e.id === 'ds-bench').archived = false; window.testAPI.startRoutine('ds-push'); });
+    await ds.evaluate(() => { window.testAPI.toggleSet(window.testAPI.state.activeWorkout.exercises[0].sets[0].id); window.testAPI.finishWorkout(); });
+    const finished = await ds.evaluate(() => window.testAPI.state.workouts[0].id);
+    sheetCheck(await ds.evaluate(id => window.testAPI.ui.view === 'history' && window.testAPI.ui.detail &&
+      window.testAPI.ui.detail.id === id && document.querySelector('#detail-dlg').open, finished),
+      'finishing a workout opens it in its sheet as the summary');
+    await ds.screenshot({path:'/tmp/liftlog-session-sheet.png'});
+    await ds.close();
+    console.log('PASS detail sheets: ' + sheetChecks.length + ' checks across routines, exercises and history');
 
     const touch = await browser.newPage({ viewport:{width:320,height:568}, isMobile:true, hasTouch:true });
     touch.on('pageerror', e => errors.push(e.message));

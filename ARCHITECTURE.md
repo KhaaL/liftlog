@@ -297,6 +297,69 @@ does not touch — so a changing inset would move the header without ever firing
 the observer, leaving `--header-h` stale and parking the session strip
 underneath the header.
 
+## Looking at one item: the detail sheet
+
+Routines, Exercises and History are three lists with the same question behind
+every row: *what is in this one?* They used to answer it three ways. A routine
+could only be looked into by opening its editor; an exercise showed what fit on
+its row and nothing more; a session rolled open inline, pushing the rest of the
+list down under it. Each row also carried its own strip of buttons, four of
+them on a routine and an exercise, which on a phone was most of the row.
+
+There is now one answer: **tap a row, and the item opens in a sheet.** It is
+the session sheet's frame (`.dlg-sheet`: full-screen on a phone, a centred
+560px card on a desktop, over a scrim) as a second static dialog,
+`#detail-dlg`, driven by `ui.detail = { kind, id }`. A kind is one entry in
+`DETAIL_SHEETS`, which names its view, how to find the item, and four pure
+builders: title, subtitle, body and footer actions. The frame, its refill,
+its focus handling and its closing are shared with the session sheet
+(`refillSheet()`, `wireSheet()`), so a fourth kind is one entry.
+
+| Kind | Body | Footer (primary last) |
+| --- | --- | --- |
+| `routine` | every exercise in order with its target — sets × range, load, RIR, the same words as the workout's target tag — and what was lifted last time; either-of and superset pairs keep the editor's bracket | Delete · Duplicate · Edit · **Start** |
+| `exercise` | its definition, note and how-to link; bests, the last five sessions, the routines that use it | Delete · Merge… · Archive/Restore · **Edit** |
+| `workout` | duration, sets and volume (the row hides them on a phone), the note, every exercise's completed sets | **Edit session** |
+
+The rules that make it one pattern rather than three:
+
+- **The sheet is for looking.** Nothing in it is editable. **Edit** closes it
+  and opens the item's editor where each kind has always been edited — the
+  routine editor in place of the list, an exercise's form in its row, a
+  session's editor under its row — and focuses the editor's container, which
+  scrolls it into view without putting a phone keyboard over the form
+  (`editFromDetail()`). One editor per kind, not a second one inside a sheet.
+- **The row is the target.** `.list-open` is one button stretched over the
+  whole `<li>` by its `::after`, named by the item alone
+  (`aria-label`) and described by its summary line (`aria-describedby`), so a
+  screen reader does not read the whole row as the button's name. A link cannot
+  sit inside a button, so the exercise how-to link moved into the sheet.
+- **A row keeps at most its one frequent action.** A routine's **Start** stays
+  on the row, beside the button and above the stretch, because starting is what
+  that list is for; below 560px it takes a line of its own so the name keeps
+  the full width. Everything else is in the footer.
+- **The footer has a fixed order.** The destructive action alone at the left,
+  the primary at the right; on a phone the primary takes the bottom row to
+  itself, under the thumb, however wide the other labels happen to be.
+- **Closing returns focus to the row** (`closeDetail()`), whichever way it
+  closes — the X, Esc, the scrim, Android's back gesture. A sheet belongs to its
+  view: navigating away closes it, and `normalizeSelections()` drops one whose
+  item has gone (deleted from the sheet itself, or replaced by an import).
+- **Some flows arrive at a sheet.** *View last session* on a load result opens
+  that session's sheet focused on the exercise; finishing a workout opens the
+  finished session's sheet as its summary; duplicating a routine from its
+  sheet moves the sheet to the copy, which is what you want to edit next.
+
+Both sheets rise into place (`sheet-in`, 200ms) instead of appearing, so they
+read as a layer over the page rather than the page changing; only on opening,
+since a refill never restarts it, and reduced motion turns it off with
+everything else.
+
+A toast raised while a sheet is open would be painted under it — everything
+that is not in the top layer is — so `#toast-region` is a manual popover that
+`toast()` re-shows above whichever dialog opened since, and `liftToasts()`
+lifts it clear of an open sheet's footer the way it clears the action bar.
+
 ## Touch
 
 The primary device is a phone held in one hand in a gym, which is a set of
@@ -1001,8 +1064,10 @@ an OS switch, but only while the theme is `system`; a pinned theme ignores it.
   the page and swallowing clicks. See `.dlg-wide[open]` and `.dlg-sheet[open]`.
 - **A dialog the app opens must be told when the user closes it.** Esc and a
   click on the scrim close a `<dialog>` without going through an action, so
-  `#overview-dlg` listens for `close` and writes `ui.overviewOpen` back —
-  guarded, so the `close()` a render just issued does not start another render.
+  both sheets listen for `close` (`wireSheet()`) and write `ui.overviewOpen` or
+  `ui.detail` back — guarded, so the `close()` a render just issued does not
+  start another render. The event is queued, not synchronous: a test that
+  presses Esc has to wait for it to land.
   Anything gating on "is a dialog open" should ask the document
   (`document.querySelector('dialog[open]')`) rather than naming two of them and
   silently missing the third, which is what the shortcut guard used to do.
@@ -1086,6 +1151,16 @@ The session sheet needs its modal edges checked: Esc, the scrim, the X and
 or an add refills it without it blinking shut; keyboard shortcuts do not fire
 behind it; discarding raises the confirm dialog *over* it and closes both; and
 on a phone the page behind must not scroll.
+
+The detail sheet needs the same edges, once per kind: open a routine, an
+exercise and a session by tapping anywhere on the row (beside a routine's Start
+too, which must start rather than open); close each by the X, Esc, the scrim
+and — on Android — the back gesture, and check focus lands on the row it came
+from. Deleting from a sheet raises the confirm over it and closes both.
+Archive an exercise from its sheet and check the toast is readable above it;
+then Edit it with archived exercises hidden, which must still find its row.
+Finish a workout and check its sheet opens as the summary, with the backup
+reminder, when due, above it.
 
 Dragging a row is worth its own pass, by finger as well as by mouse. A drag
 that starts anywhere but the grip must scroll the sheet instead. A drag that

@@ -527,7 +527,6 @@ kbd{
 }
 .how-to:hover{ text-decoration:underline; }
 .how-to .ic{ width:14px; height:14px; }
-.list-main .how-to{ margin-top:2px; }
 .tag{
   font-size:var(--fs-xs); font-weight:650; padding:2px 8px; border-radius:99px;
   border:1px solid var(--border-strong); color:var(--muted); background:var(--surface-2);
@@ -741,6 +740,29 @@ kbd{
 .list-name{ font-weight:650; }
 .list-meta{ color:var(--muted); font-size:var(--fs-xs); margin-top:1px; }
 .list-actions{ display:flex; gap:6px; flex-wrap:wrap; }
+/* A row that opens its item's sheet is a button stretched over the whole row
+   (its ::after covers the <li>), so the target is the row rather than the text
+   inside its padding. Anything else on the row — a routine's Start — sits
+   beside the button, never inside it, and above the stretch. On a phone it
+   takes a line of its own, which leaves the name the full width. */
+.list-row.is-openable{ position:relative; padding:0; gap:0; flex-wrap:nowrap; }
+.list-open{
+  appearance:none; background:none; border:0; font:inherit; color:inherit; text-align:left; cursor:pointer;
+  flex:1; min-width:0; display:flex; align-items:center; gap:var(--sp-3);
+  padding:var(--sp-3) var(--sp-4);
+}
+.list-open::after{ content:""; position:absolute; inset:0; }
+.list-open .list-main{ min-width:0; }
+.list-open .list-name,.list-open .list-meta{ display:block; }
+.list-open > .chev{ flex:none; margin-left:auto; color:var(--muted); }
+.list-row.is-openable .list-actions{ position:relative; z-index:1; flex:none; padding-right:var(--sp-4); }
+/* the button takes the line, not the actions: a full-width actions box would
+   sit above the stretch and swallow taps beside Start */
+@media (max-width:560px){
+  .list-row.is-openable{ flex-wrap:wrap; }
+  .list-row.is-openable .list-open{ flex-basis:100%; }
+  .list-row.is-openable .list-actions{ padding:0 var(--sp-4) var(--sp-3); margin-top:calc(-1 * var(--sp-1)); }
+}
 
 .hist-row{ width:100%; text-align:left; background:none; border:0; border-bottom:1px solid var(--border); cursor:pointer; padding:var(--sp-3) var(--sp-4); display:grid; grid-template-columns:minmax(170px,2.2fr) repeat(3,minmax(70px,1fr)) 24px; gap:var(--sp-3); align-items:center; }
 .hist-row:last-child{ border-bottom:0; }
@@ -769,8 +791,6 @@ kbd{
 .hist-ex h4{ margin:0 0 var(--sp-1); font-size:var(--fs-sm); font-weight:650; }
 .hist-sets{ color:var(--muted); font-size:var(--fs-sm); font-variant-numeric:tabular-nums; }
 .hist-ex h4 .top-e1rm{ font-weight:400; }
-.hist-row .chev{ transition:transform .15s ease; }
-.hist-row .is-open .chev{ transform:rotate(90deg); }
 .hedit-name{ flex:1; min-width:160px; }
 .hedit-unit{ width:120px; }
 @media (max-width:680px){
@@ -1040,8 +1060,15 @@ dialog::backdrop{ background:rgb(15 17 20 / .5); }
    in the same visual language as the exercise being logged, which read as more
    of the same screen rather than a different question. */
 .dlg-sheet{ max-width:min(560px,calc(100vw - 32px)); max-height:min(86vh,780px); }
-.dlg-sheet[open]{ display:flex; flex-direction:column; }
+/* A sheet rises into place rather than appearing, so it reads as a layer over
+   the page instead of the page changing underneath. Only on opening: the
+   bodies are refilled in place, which never restarts it. Reduced motion
+   switches it off with every other animation. */
+@keyframes sheet-in{ from{ opacity:0; transform:translateY(24px); } }
+@keyframes scrim-in{ from{ opacity:0; } }
+.dlg-sheet[open]{ display:flex; flex-direction:column; animation:sheet-in .2s cubic-bezier(.2,.8,.2,1); }
 .dlg-sheet::backdrop{ background:rgb(15 17 20 / .62); }
+.dlg-sheet[open]::backdrop{ animation:scrim-in .2s ease; }
 .sheet-head{
   display:flex; align-items:flex-start; gap:var(--sp-3); flex:none;
   padding:var(--sp-4) var(--sp-4) var(--sp-3);
@@ -1059,6 +1086,44 @@ dialog::backdrop{ background:rgb(15 17 20 / .5); }
 /* the rows bring their own padding and dividers, so the first one must not
    also carry the panel's top border */
 .sheet-body > .done-ex-row:first-child{ border-top:0; }
+/* The detail sheet: one item, read-only. Sections are divided the way the
+   session sheet's rows are; its actions are the footer, with the destructive
+   one pushed to the far end from the primary. */
+.detail-section{ padding:var(--sp-4); border-bottom:1px solid var(--border); }
+.detail-section:last-child{ border-bottom:0; }
+.detail-section > h3{
+  font-size:var(--fs-xs); text-transform:uppercase; letter-spacing:.05em;
+  color:var(--muted); font-weight:650; margin-bottom:var(--sp-2);
+}
+.detail-facts{ display:grid; grid-template-columns:max-content 1fr; gap:var(--sp-1) var(--sp-4); font-size:var(--fs-sm); margin:0; }
+.detail-facts dt{ color:var(--muted); }
+.detail-facts dd{ margin:0; min-width:0; overflow-wrap:anywhere; font-variant-numeric:tabular-nums; }
+.detail-note{ color:var(--muted); font-size:var(--fs-sm); margin-top:var(--sp-3); }
+.detail-list{ list-style:none; margin:0; padding:0; font-size:var(--fs-sm); }
+.detail-list li{ padding:var(--sp-1) 0; }
+.detail-list .muted{ font-variant-numeric:tabular-nums; }
+/* 44px of gutter on every row, paired or not, so names line up and a pair's
+   bracket has the same room it has in the routine editor's grip column */
+.detail-item{ padding:var(--sp-3) var(--sp-4) var(--sp-3) 44px; border-bottom:1px solid var(--border); }
+.detail-item:last-child{ border-bottom:0; }
+.detail-item-name{ font-weight:650; }
+.detail-item-target{ font-size:var(--fs-sm); font-variant-numeric:tabular-nums; margin-top:1px; }
+.detail-item-last{ color:var(--muted); font-size:var(--fs-xs); margin-top:2px; font-variant-numeric:tabular-nums; }
+.detail-actions .btn-danger{ margin-right:auto; }
+/* On a phone the primary action takes the bottom row to itself, under the
+   thumb, whatever the other labels happen to measure; the rest share the row
+   above it. Wrapping wherever the widths fell put Edit alone under Restore. */
+@media (max-width:640px){
+  .detail-actions .btn-primary{ order:1; flex:1 0 100%; }
+}
+/* and below 400px Duplicate keeps its icon and gives up its label (its
+   aria-label still names it), as the timer toggle does */
+@media (max-width:400px){
+  #detail-dup span{ display:none; }
+  #detail-dup{ min-width:44px; padding-inline:10px; }
+}
+.detail-stats{ display:flex; flex-wrap:wrap; gap:var(--sp-1) var(--sp-4); font-size:var(--fs-sm); font-variant-numeric:tabular-nums; }
+.detail-stats b{ font-weight:650; }
 @media (max-width:640px){
   .dlg-sheet{
     max-width:none; width:100%; height:100%; max-height:none;
@@ -1105,11 +1170,14 @@ pre.code code{ background:none; border:0; padding:0; font-size:inherit; white-sp
   table.fields tr:last-child{ border-bottom:0; }
 }
 
-/* --toast-lift is set from the action bar's measured height in render(), so a
-   toast never lands on top of the primary button. */
+/* --toast-lift is set from where the action bar — or an open sheet's footer —
+   actually is (liftToasts()), so a toast never lands on top of the primary
+   button. */
 #toast-region{
-  position:fixed; left:50%; bottom:calc(var(--toast-lift, 20px) + env(safe-area-inset-bottom)); transform:translateX(-50%);
+  position:fixed; inset:auto auto calc(var(--toast-lift, 20px) + env(safe-area-inset-bottom)) 50%; transform:translateX(-50%);
   z-index:60; display:flex; flex-direction:column; gap:var(--sp-2); align-items:center; pointer-events:none;
+  /* a manual popover (see toast()); this undoes the UA's popover box */
+  margin:0; border:0; padding:0; background:none; overflow:visible; color:inherit;
 }
 .toast{
   background:var(--text); color:var(--bg); font-size:var(--fs-sm); font-weight:600;
@@ -1279,7 +1347,7 @@ pre.code code{ background:none; border:0; padding:0; font-size:inherit; white-sp
 /* The platform's own tap flash fights .btn:active, and double-tap-to-zoom puts
    a delay on every control that sits close to its neighbour by design. */
 button,input,select,textarea,label,a{ -webkit-tap-highlight-color:transparent; }
-button,.btn,.icon-btn,.nav-btn,.strip-step,.strip-num,.set-num,.done-ex-row,.hist-row{
+button,.btn,.icon-btn,.nav-btn,.strip-step,.strip-num,.set-num,.done-ex-row,.hist-row,.list-open{
   touch-action:manipulation;
 }
 /* After the coarse-pointer block above, which grows the tabs: on a landscape
@@ -1327,7 +1395,7 @@ button,.btn,.icon-btn,.nav-btn,.strip-step,.strip-num,.set-num,.done-ex-row,.his
   </div>
 </footer>
 
-<div id="toast-region" role="status" aria-live="polite"></div>
+<div id="toast-region" role="status" aria-live="polite" popover="manual"></div>
 <div id="live" class="sr-only" role="status" aria-live="polite"></div>
 
 <dialog id="dlg" aria-labelledby="dlg-title" aria-describedby="dlg-body">
@@ -1366,6 +1434,20 @@ button,.btn,.icon-btn,.nav-btn,.strip-step,.strip-num,.set-num,.done-ex-row,.his
   <div class="dlg-actions">
     <button type="button" class="btn btn-primary" data-action="close-overview">Back to workout</button>
   </div>
+</dialog>
+
+<dialog id="detail-dlg" class="dlg-sheet" aria-labelledby="detail-title">
+  <div class="sheet-head">
+    <div>
+      <h2 id="detail-title" tabindex="-1"></h2>
+      <p class="sheet-sub" id="detail-sub"></p>
+    </div>
+    <button type="button" class="icon-btn sheet-close" id="detail-close" data-action="detail-close" aria-label="Close">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </div>
+  <div class="sheet-body" id="detail-body"></div>
+  <div class="dlg-actions detail-actions" id="detail-actions"></div>
 </dialog>
 
 <dialog id="schema-dlg" class="dlg-wide" aria-labelledby="schema-title">
@@ -2599,9 +2681,9 @@ function freshUI(){
     view:'today',
     prevView:null,
     selectedRoutineId:null,
-    expandedWorkouts:new Set(),
     expandedDone:new Set(),     /* keyed by exercise index within the active workout */
     overviewOpen:false,         /* whether the session-overview drawer is expanded */
+    detail:null,                /* {kind, id} of the item shown in the detail sheet */
     notesOpen:false,            /* session-notes field expanded (auto if a note exists) */
     routineDraft:null,          /* object while editing a routine */
     routineError:'',
@@ -2645,16 +2727,19 @@ function resetUI(){
   ui.view = view;
 }
 /* Editors are scoped to the view that owns them, so leaving a view closes them.
-   Every navigation path goes through here — nav buttons and shortcuts alike. */
-function navigate(view){
+   Every navigation path goes through here — nav buttons and shortcuts alike.
+   A detail sheet belongs to its view too; `detail` opens one on arrival. */
+function navigate(view, detail){
   if (ui.view !== view){
     ui.routineDraft = null; ui.routineError = '';
     ui.exerciseDraft = null; ui.showExerciseForm = false; ui.exerciseFormError = '';
     ui.mergeExerciseId = null; ui.mergeExerciseError = '';
     ui.editWorkoutId = null;
+    ui.detail = null;
     if (view !== 'history') ui.historyLinksOpen = false;
     ui.view = view;
   }
+  if (detail) ui.detail = detail;
   render();
 }
 
@@ -2952,7 +3037,8 @@ if (window.matchMedia){
    appear. Measured from where the bar actually is on screen rather than from
    its height, because at the very end of the page it is no longer pinned. */
 function liftToasts(){
-  const bar = $('.actionbar');
+  /* an open sheet covers the bar, and its own actions sit on that edge instead */
+  const bar = $('dialog.dlg-sheet[open] .dlg-actions') || $('.actionbar');
   let lift = 20;
   if (bar){
     const r = bar.getBoundingClientRect();
@@ -2961,9 +3047,18 @@ function liftToasts(){
   }
   document.body.style.setProperty('--toast-lift', lift + 'px');
 }
+/* The region is a manual popover so that it can sit above a modal dialog:
+   anything else is painted underneath the top layer, and a sheet is open for
+   half the actions that toast (archive, duplicate, a finished workout and the
+   backup reminder after it). Showing it again moves it above whichever dialog
+   opened since. Without popover support it is an ordinary fixed element. */
 function toast(msg){
   liftToasts();
   const region = $('#toast-region');
+  if (region.showPopover){
+    if (region.matches(':popover-open') && $('dialog[open]')) region.hidePopover();
+    if (!region.matches(':popover-open')) region.showPopover();
+  }
   const el = document.createElement('div');
   el.className = 'toast';
   el.textContent = msg;
@@ -3936,8 +4031,11 @@ function finishWorkout(){
     sortWorkouts();
     state.activeWorkout = null;
     save(); loadTimer(state.settings.defaultRest);
-    ui.expandedWorkouts.add(w.id);
-    navigate('history');
+    /* the finished session opens in its sheet, as the summary of what was
+       done; a search left in History would hide its row once it closed */
+    ui.historyQuery = '';
+    ui.focus = 'detail-title';
+    navigate('history', { kind:'workout', id:w.id });
     window.scrollTo(0,0);
     toast('Workout saved — ' + fmtNum(workoutVolume(w)) + ' ' + unitLabel() + ' total');
     maybeNagBackup();
@@ -4172,6 +4270,8 @@ function duplicateRoutine(id){
   copy.id = uid(); copy.name = r.name + ' (copy)';
   copy.items.forEach(it => it.id = uid());
   state.routines.push(copy);
+  /* from its sheet, the copy is what you want to look at (and edit) next */
+  if (ui.detail && ui.detail.kind === 'routine' && ui.detail.id === id) ui.detail = { kind:'routine', id:copy.id };
   save(); render(); toast('Duplicated “' + r.name + '”');
 }
 function deleteRoutine(id){
@@ -5305,53 +5405,78 @@ function render(){
   liftToasts();      /* the bar's height changes with the sheet and the set row */
   syncWakeLock();
   /* before applyFocus: showModal() takes the focus, so anything this render
-     wanted focused has to be put back afterwards — and a target inside the
+     wanted focused has to be put back afterwards — and a target inside a
      sheet has to exist by then. */
-  syncOverviewSheet();
+  const sheetOpen = [syncOverviewSheet(), syncDetailSheet()].some(Boolean);
+  document.documentElement.classList.toggle('sheet-open', sheetOpen);
   applyFocus();
 }
-/* The overview sheet is a modal dialog, so it lives outside #main and is not
-   rebuilt by the line above. Only its body is refilled: calling showModal() on
-   an already-open dialog throws, and re-creating the element would flash the
-   backdrop on every reorder. */
+/* Both sheets are modal dialogs, so they live outside #main and are not
+   rebuilt by the line above. Only their contents are refilled: calling
+   showModal() on an already-open dialog throws, and re-creating the element
+   would flash the backdrop on every reorder.
+
+   Refilling destroys whatever was focused inside, and renders arrive from
+   elsewhere too (a storage answer landing, a rest tick that finishes).
+   Anything the render did not itself ask to focus is put back, through the
+   same ui.focus applyFocus() uses a few lines later. */
+function refillSheet(dlg, fill){
+  const keep = (!ui.focus && dlg.contains(document.activeElement) && document.activeElement.id) || '';
+  fill();
+  if (keep) ui.focus = keep;
+  if (!dlg.open) dlg.showModal();
+}
 function syncOverviewSheet(){
   const dlg = $('#overview-dlg');
-  if (!dlg) return;
+  if (!dlg) return false;
   const w = state.activeWorkout;
-  const open = !!(w && ui.overviewOpen);
-  if (open){
-    const body = $('#overview-dlg-body');
-    /* Refilling the body destroys whatever was focused inside it, and renders
-       arrive from elsewhere too (a storage answer landing, a rest tick that
-       finishes). Anything the render did not itself ask to focus is put back,
-       through the same ui.focus applyFocus() uses a few lines later. */
-    const keep = (!ui.focus && body.contains(document.activeElement) && document.activeElement.id) || '';
-    body.innerHTML = overviewSheetHTML(w);
-    $('#overview-sub').textContent = overviewSubtitle(w);
-    if (keep) ui.focus = keep;
-    if (!dlg.open) dlg.showModal();
-  } else if (dlg.open){
-    dlg.close();
+  if (w && ui.overviewOpen){
+    refillSheet(dlg, () => {
+      $('#overview-dlg-body').innerHTML = overviewSheetHTML(w);
+      $('#overview-sub').textContent = overviewSubtitle(w);
+    });
+    return true;
   }
-  document.documentElement.classList.toggle('sheet-open', open);
+  if (dlg.open) dlg.close();
+  return false;
 }
-/* Esc and a click on the scrim close the dialog without going through an
-   action, so ui has to be told. The guard keeps the close() this render may
-   just have issued from starting another one. */
-function wireOverviewSheet(){
-  const dlg = $('#overview-dlg');
-  if (!dlg) return;
+function syncDetailSheet(){
+  const dlg = $('#detail-dlg');
+  if (!dlg) return false;
+  const item = detailItem(ui.detail);
+  if (item){
+    const sheet = DETAIL_SHEETS[ui.detail.kind];
+    refillSheet(dlg, () => {
+      $('#detail-title').textContent = sheet.title(item);
+      $('#detail-sub').textContent = sheet.sub(item);
+      $('#detail-close').setAttribute('aria-label', 'Close ' + sheet.noun);
+      $('#detail-body').innerHTML = sheet.body(item);
+      $('#detail-actions').innerHTML = sheet.actions(item);
+    });
+    return true;
+  }
+  if (dlg.open) dlg.close();
+  return false;
+}
+/* Esc, a click on the scrim and Android's back gesture close a dialog without
+   going through an action, so ui has to be told. The guard keeps the close()
+   a render may just have issued from starting another one. */
+function wireSheet(dlg, isOpen, onClose){
   dlg.addEventListener('close', () => {
-    /* Closing the sheet abandons a drag rather than dropping it: the rows stay
+    /* Closing a sheet abandons a drag rather than dropping it: the rows stay
        in the DOM behind a closed dialog, so without this the pointerup that
        follows an Escape would commit the order the row happened to be passing
        through. State is untouched, so the next open rebuilds from it. */
     cancelGesture();
-    document.documentElement.classList.remove('sheet-open');
-    if (!ui.overviewOpen) return;
-    closeOverview();
+    document.documentElement.classList.toggle('sheet-open', !!$('dialog.dlg-sheet[open]'));
+    if (isOpen()) onClose();
   });
   dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });
+}
+function wireSheets(){
+  const overview = $('#overview-dlg'), detail = $('#detail-dlg');
+  if (overview) wireSheet(overview, () => ui.overviewOpen, closeOverview);
+  if (detail) wireSheet(detail, () => !!ui.detail, closeDetail);
 }
 function closeOverview(){
   ui.overviewOpen = false;
@@ -5375,9 +5500,11 @@ function trackHeaderHeight(){
   if (window.ResizeObserver) new ResizeObserver(apply).observe(header, { box:'border-box' });
   else window.addEventListener('resize', apply);
 }
-/* Templates must not mutate ui while they build strings, so the two selections
-   that can dangle (a deleted routine, a deleted trend exercise) settle here. */
+/* Templates must not mutate ui while they build strings, so the selections
+   that can dangle (a deleted routine, a deleted trend exercise, the item a
+   detail sheet was showing) settle here. */
 function normalizeSelections(){
+  if (ui.detail && (!detailItem(ui.detail) || DETAIL_SHEETS[ui.detail.kind].view !== ui.view)) ui.detail = null;
   if (state.routines.length && !routineById(ui.selectedRoutineId))
     ui.selectedRoutineId = state.routines[0].id;
   const trendable = trendCandidates();
@@ -5606,6 +5733,16 @@ function htmlSessionNote(w){
     '<textarea id="wnotes" data-bind="wnotes" rows="4" placeholder="Optional — how did it feel? Supports **bold**, _italic_, # headings, - lists, [links](url)">' + esc(w.notes || '') + '</textarea></label></div>';
 }
 
+/* The bests worth quoting for one movement, as [label, value] pairs: here
+   beside the sets being logged, and in the exercise's detail sheet. */
+function bestBits(stats, ex){
+  const out = [], bodyweight = ex.unit === 'bw';
+  if (stats.e1rm > 0) out.push([bodyweight ? 'Best total e1RM' : 'Best e1RM', fmtNum(roundHalf(stats.e1rm)) + ' ' + unitLabel()]);
+  if (stats.volume > 0) out.push(['Best volume', fmtNum(stats.volume) + ' ' + unitLabel()]);
+  if (bodyweight && stats.e1rm <= 0 && stats.reps > 0) out.push(['Best set', stats.reps + ' reps']);
+  if (ex.unit === 'time' && stats.duration > 0) out.push(['Best hold', stats.duration + ' s']);
+  return out;
+}
 function htmlCurrentExercise(w, ex){
   const run = supersetRun(w, w.currentExerciseIndex);
   const next = w.exercises[run[run.length - 1] + 1] || null;
@@ -5621,10 +5758,7 @@ function htmlCurrentExercise(w, ex){
   const bits = [];
   const bit = (k, v) => bits.push('<span class="pp-item"><span class="pp-k">' + k + '</span><strong>' + v + '</strong></span>');
   if (prev) bit('Last · ' + esc(relDays(prev.date)), prev.sets.slice(0,4).map(s => setSummary(s, ex)).join(', '));
-  if (stats.e1rm > 0) bit(bodyweight ? 'Best total e1RM' : 'Best e1RM', fmtNum(roundHalf(stats.e1rm)) + ' ' + unitLabel());
-  if (stats.volume > 0) bit('Best volume', fmtNum(stats.volume) + ' ' + unitLabel());
-  if (bodyweight && stats.e1rm <= 0 && stats.reps > 0) bit('Best set', stats.reps + ' reps');
-  if (ex.unit === 'time' && stats.duration > 0) bit('Best hold', stats.duration + ' s');
+  bestBits(stats, ex).forEach(([k, v]) => bit(k, v));
   if (bits.length) prevHTML = '<div class="prev-perf">' + bits.join('') + '</div>';
 
   const currentIdx = ex.sets.findIndex(s => !s.completed);
@@ -5907,6 +6041,164 @@ function exerciseOptions(selected, skip){
     .join('');
 }
 
+/* ---------- DETAIL SHEET ---------- */
+/* Tapping a routine, an exercise or a logged session opens the same sheet:
+   what the item is, read-only, with everything you can do to it along the
+   bottom — the primary action at the right, the destructive one alone at the
+   left. An entry here is one kind of item; the frame, its focus handling and
+   its closing are shared with the session sheet (refillSheet, wireSheet).
+
+   Nothing is edited in the sheet. Edit closes it and opens the item's editor
+   in the page, where each kind has always been edited — so the sheet is only
+   ever for looking, and there is one editor per kind rather than two. */
+const DETAIL_SHEETS = {
+  routine:{
+    view:'routines', noun:'routine', find:id => routineById(id),
+    title:r => r.name, sub:r => routineSummary(r.items),
+    body:routineDetailHTML, actions:routineDetailActions
+  },
+  exercise:{
+    view:'exercises', noun:'exercise', find:id => exerciseById(id),
+    title:e => e.name, sub:e => e.category + (e.archived ? ' · archived' : ''),
+    body:exerciseDetailHTML, actions:exerciseDetailActions
+  },
+  workout:{
+    view:'history', noun:'session', find:id => state.workouts.find(w => w.id === id),
+    title:w => w.routineName, sub:w => fmtDate(w.startedAt) + ' · ' + relDays(w.startedAt),
+    body:htmlWorkoutDetail, actions:workoutDetailActions
+  }
+};
+function detailItem(d){
+  const sheet = d && DETAIL_SHEETS[d.kind];
+  return (sheet && sheet.find(d.id)) || null;
+}
+/* The row that opens a sheet is where focus goes back to when it closes. It
+   is named by its item alone; the summary line under the name describes it,
+   rather than every word in the row becoming the button's name. */
+function detailRowId(kind, id){ return 'open-' + kind + '-' + encodeURIComponent(id); }
+function detailRowAttrs(kind, id, label, describedBy){
+  return 'id="' + esc(detailRowId(kind, id)) + '" data-action="detail-open" data-kind="' + kind + '" ' +
+    'data-id="' + esc(id) + '" aria-haspopup="dialog" aria-label="' + esc(label) + '"' +
+    (describedBy ? ' aria-describedby="' + esc(describedBy) + '"' : '');
+}
+function openDetail(kind, id){
+  if (!DETAIL_SHEETS[kind] || !DETAIL_SHEETS[kind].find(id)) return;
+  ui.detail = { kind, id };
+  ui.focus = 'detail-title';
+  render();
+}
+function closeDetail(){
+  const d = ui.detail;
+  ui.detail = null;
+  if (d && d.kind === 'workout') ui.historyHighlight = null;
+  if (d) ui.focus = detailRowId(d.kind, d.id);
+  render();
+}
+/* Edit hands over to the page: the sheet closes and the item's own editor
+   opens where its row is, focused so that it is scrolled into view too. The
+   editor's container takes the focus rather than its first field, which on a
+   phone would put the keyboard over the form before anything was chosen. */
+function editFromDetail(start, focus){
+  ui.detail = null;
+  start();
+  ui.focus = focus;
+  render();
+}
+const detailBtn = (id, action, itemId, label, content, cls) =>
+  '<button type="button" class="btn' + (cls ? ' ' + cls : '') + '" id="' + id + '" data-action="' + action + '" ' +
+  'data-id="' + esc(itemId) + '" aria-label="' + esc(label) + '">' + content + '</button>';
+
+/* The target reads the way the workout's own target tag does. */
+function routineItemTarget(it, e){
+  const timed = e && e.unit === 'time';
+  let text = toNum(it.repsMax) > 0
+    ? it.sets + ' × ' + targetRangeLabel({ targetRepsMin:it.repsMin, targetRepsMax:it.repsMax }) + (timed ? ' s' : ' reps')
+    : plural(it.sets, 'set');
+  if (e && !timed && it.weight != null)
+    text += ' @ ' + (e.unit === 'bw' ? '+' : '') + fmtNum(it.weight) + ' ' + exerciseLoadLabel(e);
+  if (it.targetRir != null) text += ' · RIR ' + fmtNum(it.targetRir);
+  return text;
+}
+/* Pairs keep the routine editor's bracket, so an either-of or a superset looks
+   the same wherever the routine is drawn. */
+function routineDetailHTML(r){
+  if (!r.items.length) return '<div class="detail-section"><p class="muted small">No exercises yet — edit the routine to add some.</p></div>';
+  let html = '<div role="list" aria-label="Exercises">';
+  routineGroups(r.items).forEach(group => {
+    const pairStyle = group.length > 1 ? (group[0].supersetOf ? 'superset' : 'either') : '';
+    group.forEach((it, gi) => {
+      const e = exerciseById(it.exerciseId);
+      const name = e ? e.name : '(removed exercise)';
+      const partner = group.length > 1 && gi === 0 ? exerciseById(group[1].exerciseId) : null;
+      const last = e && lastPerformance(e.id);
+      html += '<div role="listitem" class="detail-item' +
+          (pairStyle ? ' ' + pairStyle + '-pair ' + pairStyle + (gi === 0 ? '-first' : '-last') : '') + '">' +
+        '<p class="detail-item-name">' + esc(name) +
+          (gi === 0 && group.length > 1 ? '<span class="sr-only">' + (pairStyle === 'superset' ? ', in a superset with ' : ', or ') +
+            esc(partner ? partner.name : 'its alternative') + '</span>' : '') + '</p>' +
+        '<p class="detail-item-target">' + esc(routineItemTarget(it, e)) + '</p>' +
+        (last ? '<p class="detail-item-last">Last · ' + esc(relDays(last.date)) + ' — ' +
+          last.sets.slice(0,4).map(s => setSummary(s, e)).join(', ') + (last.sets.length > 4 ? ', …' : '') + '</p>' : '') +
+      '</div>';
+    });
+  });
+  return html + '</div>';
+}
+function routineDetailActions(r){
+  return detailBtn('detail-del', 'routine-del', r.id, 'Delete ' + r.name, IC.trash + '<span class="sr-only">Delete</span>', 'btn-danger') +
+    detailBtn('detail-dup', 'routine-dup', r.id, 'Duplicate ' + r.name, IC.copy + '<span>Duplicate</span>') +
+    detailBtn('detail-edit', 'routine-edit', r.id, 'Edit ' + r.name, IC.pen + '<span>Edit</span>') +
+    detailBtn('detail-start', 'routine-start', r.id, 'Start ' + r.name, IC.play + '<span>Start</span>', 'btn-primary');
+}
+
+/* Most recent first, the completed sets of each session that logged it. */
+function recentSessions(exId, limit){
+  const out = [];
+  for (const w of sortedWorkouts()){
+    const block = w.exercises.find(x => canonicalExerciseId(x.exerciseId) === exId && x.sets.some(s => s.completed));
+    if (block) out.push({ date:w.startedAt, block, sets:block.sets.filter(s => s.completed) });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+function exerciseDetailHTML(e){
+  const facts = [['Measured', e.unit === 'bw' ? 'bodyweight + ' + exerciseLoadLabel(e) : exerciseLoadLabel(e)],
+    ['Movement', e.movementFamily.replace(/_/g,' ')]];
+  if (e.equipmentKey) facts.push(['Equipment', e.equipmentKey]);
+  const dl = rows => '<dl class="detail-facts">' + rows.map(([k, v]) => '<dt>' + esc(k) + '</dt><dd>' + v + '</dd>').join('') + '</dl>';
+  let html = '<div class="detail-section">' + dl(facts.map(([k, v]) => [k, esc(v)])) +
+    (e.notes ? '<p class="detail-note quote">“' + esc(e.notes) + '”</p>' : '') +
+    htmlHowTo(e.url, e.name) + '</div>';
+
+  const bests = bestBits(exerciseStats(e.id), e);
+  const recent = recentSessions(e.id, 5);
+  html += '<div class="detail-section"><h3>Performance</h3>' +
+    (bests.length ? dl(bests) : '') +
+    (recent.length
+      ? '<ul class="detail-list' + (bests.length ? ' mt-3' : '') + '" aria-label="Recent sessions">' + recent.map(x =>
+          '<li><span class="muted xs">' + fmtDate(x.date) + ' · ' + esc(relDays(x.date)) + '</span><br>' +
+          x.sets.map(s => setSummary(s, x.block)).join(', ') + '</li>').join('') + '</ul>'
+      : '<p class="muted small">Not logged yet.</p>') +
+  '</div>';
+
+  const routines = state.routines.filter(r => r.items.some(it => it.exerciseId === e.id));
+  html += '<div class="detail-section"><h3>In routines</h3>' +
+    (routines.length ? '<ul class="detail-list">' + routines.map(r => '<li>' + esc(r.name) + '</li>').join('') + '</ul>'
+                     : '<p class="muted small">Not in any routine.</p>') + '</div>';
+  return html;
+}
+function exerciseDetailActions(e){
+  return detailBtn('detail-del', 'ex-del', e.id, 'Delete ' + e.name, IC.trash + '<span class="sr-only">Delete</span>', 'btn-danger') +
+    detailBtn('detail-merge', 'ex-merge', e.id, 'Merge ' + e.name, 'Merge…') +
+    '<button type="button" class="btn" id="detail-archive" data-action="ex-archive" data-id="' + esc(e.id) + '" ' +
+      'data-archived="' + (!e.archived) + '" aria-label="' + (e.archived ? 'Restore ' : 'Archive ') + esc(e.name) + '">' +
+      (e.archived ? 'Restore' : 'Archive') + '</button>' +
+    detailBtn('detail-edit', 'ex-edit', e.id, 'Edit ' + e.name, IC.pen + '<span>Edit</span>', 'btn-primary');
+}
+function workoutDetailActions(w){
+  return detailBtn('detail-edit', 'history-edit', w.id, 'Edit session', IC.pen + '<span>Edit session</span>', 'btn-primary');
+}
+
 /* ---------- ROUTINES ---------- */
 function viewRoutines(){
   const head = '<div class="view-head"><div><h1>Routines</h1>' +
@@ -5925,16 +6217,17 @@ function viewRoutines(){
   html += '<ul class="list">';
   state.routines.forEach(r => {
     const names = routineGroups(r.items).map(g => g.map(it => (exerciseById(it.exerciseId) || {}).name || '(removed)').join(' or ')).slice(0,4).join(', ');
-    html += '<li class="list-row">' +
-      '<div class="list-main">' +
-        '<p class="list-name">' + esc(r.name) + '</p>' +
-        '<p class="list-meta">' + routineSummary(r.items) + ' — ' + esc(names) + (routineGroups(r.items).length > 4 ? '…' : '') + '</p>' +
-      '</div>' +
+    /* The row opens the routine's sheet; Start stays beside it because
+       starting is what this list is for. Everything else is in the sheet. */
+    html += '<li class="list-row is-openable">' +
+      '<button type="button" class="list-open" ' + detailRowAttrs('routine', r.id, r.name, detailRowId('routine', r.id) + '-meta') + '>' +
+        '<span class="list-main">' +
+          '<span class="list-name">' + esc(r.name) + '</span>' +
+          '<span class="list-meta" id="' + esc(detailRowId('routine', r.id) + '-meta') + '">' + routineSummary(r.items) + ' — ' + esc(names) + (routineGroups(r.items).length > 4 ? '…' : '') + '</span>' +
+        '</span>' + IC.chev +
+      '</button>' +
       '<span class="list-actions">' +
         '<button type="button" class="btn btn-sm btn-primary" data-action="routine-start" data-id="' + esc(r.id) + '">' + IC.play + '<span>Start</span></button>' +
-        '<button type="button" class="btn btn-sm" data-action="routine-edit" data-id="' + esc(r.id) + '" aria-label="Edit ' + esc(r.name) + '">Edit</button>' +
-        '<button type="button" class="btn btn-sm" data-action="routine-dup" data-id="' + esc(r.id) + '" aria-label="Duplicate ' + esc(r.name) + '">' + IC.copy + '<span class="sr-only">Duplicate</span></button>' +
-        '<button type="button" class="btn btn-sm btn-danger" data-action="routine-del" data-id="' + esc(r.id) + '" aria-label="Delete ' + esc(r.name) + '">' + IC.trash + '<span class="sr-only">Delete</span></button>' +
       '</span></li>';
   });
   html += '</ul>';
@@ -5945,7 +6238,7 @@ function htmlRoutineEditor(){
   const d = ui.routineDraft;
   const groups = routineGroups(d.items);
   let html = '<section class="panel"><div class="pad">' +
-    '<form data-form="routine-save" id="routine-form">' +
+    '<form data-form="routine-save" id="routine-form" tabindex="-1">' +
       '<div class="form-row">' +
         '<label class="field flex-2"><span class="cap">Routine name</span>' +
         '<input type="text" data-bind="rdraft" data-field="name" value="' + esc(d.name) + '" placeholder="e.g. Upper Power" required></label>' +
@@ -6158,11 +6451,10 @@ function viewHistory(){
     (query ? '<p class="muted small mb-2">' + visible.length + ' of ' + ws.length + ' workouts match</p>' : '');
   html += '<div class="list" role="list">';
   visible.forEach(w => {
-    const open = ui.expandedWorkouts.has(w.id);
     const dur = fmtDuration(workoutDuration(w));
     const vol = workoutVolume(w);
     html += '<div role="listitem">' +
-      '<button type="button" class="hist-row" data-action="history-toggle" data-id="' + esc(w.id) + '" aria-expanded="' + open + '" aria-label="' + esc(w.routineName) + ', ' + fmtDate(w.startedAt) + '">' +
+      '<button type="button" class="hist-row" ' + detailRowAttrs('workout', w.id, w.routineName + ', ' + fmtDate(w.startedAt)) + '>' +
         /* One heading, not two competing ones. The session name is what the eye
            looks for in this list, so it carries the weight; the date and how
            long ago it was share the muted line under it, which keeps the time
@@ -6176,9 +6468,11 @@ function viewHistory(){
         '<span class="hist-cell hide-m">' + dur + '</span>' +
         '<span class="hist-cell hide-m">' + plural(workoutSets(w), 'set') + '</span>' +
         '<span class="hist-cell hide-m"><b>' + fmtNum(vol) + '</b> ' + unitLabel() + '</span>' +
-        '<span class="muted self-end' + (open ? ' is-open' : '') + '">' + IC.chev + '</span>' +
+        '<span class="muted self-end">' + IC.chev + '</span>' +
       '</button>';
-    if (open) html += htmlWorkoutDetail(w);
+    /* Looking is the sheet's job; a session being edited opens here, under
+       its row, as a routine or an exercise opens its editor in the page. */
+    if (ui.editWorkoutId === w.id) html += htmlWorkoutEditor(w);
     html += '</div>';
   });
   html += '</div>';
@@ -6191,15 +6485,18 @@ function viewHistoryExercise(workoutId, index){
   if (!w || !w.exercises[index]) return;
   ui.historyQuery = '';
   ui.historyHighlight = {workoutId, index};
-  ui.expandedWorkouts.add(workoutId);
   ui.focus = historyExerciseDomId(workoutId, index);
-  navigate('history');
+  navigate('history', { kind:'workout', id:workoutId });
 }
+/* The body of a session's detail sheet. The list row hides duration, sets and
+   volume on a phone, so the sheet leads with them. */
 function htmlWorkoutDetail(w){
-  if (ui.editWorkoutId === w.id) return htmlWorkoutEditor(w);
-  let html = '<div class="hist-detail">' +
-    '<div class="hedit-bar"><button type="button" class="btn" data-action="history-edit" data-id="' + esc(w.id) + '">' + IC.pen + '<span>Edit session</span></button></div>';
-  if (w.notes) html += '<div class="small mb-3 md-note">' + mdToHtml(w.notes) + '</div>';
+  let html = '<div class="detail-section"><p class="detail-stats">' +
+    '<span>' + fmtDuration(workoutDuration(w)) + '</span>' +
+    '<span>' + plural(workoutSets(w), 'set') + '</span>' +
+    '<span><b>' + fmtNum(workoutVolume(w)) + '</b> ' + unitLabel() + '</span></p>' +
+    (w.notes ? '<div class="small mt-3 md-note">' + mdToHtml(w.notes) + '</div>' : '') + '</div>' +
+    '<div class="detail-section">';
   let shown = 0;
   w.exercises.forEach((ex, index) => {
     /* every completed set is shown: countForPR only decides what counts as a
@@ -6226,7 +6523,7 @@ function htmlWorkoutDetail(w){
 }
 /* Inline editor for a logged session: edits save to localStorage as you type. */
 function htmlWorkoutEditor(w){
-  let html = '<div class="hist-detail hedit" aria-label="Edit session">' +
+  let html = '<div class="hist-detail hedit" id="hedit" tabindex="-1" role="group" aria-label="Edit session">' +
     '<div class="hedit-bar"><strong>Edit session</strong>' +
       '<span class="hedit-hint muted xs">Changes save as you type</span>' +
       '<button type="button" class="btn btn-primary" data-action="history-edit-done">' + IC.check + '<span>Done</span></button></div>' +
@@ -6747,17 +7044,17 @@ function viewExercises(){
     if (ui.mergeExerciseId === e.id){ html += htmlExerciseMergeRow(e); return; }
     const usedBy = state.routines.filter(r => r.items.some(it => it.exerciseId === e.id)).length;
     const last = lastPerformance(e.id);
-    html += '<li class="list-row ex-row' + (e.archived ? ' is-archived' : '') + '"><div class="list-main">' +
-      '<p class="list-name">' + esc(e.name) + (e.archived ? ' <span class="tag tag-plain">Archived</span>' : '') + '</p>' +
-      '<p class="list-meta"><span class="tag tag-plain">' + esc(e.category) + '</span> ' +
+    /* The how-to link is in the sheet: a link cannot sit inside the button
+       that is the row. */
+    html += '<li class="list-row ex-row is-openable' + (e.archived ? ' is-archived' : '') + '">' +
+      '<button type="button" class="list-open" ' + detailRowAttrs('exercise', e.id, e.name + (e.archived ? ' (archived)' : ''),
+        detailRowId('exercise', e.id) + '-meta') + '><span class="list-main">' +
+      '<span class="list-name">' + esc(e.name) + (e.archived ? ' <span class="tag tag-plain">Archived</span>' : '') + '</span>' +
+      '<span class="list-meta" id="' + esc(detailRowId('exercise', e.id) + '-meta') + '"><span class="tag tag-plain">' + esc(e.category) + '</span> ' +
         esc(e.unit === 'bw' ? 'bodyweight + ' + exerciseLoadLabel(e) : exerciseLoadLabel(e)) + ' · ' + esc(e.movementFamily.replace(/_/g,' ')) +
         (e.equipmentKey ? ' · ' + esc(e.equipmentKey) : '') + (usedBy ? ' · in ' + plural(usedBy, 'routine') : '') +
-        (last ? ' · last ' + relDays(last.date) : '') + '</p>' +
-      (e.notes ? '<p class="list-meta quote">“' + esc(e.notes) + '”</p>' : '') + htmlHowTo(e.url, e.name) + '</div>' +
-      '<span class="list-actions"><button type="button" class="btn btn-sm" data-action="ex-edit" data-id="' + esc(e.id) + '" aria-label="Edit ' + esc(e.name) + '">Edit</button>' +
-      '<button type="button" class="btn btn-sm" data-action="ex-merge" data-id="' + esc(e.id) + '" aria-label="Merge ' + esc(e.name) + '">Merge…</button>' +
-      '<button type="button" class="btn btn-sm" data-action="ex-archive" data-id="' + esc(e.id) + '" data-archived="' + (!e.archived) + '" aria-label="' + (e.archived ? 'Restore ' : 'Archive ') + esc(e.name) + '">' + (e.archived ? 'Restore' : 'Archive') + '</button>' +
-      '<button type="button" class="btn btn-sm btn-danger" data-action="ex-del" data-id="' + esc(e.id) + '" aria-label="Delete ' + esc(e.name) + '">' + IC.trash + '<span class="sr-only">Delete</span></button></span></li>';
+        (last ? ' · last ' + relDays(last.date) : '') + '</span>' +
+      (e.notes ? '<span class="list-meta quote">“' + esc(e.notes) + '”</span>' : '') + '</span>' + IC.chev + '</button></li>';
   });
   html += '</ul>';
   if (!shown.length) html += '<p class="hint">No exercises match this view.</p>';
@@ -6775,7 +7072,7 @@ function loadModeOptions(selected){
 }
 function htmlExerciseMergeRow(source){
   const compatible = state.exercises.filter(e => e.id !== source.id && !e.archived && sameProgressionContract(source,e)).sort(compareExerciseNames);
-  return '<li class="list-row is-editing"><form data-form="ex-merge" data-source="' + esc(source.id) + '">' +
+  return '<li class="list-row is-editing"><form data-form="ex-merge" id="ex-merge-form" tabindex="-1" data-source="' + esc(source.id) + '">' +
     '<h3 class="panel-title">Merge “' + esc(source.name) + '”</h3>' +
     '<p class="hint mt-2">Routine and active-workout references move to the survivor. Finished workouts keep their original snapshots and join the same progression series for analytics.</p>' +
     '<label class="field mt-3"><span class="cap">Surviving exercise</span><select name="merge-target"' + (compatible.length ? '' : ' disabled') + '>' +
@@ -6839,7 +7136,7 @@ function htmlHowTo(rawUrl, name){
 function htmlExerciseEditRow(e){
   const d = ui.exerciseDraft;
   return '<li class="list-row is-editing">' +
-    '<form data-form="ex-save">' +
+    '<form data-form="ex-save" id="ex-edit-form" tabindex="-1">' +
       '<div class="ex-edit-grid">' +
         '<label class="field"><span class="cap">Name</span><input type="text" data-bind="edraft" data-field="name" value="' + esc(d.name) + '" required></label>' +
         '<label class="field"><span class="cap">Category</span><select data-bind="edraft" data-field="category">' + categoryOptions(d.category) + '</select>' +
@@ -7256,7 +7553,13 @@ const actions = {
   'timer-reset'(){ resetTimer(); },
 
   'routine-new'(){ ui.routineDraft = newRoutineDraft(null); ui.routineError = ''; render(); },
-  'routine-edit'(d){ const r = routineById(d.id); if (r){ ui.routineDraft = newRoutineDraft(r); ui.routineError=''; render(); } },
+  'detail-open'(d){ openDetail(d.kind, d.id); },
+  'detail-close'(){ closeDetail(); },
+
+  'routine-edit'(d){
+    const r = routineById(d.id);
+    if (r) editFromDetail(() => { ui.routineDraft = newRoutineDraft(r); ui.routineError = ''; }, 'routine-form');
+  },
   'routine-dup'(d){ duplicateRoutine(d.id); },
   'routine-del'(d){ deleteRoutine(d.id); },
   'routine-cancel'(){ ui.routineDraft = null; ui.routineError=''; render(); },
@@ -7275,19 +7578,31 @@ const actions = {
   'ex-form-toggle'(){ ui.showExerciseForm = !ui.showExerciseForm; ui.exerciseFormError=''; render();
     if (ui.showExerciseForm){ const f = $('[data-form="ex-new"] input[name="exname"]'); if (f) f.focus(); } },
   'ex-form-close'(){ ui.showExerciseForm = false; ui.exerciseFormError=''; render(); },
-  'ex-edit'(d){ const e = exerciseById(d.id); if (e){ ui.mergeExerciseId=null; ui.exerciseDraft = Object.assign({ url:'' }, deepCopy(e)); render(); } },
+  /* An archived exercise's sheet can still be open with archived rows hidden,
+     and its editor has to have a row to open in. */
+  'ex-edit'(d){
+    const e = exerciseById(d.id); if (!e) return;
+    editFromDetail(() => {
+      if (e.archived) ui.showArchivedExercises = true;
+      ui.mergeExerciseId = null; ui.exerciseDraft = Object.assign({ url:'' }, deepCopy(e));
+    }, 'ex-edit-form');
+  },
   'ex-edit-cancel'(){ ui.exerciseDraft = null; render(); },
   'ex-archived-toggle'(){ ui.showArchivedExercises = !ui.showArchivedExercises; render(); },
   'ex-archive'(d){ setExerciseArchived(d.id, d.archived === 'true'); },
-  'ex-merge'(d){ ui.exerciseDraft=null; ui.mergeExerciseId=d.id; ui.mergeExerciseError=''; render(); },
+  'ex-merge'(d){
+    const e = exerciseById(d.id); if (!e) return;
+    editFromDetail(() => {
+      if (e.archived) ui.showArchivedExercises = true;
+      ui.exerciseDraft = null; ui.mergeExerciseId = e.id; ui.mergeExerciseError = '';
+    }, 'ex-merge-form');
+  },
   'ex-merge-cancel'(){ ui.mergeExerciseId=null; ui.mergeExerciseError=''; render(); },
   'ex-del'(d){ deleteExercise(d.id); },
 
-  'history-toggle'(d){
-    ui.expandedWorkouts.has(d.id) ? ui.expandedWorkouts.delete(d.id) : ui.expandedWorkouts.add(d.id);
-    render();
+  'history-edit'(d){
+    if (state.workouts.some(w => w.id === d.id)) editFromDetail(() => { ui.editWorkoutId = d.id; }, 'hedit');
   },
-  'history-edit'(d){ ui.editWorkoutId = d.id; ui.expandedWorkouts.add(d.id); render(); },
   'history-edit-done'(){ ui.editWorkoutId = null; save(); render(); toast('Session updated'); },
   'history-links-open'(){ openHistoryLinks(); },
   'history-links-close'(){ ui.historyLinksOpen = false; render(); },
@@ -7943,7 +8258,7 @@ function init(){
 
   loadManifestThemeColor();
   trackHeaderHeight();
-  wireOverviewSheet();
+  wireSheets();
   $('#help-shortcuts').innerHTML = shortcutTable();
 
   save({ touch:false, remote:false, immediate:true }); /* persist a first seed without making it newer than remote */

@@ -18,13 +18,15 @@ they do not touch your real workout data or a remote backup. The security suite
 also mocks remote storage to exercise the real restore/validation path.
 
 - `regression.cjs`: samples, routine pairing, supersets (pair rules, group
-  cursor, rest per round, session-only lifetime), targets, historical exercise
+  cursor, rest per round, session-only lifetime), detail sheets (routine,
+  exercise and session sheets, their edit hand-over, focus return and toasts
+  above a sheet), targets, historical exercise
   reconciliation, measurement semantics, bodyweight/added-load analytics,
   archive/merge behavior, progression-series compatibility and movement-family
   metadata, progression stalls/load-increase cues, debounced persistence, automatic
   remote backup/startup restore, migration, restore, reload, and mobile layout.
   Screenshots are written under `/tmp`, including the routine editor, workout,
-  history progression, and mobile Settings views.
+  routine and session sheets, history progression, and mobile Settings views.
 - `security.cjs`: nested backup validation, duplicate ID scopes, legacy versions,
   cancellation, hostile IDs through imports and UI actions, remote validation,
   startup recovery download/discard, and failure to save a recovery copy.
