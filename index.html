@@ -812,6 +812,26 @@ kbd{
 .trend-picker{ min-width:180px; }
 .trend-foot{ display:flex; justify-content:space-between; gap:var(--sp-3); flex-wrap:wrap; margin-top:6px; }
 .trend-delta{ font-weight:650; }
+.trend-chart{ position:relative; cursor:crosshair; touch-action:manipulation; border-radius:var(--radius-sm); }
+.trend-chart:focus-visible{ outline:2px solid var(--focus); outline-offset:4px; }
+.trend-guide{ stroke:var(--border-strong); stroke-width:1; stroke-dasharray:3 3; }
+.trend-ring{ fill:none; stroke:var(--accent); stroke-width:2; }
+/* the card for one point: it floats above the point it describes, and takes
+   the pointer only once pinned, so hovering never catches on it */
+.trend-tip{
+  position:absolute; z-index:5; width:max-content; max-width:min(300px, 100%);
+  background:var(--surface); color:var(--text); border:1px solid var(--border-strong);
+  border-radius:var(--radius); box-shadow:var(--shadow-md); padding:var(--sp-2) var(--sp-3);
+  font-size:var(--fs-xs); line-height:1.45; pointer-events:none; cursor:auto;
+}
+.trend-tip p + p{ margin-top:2px; }
+.trend-tip .tt-value{ font-size:var(--fs-sm); font-variant-numeric:tabular-nums; }
+.trend-tip .tt-open{ display:none; margin-top:var(--sp-2); }
+.trend-tip.is-pinned{ pointer-events:auto; }
+.trend-tip.is-pinned .tt-open{ display:block; }
+.trend-tip.is-pinned .tt-hint{ display:none; }
+/* no pointer to hover with: the card opens pinned, so the hint would be wrong */
+@media (hover:none){ .trend-tip .tt-hint{ display:none; } }
 .records{ margin-top:var(--sp-4); padding-top:var(--sp-3); border-top:1px solid var(--border); }
 .records-title{ font-size:var(--fs-sm); font-weight:650; margin:0; }
 .records-list{ list-style:none; margin:var(--sp-2) 0 0; padding:0; font-size:var(--fs-sm); font-variant-numeric:tabular-nums; }
@@ -6691,14 +6711,26 @@ function exMetric(ex){
   };
 }
 /* Per-session bests for one exercise, oldest first. */
+/* Each also carries what produced it — the session, the set that made the
+   best and every completed set — which the trend chart shows on a point. */
 function exSessions(ex){
   const m = exMetric(ex);
   const out = [];
   sortedWorkouts().slice().reverse().forEach(w => {
-    const blocks = w.exercises.filter(x => canonicalExerciseId(x.exerciseId) === ex.id);
-    if (!blocks.length) return;
-    const best = blocks.reduce((top,b) => b.sets.filter(countsPR).reduce((a,s) => Math.max(a, m.of(s, w.startedAt)), top), 0);
-    if (best > 0) out.push({ date:w.startedAt, best });
+    let best = 0, bestSet = null, blockIndex = -1;
+    const sets = [];
+    w.exercises.forEach((b, bi) => {
+      if (canonicalExerciseId(b.exerciseId) !== ex.id) return;
+      if (blockIndex < 0) blockIndex = bi;
+      b.sets.forEach(s => {
+        if (!s.completed) return;
+        sets.push({ s, block:b });
+        if (!countsPR(s)) return;
+        const v = m.of(s, w.startedAt);
+        if (v > best){ best = v; bestSet = { s, block:b }; blockIndex = bi; }
+      });
+    });
+    if (best > 0) out.push({ date:w.startedAt, best, workoutId:w.id, routineName:w.routineName, blockIndex, bestSet, sets });
   });
   return out;
 }
@@ -6950,14 +6982,21 @@ function trendPanel(){
     const y = v => max === min ? H/2 : (H - pad - ((v - min)/(max - min)) * (H - pad*2));
     const r1 = n => Math.round(n*10)/10;
     const pts = vals.map((v,i) => r1(x(i)) + ',' + r1(y(v))).join(' ');
-    /* a filled dot is a session that beat every one before it */
+    /* a filled dot is a session that beat every one before it. No <title>:
+       the card below replaces it, and the two would show at once. */
     const dots = vals.map((v,i) =>
-      '<circle cx="' + r1(x(i)) + '" cy="' + r1(y(v)) + '" r="' + (i === vals.length-1 ? 4 : 2.8) + '" fill="' + (sessions[i].pr ? 'var(--accent)' : 'var(--surface)') + '" stroke="var(--accent)" stroke-width="1.6"' +
-        (sessions[i].pr ? ' data-record' : '') + '><title>' + fmtDate(sessions[i].date) + ' — ' + fmtNum(roundHalf(v)) + ' ' + esc(unit) +
-        (sessions[i].pr && i > 0 ? ' · new best' : '') + '</title></circle>').join('');
+      '<circle data-i="' + i + '" cx="' + r1(x(i)) + '" cy="' + r1(y(v)) + '" r="' + (i === vals.length-1 ? 4 : 2.8) + '" fill="' + (sessions[i].pr ? 'var(--accent)' : 'var(--surface)') + '" stroke="var(--accent)" stroke-width="1.6"' +
+        (sessions[i].pr ? ' data-record' : '') + '/>').join('');
     const delta = roundHalf(vals[vals.length-1] - vals[0]);
-    body = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Trend of ' + metricName + ' for ' + esc(ex.name) + ' across ' + vals.length + ' sessions">' +
-      '<polyline points="' + pts + '" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>' + dots + '</svg>' +
+    body = '<div class="trend-chart" tabindex="0" data-n="' + vals.length + '" data-w="' + W + '" data-pad="' + pad + '" ' +
+        'aria-label="' + esc(ex.name) + ', ' + metricName + ' per session. Use the left and right arrow keys to read each session.">' +
+      '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Trend of ' + metricName + ' for ' + esc(ex.name) + ' across ' + vals.length + ' sessions">' +
+      '<line class="trend-guide" x1="0" x2="0" y1="0" y2="' + H + '" visibility="hidden"/>' +
+      '<polyline points="' + pts + '" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>' + dots +
+      '<circle class="trend-ring" r="7" cx="0" cy="0" visibility="hidden"/></svg>' +
+      '<div class="trend-tip" role="status" hidden></div>' +
+      '<div class="trend-tips" hidden>' + sessions.map((s, i) => '<div data-tip="' + i + '">' + trendTipHTML(sessions, i, m) + '</div>').join('') + '</div>' +
+      '</div>' +
       '<div class="trend-foot">' +
         '<span class="muted xs">' + fmtDate(sessions[0].date) + ' → ' + fmtDate(sessions[sessions.length-1].date) + ' · ' + plural(sessions.length, 'session') + '</span>' +
         (delta === 0
@@ -6983,6 +7022,26 @@ function trendPanel(){
   '</section>';
 }
 
+/* What one point on the trend stands for: the session, the figure, the set
+   that made it, every completed set, and how it compares with the session
+   before. Built with the chart, one per point, and shown by the controller in
+   EVENT HANDLING — so pointing at the line does not need a render. */
+function trendTipHTML(sessions, i, m){
+  const s = sessions[i], prev = sessions[i - 1];
+  const setText = x => setSummary(x.s, x.block) + (x.s.rir != null ? ' @RIR' + esc(x.s.rir) : x.s.rpe != null ? ' @RPE' + esc(x.s.rpe) : '') +
+    (countsVolume(x.s) ? '' : ' <span class="status-chip skip">warm-up</span>');
+  const diff = prev ? roundHalf(s.best - prev.best) : 0;
+  return '<p class="tt-head"><b>' + fmtDate(s.date) + '</b> · ' + esc(s.routineName || 'Session') + '</p>' +
+    '<p class="tt-value"><b>' + fmtNum(roundHalf(s.best)) + '</b> ' + esc(m.unit) + ' <span class="muted">' + esc(m.name) + '</span>' +
+      (s.pr && !s.first ? ' <span class="status-chip ok">new best</span>' : '') + '</p>' +
+    (s.bestSet ? '<p>Best set: <b>' + setText(s.bestSet) + '</b></p>' : '') +
+    '<p class="muted">' + plural(s.sets.length, 'set') + ': ' + s.sets.map(setText).join(', ') + '</p>' +
+    (prev ? '<p class="' + (diff > 0 ? 'trend-delta up' : diff < 0 ? 'trend-delta down' : 'muted') + '">' +
+      (diff === 0 ? 'Same as ' : (diff > 0 ? '+' : '−') + fmtNum(Math.abs(diff)) + ' ' + esc(m.unit) + ' vs ') + fmtDate(prev.date) + '</p>'
+      : '<p class="muted">First session logged</p>') +
+    '<p class="tt-open"><button type="button" class="btn btn-sm" data-action="cue-view-session" data-workout="' + esc(s.workoutId) + '" data-idx="' + s.blockIndex + '">Open session</button></p>' +
+    '<p class="tt-hint muted">Click the point to keep this open</p>';
+}
 /* Marks each session (oldest first) that beat every session before it. The
    first one is the baseline rather than a record; ties do not count. */
 function sessionRecords(sessions){
@@ -8273,6 +8332,79 @@ document.addEventListener('submit', e => {
   else if (kind === 'remote-config'){ saveRemoteConfigForm(form); }
 });
 
+
+/* ---------- trend chart: reading one point ----------
+   The progress trend shows the card for the session nearest the pointer.
+   A mouse previews by hovering; a click (or a tap, which is all a phone has)
+   pins the card, which is then the one that can be clicked into — Open
+   session. The arrow keys step through sessions on a focused chart. None of
+   it renders: the cards are built with the chart, and this only moves one of
+   them into place, so the state lives on the chart element and goes with it
+   at the next render. */
+function trendIndexAt(chart, clientX){
+  const svg = $('svg', chart), r = svg.getBoundingClientRect();
+  const n = Number(chart.dataset.n), W = Number(chart.dataset.w), pad = Number(chart.dataset.pad);
+  const xv = (clientX - r.left) / r.width * W;
+  return clamp(Math.round((xv - pad) / (W - pad * 2) * (n - 1)), 0, n - 1);
+}
+function trendShow(chart, i, pin){
+  const n = Number(chart.dataset.n);
+  i = clamp(i, 0, n - 1);
+  const dot = $('circle[data-i="' + i + '"]', chart), src = $('[data-tip="' + i + '"]', chart);
+  const tip = $('.trend-tip', chart), svg = $('svg', chart);
+  if (!dot || !src) return;
+  if (chart.dataset.active !== String(i) || tip.hidden) tip.innerHTML = src.innerHTML;
+  tip.hidden = false;
+  tip.classList.toggle('is-pinned', !!pin);
+  chart.dataset.active = String(i);
+  chart.dataset.pinned = pin ? '1' : '';
+  const cx = Number(dot.getAttribute('cx')), cy = Number(dot.getAttribute('cy'));
+  const guide = $('.trend-guide', chart), ring = $('.trend-ring', chart);
+  guide.setAttribute('x1', cx); guide.setAttribute('x2', cx); guide.setAttribute('visibility', 'visible');
+  ring.setAttribute('cx', cx); ring.setAttribute('cy', cy); ring.setAttribute('visibility', 'visible');
+  /* above the point, centred on it, kept inside the chart's width */
+  const sr = svg.getBoundingClientRect(), cr = chart.getBoundingClientRect();
+  const scale = sr.width / Number(chart.dataset.w);
+  const px = sr.left - cr.left + cx * scale, py = sr.top - cr.top + cy * scale;
+  tip.style.left = clamp(px - tip.offsetWidth / 2, 0, Math.max(0, cr.width - tip.offsetWidth)) + 'px';
+  tip.style.bottom = (cr.height - py + 12) + 'px';
+}
+function trendHide(chart){
+  const tip = $('.trend-tip', chart);
+  if (!tip) return;
+  tip.hidden = true;
+  tip.classList.remove('is-pinned');
+  delete chart.dataset.active;
+  chart.dataset.pinned = '';
+  $('.trend-guide', chart).setAttribute('visibility', 'hidden');
+  $('.trend-ring', chart).setAttribute('visibility', 'hidden');
+}
+document.addEventListener('pointermove', e => {
+  const chart = e.target.closest && e.target.closest('.trend-chart');
+  if (!chart || e.pointerType !== 'mouse' || chart.dataset.pinned || e.target.closest('.trend-tip')) return;
+  trendShow(chart, trendIndexAt(chart, e.clientX), false);
+});
+document.addEventListener('pointerout', e => {
+  const chart = e.target.closest && e.target.closest('.trend-chart');
+  if (chart && !chart.contains(e.relatedTarget) && !chart.dataset.pinned) trendHide(chart);
+});
+document.addEventListener('click', e => {
+  const chart = e.target.closest && e.target.closest('.trend-chart');
+  /* a click anywhere else lets go of a pinned card */
+  $$('.trend-chart[data-pinned="1"]').forEach(c => { if (c !== chart) trendHide(c); });
+  if (!chart || e.target.closest('.trend-tip')) return;
+  const i = trendIndexAt(chart, e.clientX);
+  if (chart.dataset.pinned && chart.dataset.active === String(i)) trendHide(chart);
+  else trendShow(chart, i, true);
+});
+document.addEventListener('keydown', e => {
+  const chart = e.target.classList && e.target.classList.contains('trend-chart') ? e.target : null;
+  if (!chart) return;
+  const n = Number(chart.dataset.n), at = chart.dataset.active != null ? Number(chart.dataset.active) : null;
+  const to = { ArrowLeft: at == null ? n - 1 : at - 1, ArrowRight: at == null ? 0 : at + 1, Home:0, End:n - 1 }[e.key];
+  if (to != null){ e.preventDefault(); trendShow(chart, to, true); }
+  else if (e.key === 'Escape' && chart.dataset.active != null){ e.stopImmediatePropagation(); trendHide(chart); }
+});
 
 /* ============================================================
    KEYBOARD SHORTCUTS
