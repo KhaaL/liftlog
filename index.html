@@ -1628,6 +1628,11 @@ function fmtNum(n){
 function unitLabel(){ return state.settings.unit === 'lb' ? 'lb' : 'kg'; }
 /* "3 sets" / "1 set" without an if at every call site */
 function plural(n, word, suffix){ return n + ' ' + word + (n === 1 ? '' : (suffix || 's')); }
+/* MM-DD: the date as a short, fixed-width prefix */
+function fmtMonthDay(ts){
+  const d = new Date(ts), p = n => String(n).padStart(2, '0');
+  return p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
 function relDays(ts){
   const d = Math.floor((Date.now() - ts) / 86400000);
   if (d <= 0) return 'today';
@@ -5794,7 +5799,7 @@ function htmlCurrentExercise(w, ex){
   let prevHTML = '';
   const bits = [];
   const bit = (k, v) => bits.push('<span class="pp-item"><span class="pp-k">' + k + '</span><strong>' + v + '</strong></span>');
-  if (prev) bit('Last · ' + esc(relDays(prev.date)), prev.sets.slice(0,4).map(s => setSummary(s, ex)).join(', '));
+  if (prev) bit(fmtMonthDay(prev.date), prev.sets.slice(0,4).map(s => setSummary(s, ex)).join(', '));
   bestBits(stats, ex).forEach(([k, v]) => bit(k, v));
   if (bits.length) prevHTML = '<div class="prev-perf">' + bits.join('') + '</div>';
 
@@ -5880,7 +5885,6 @@ function htmlCurrentExercise(w, ex){
   return '<div class="pad divider-top" id="ex-panel-top" tabindex="-1">' +
     '<div class="ex-head">' +
       '<span class="ex-tags">' +
-        (ex.category ? '<span class="tag">' + esc(ex.category) + '</span>' : '') +
         '<span class="tag">target ' + ex.sets.length + ' × ' + esc(targetRangeLabel(ex)) +
           (ex.targetWeight != null ? ' @ ' + (bodyweight ? '+' : '') + fmtNum(ex.targetWeight) + ' ' + exerciseLoadLabel(ex) : '') +
           (ex.targetRir != null ? ' · RIR ' + fmtNum(ex.targetRir) : '') + '</span>' +
