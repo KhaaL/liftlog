@@ -822,6 +822,17 @@ the filled dots on the line and a newest-first list with the gain each one
 made, because "when did this last get better" is the question a plateau asks
 and a first-to-last delta does not answer it.
 
+**Reading a point** — the trend's points open a card: the session and its
+routine, the figure, the set that made it, every completed set (warm-ups
+marked) and the change from the session before, with *Open session* into its
+detail sheet. A mouse previews the session nearest the pointer, so nobody has
+to hit a 3px dot; a click — or a tap, which is all a phone has — pins it; a
+focused chart steps through sessions with the arrow keys, and the card is a
+live region. The cards are built with the chart (`trendTipHTML()`, from the
+extra fields `exSessions()` now returns) and the controller in EVENT HANDLING
+only moves one into place, so pointing at the line never renders; its state
+lives on the chart element and is gone at the next render.
+
 **Weekly** — `weeklyChart()`, switched between **volume** (weight × reps) and
 **working sets** (`countsVolume()`, every movement). Volume is honest for a
 barbell program and not for a machine one, where stacks on different machines

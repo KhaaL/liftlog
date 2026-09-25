@@ -455,6 +455,33 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
       'the session that beat its predecessors is listed as a record');
     assert.equal(await page.locator('[aria-label="Exercise trend"] circle[data-record]').count(), 2,
       'the baseline and the record are the filled dots on the trend');
+    const trendChart = page.locator('.trend-chart');
+    await trendChart.scrollIntoViewIfNeeded();
+    const tBox = await trendChart.boundingBox();
+    await page.mouse.move(tBox.x + tBox.width - 4, tBox.y + tBox.height / 2);
+    const tip = page.locator('.trend-tip');
+    assert.equal(await tip.isVisible() && !(await tip.evaluate(el => el.classList.contains('is-pinned'))), true,
+      'hovering the trend previews the nearest session');
+    assert.match(await tip.innerText(), /new best[\s\S]*Best set: 100 kg × 9[\s\S]*3 sets: 100 kg × 9, 100 kg × 8, 100 kg × 8/,
+      'the card names the best set and every completed set of that session');
+    await page.mouse.move(tBox.x + 4, tBox.y + tBox.height / 2);
+    assert.match(await tip.innerText(), /First session logged/, 'moving along the line follows the nearest session');
+    await page.mouse.move(tBox.x + tBox.width / 2, tBox.y - 60);
+    assert.equal(await tip.isVisible(), false, 'leaving the chart hides the preview');
+    await trendChart.focus();
+    await page.keyboard.press('End');
+    await page.keyboard.press('ArrowLeft');
+    assert.match(await tip.innerText(), /Same as/, 'the arrow keys step through sessions');
+    assert.equal(await tip.getByRole('button', {name:'Open session'}).isVisible(), true, 'a pinned card offers the session');
+    await page.keyboard.press('Escape');
+    assert.equal(await tip.isVisible(), false, 'Escape closes the card');
+    await page.mouse.click(tBox.x + tBox.width - 4, tBox.y + tBox.height / 2);
+    await tip.getByRole('button', {name:'Open session'}).click();
+    assert.equal(await page.evaluate(() => document.querySelector('#detail-dlg').open &&
+      window.testAPI.ui.detail.id === window.testAPI.state.workouts[0].id), true,
+      'Open session opens that workout in its sheet');
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.querySelector('#detail-dlg').open);
     await page.evaluate(() => {
       const ex = window.testAPI.state.workouts[0].exercises[0];
       ex.targetRepsMin = 5; ex.targetRepsMax = 8; ex.targetRir = 2;
