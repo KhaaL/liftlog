@@ -1,15 +1,13 @@
-// Run with Node and Playwright available; BROWSER_PATH optionally selects Chromium.
-const { chromium } = require('playwright');
+// Workflow regression suite: `npm test`, or node tests/regression.cjs. See tests/README.md.
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
+const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
 (async () => {
-  const browser = await chromium.launch({ headless:true, ...(process.env.BROWSER_PATH ? { executablePath:process.env.BROWSER_PATH } : {}) });
+  const browser = await launchBrowser();
   try {
     const page = await browser.newPage({ viewport:{ width:390, height:844 } });
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
-    let html = fs.readFileSync('index.html', 'utf8');
-    html = html.replace('init();\n})();', `window.testAPI = { sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, importHistory, normalizeImportedSet, normalizeImportedWorkout, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, workoutVolume, progressionStatus, loadCueFor, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, compatibleHistoryLink, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, setExerciseArchived, mergeExercises, sameProgressionContract, exerciseLoadLabel, setSummary, remoteStartupSync, autoRemoteBackup, flushSave, save, render, supersetRun, currentMemberIndex, isSettledRow, switchSupersetMember, navigate, currentExercise, settleSupersets, pauseTimer, finishWorkout, sampleExercises, sampleRoutines, get timer(){return timer}, get state(){return state}, get ui(){return ui} };\ninit();\n})();`);
+    const html = appWithTestAPI(`{ sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, importHistory, normalizeImportedSet, normalizeImportedWorkout, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, workoutVolume, progressionStatus, loadCueFor, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, compatibleHistoryLink, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, setExerciseArchived, mergeExercises, sameProgressionContract, exerciseLoadLabel, setSummary, remoteStartupSync, autoRemoteBackup, flushSave, save, render, supersetRun, currentMemberIndex, isSettledRow, switchSupersetMember, navigate, currentExercise, settleSupersets, pauseTimer, finishWorkout, sampleExercises, sampleRoutines, get timer(){return timer}, get state(){return state}, get ui(){return ui} }`);
     await page.route('https://liftlog.test/**', route => route.fulfill({ contentType:'text/html', body:html }));
     await page.goto('https://liftlog.test/');
     const result = await page.evaluate(async () => {

@@ -1,0 +1,13 @@
+{
+  "name": "liftlog-dev",
+  "private": true,
+  "description": "Development tooling only. The app is index.html and has no dependencies; these run the browser tests.",
+  "scripts": {
+    "test": "node tests/regression.cjs && node tests/security.cjs",
+    "test:regression": "node tests/regression.cjs",
+    "test:security": "node tests/security.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

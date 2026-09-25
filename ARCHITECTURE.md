@@ -16,7 +16,9 @@ to make it installable — `manifest.webmanifest`, `sw.js`, and `icons/`
 (regenerate with `python3 tools/make-icons.py`, standard library only). Nothing
 is compiled, bundled or fetched at any point; opening the file directly simply
 skips them. Please keep it that way — see [ENHANCEMENTS.md](ENHANCEMENTS.md)
-before adding anything that needs a build step.
+before adding anything that needs a build step. `package.json` does not change
+this: its one dependency is Playwright, for the browser tests, and nothing in
+it is shipped or needed to run the app.
 
 By default the app also makes **no network calls at all**. The two exceptions
 are the optional remote storage feature below, whose requests go directly from
@@ -1083,7 +1085,11 @@ One family, sans-serif throughout, differentiated by size, weight and tracking
 rather than by a second face. Every family named in `--font-ui` and
 `--font-mono` is open-source (SIL OFL or Apache-2.0), ordered by how likely it
 is to be installed already — Roboto and Noto cover Android, Inter and Source
-Sans most Linux desktops, DejaVu and Liberation the rest.
+Sans most Linux desktops, Liberation and DejaVu the rest. Liberation comes
+before DejaVu for width rather than likelihood: it has Arial's metrics, close to
+the Roboto and Helvetica the layout is drawn against, while DejaVu is wide
+enough to overflow the five header tabs at 320px — which is also what a bare
+Linux CI runner falls back to.
 
 **No webfont is fetched, so nothing is guaranteed.** The app makes no network
 calls and ships as one document, which rules out both a `@font-face` URL and a
@@ -1122,13 +1128,23 @@ is a bug.
 ## Testing
 
 Two Playwright suites exercise the real document on an isolated synthetic
-origin. Run `node tests/regression.cjs` for workflows, migrations, transfer
-round trips, progression and mobile layouts; run `node tests/security.cjs` for
-backup validation, hostile imported values and recovery behavior. They require
-Playwright and a Chromium browser (optionally selected with `BROWSER_PATH`).
-There is no repository CI workflow yet. If touching remote storage, also test a
-failed connection and a backup/restore round trip against a real S3-compatible
-bucket; the local suites stub that boundary.
+origin: `tests/regression.cjs` for workflows, migrations, transfer round trips,
+progression and mobile layouts, and `tests/security.cjs` for backup
+validation, hostile imported values and recovery behavior. `npm ci` then
+`npm test` runs both; [tests/README.md](tests/README.md) has the details.
+GitHub Actions runs them on every pull request and on `main`, inside
+Playwright's own image so that the browser *and the fonts* are fixed — the
+layout checks at phone widths depend on text metrics.
+
+They reach the app's internals through one marker line, `/* @test-seam */`,
+before `init();` at the end of the script: `tests/harness.cjs` replaces it in
+the copy it serves with a `window.testAPI` object built inside the closure.
+Keep that line as it is. The harness refuses to start without it, rather than
+every check failing later on an undefined handle.
+
+If touching remote storage, also test a failed connection and a backup/restore
+round trip against a real S3-compatible bucket; the local suites stub that
+boundary.
 
 Also exercise the set row: log a set from its own box in the done column (and
 check auto-rest starts), mark a set as a warm-up both by long-pressing that box

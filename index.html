@@ -60,10 +60,13 @@
      document, so this is a preference list and the generic `sans-serif` /
      `monospace` keywords are the guaranteed floor. Order is by how likely a
      family is to be installed already — Roboto and Noto cover Android, Inter
-     and Source Sans most Linux desktops, DejaVu and Liberation the rest.
+     and Source Sans most Linux desktops, Liberation and DejaVu the rest.
+     Of those last two, Liberation goes first because it is the narrower:
+     it has Arial's metrics, near the Roboto and Helvetica widths the layout
+     is drawn against, where DejaVu's overflows the five tabs at 320px.
      There is no separate display face: headings are the same family,
      separated by size, weight and tracking. */
-  --font-ui:"Inter","Roboto","Noto Sans","Open Sans","Source Sans 3","DejaVu Sans","Liberation Sans",sans-serif;
+  --font-ui:"Inter","Roboto","Noto Sans","Open Sans","Source Sans 3","Liberation Sans","DejaVu Sans",sans-serif;
   --font-mono:"JetBrains Mono","Fira Mono","Roboto Mono","Noto Sans Mono","DejaVu Sans Mono","Liberation Mono",monospace;
 
   /* Height of the sticky header, remeasured by trackHeaderHeight() so the
@@ -8288,6 +8291,11 @@ function init(){
   if (state.activeWorkout) announce('Active workout restored: ' + state.activeWorkout.routineName);
   if (loadWarning) toast(loadWarning);
 }
+/* The browser tests put their handle on the internals here — in a copy of the
+   document they serve to themselves, never in the shipped file — so it is the
+   one line they depend on. Keep it exactly as written; tests/harness.cjs
+   fails loudly when it cannot find it. */
+/* @test-seam */
 init();
 })();
 </script>
