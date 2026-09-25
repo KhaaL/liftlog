@@ -833,6 +833,19 @@ extra fields `exSessions()` now returns) and the controller in EVENT HANDLING
 only moves one into place, so pointing at the line never renders; its state
 lives on the chart element and is gone at the next render.
 
+**Ready to increase load** — `loadCueTableHTML()`, under the routine picker on
+Today and at the top of a routine's detail sheet. One row per movement whose
+routine target was met (`routineLoadCues()` → `loadCueFor()`): the last result
+dated MM-DD, and **Next** from `nextLoadFor()` — the last working load plus
+`settings.loadStep` (default 2.5 kg / 5 lb, set under Rest timer in Settings),
+at the bottom of the routine's rep range, which is double progression starting
+its climb again. Bodyweight work steps its added load. A row with no prescribed
+RIR carries a note to check effort first, since reps alone do not show it. The
+occasional actions — view the session, dismiss the result, turn suggestions off
+— are behind each row's ⋯ (`ui.cueMenuId`). The step lives in the display unit:
+`setUnit()` swaps a default step for the other unit's default and converts a
+custom one.
+
 **Weekly** — `weeklyChart()`, switched between **volume** (weight × reps) and
 **working sets** (`countsVolume()`, every movement). Volume is honest for a
 barbell program and not for a machine one, where stacks on different machines
