@@ -1,0 +1,24 @@
+# Keeps the test tooling current. The app itself has no dependencies; the
+# only npm package is Playwright, and the workflow reads its Docker image tag
+# from package.json, so a Dependabot bump is a complete upgrade on its own.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    # playwright and playwright-core move together; one PR for both
+    groups:
+      playwright:
+        patterns: ["playwright", "playwright-core"]
+    commit-message:
+      prefix: "deps(test)"
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"

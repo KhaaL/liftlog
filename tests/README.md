@@ -50,8 +50,11 @@ the page loads.
 ## Continuous integration
 
 `.github/workflows/tests.yml` runs both suites on every pull request and on
-pushes to `main`, inside `mcr.microsoft.com/playwright` at the same version as
-`package.json`. When bumping Playwright, change both. The image pins the fonts
+pushes to `main`, inside `mcr.microsoft.com/playwright`. The workflow's first
+job reads the exact Playwright version from `package.json` and picks the image
+tag from it, so bumping `package.json` is the whole upgrade — Dependabot
+(`.github/dependabot.yml`) proposes that bump weekly, and the actions the
+workflow uses monthly. The image pins the fonts
 as well as the browser, and that matters: several checks measure layout at
 phone widths, and text metrics decide them. Screenshots from a failed run are
 kept as a workflow artifact.

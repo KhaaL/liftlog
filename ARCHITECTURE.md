@@ -815,6 +815,19 @@ estimated total 1RM for bodyweight work once a dated bodyweight is available
 (otherwise best set in reps). Both modes call `exMetric()` and `exSessions()`, so the chart
 and the breakdown list can never disagree about what "better" means.
 
+**Records** — `sessionRecords()` / `recordsHTML()`, under the per-exercise
+trend. A session that beats every earlier session on the same `exMetric()` is a
+record; the first session is the baseline, and a tie is not a gain. Records are
+the filled dots on the line and a newest-first list with the gain each one
+made, because "when did this last get better" is the question a plateau asks
+and a first-to-last delta does not answer it.
+
+**Weekly** — `weeklyChart()`, switched between **volume** (weight × reps) and
+**working sets** (`countsVolume()`, every movement). Volume is honest for a
+barbell program and not for a machine one, where stacks on different machines
+are not the same kilogram; working sets count the same on anything. Both show
+the last four weeks, this one included, against the four before.
+
 **Per movement family** — `musclePanel()`. Every movement carrying the same
 `movementFamily`, charted as **working sets per week** — a completed set that is not
 a warm-up, i.e. `countsVolume()`.
@@ -1134,7 +1147,8 @@ validation, hostile imported values and recovery behavior. `npm ci` then
 `npm test` runs both; [tests/README.md](tests/README.md) has the details.
 GitHub Actions runs them on every pull request and on `main`, inside
 Playwright's own image so that the browser *and the fonts* are fixed — the
-layout checks at phone widths depend on text metrics.
+layout checks at phone widths depend on text metrics. The image tag is read
+from `package.json`, and Dependabot keeps that version current.
 
 They reach the app's internals through one marker line, `/* @test-seam */`,
 before `init();` at the end of the script: `tests/harness.cjs` replaces it in
