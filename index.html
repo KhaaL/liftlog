@@ -846,6 +846,26 @@ kbd{
 .progression-count.ready{ color:var(--accent); font-weight:650; }
 .today-cues{ padding:var(--sp-4); margin-top:var(--sp-3); }
 .today-cues h3{ margin:0 0 var(--sp-2); font-size:var(--fs-sm); }
+/* load guidance: one row per movement ready for more load */
+.cue-table{ width:100%; border-collapse:collapse; font-size:var(--fs-sm); font-variant-numeric:tabular-nums; }
+.cue-table th,.cue-table td{ text-align:left; padding:var(--sp-2); border-top:1px solid var(--border); vertical-align:middle; }
+.cue-table thead th{ border-top:0; color:var(--muted); font-size:var(--fs-xs); font-weight:650; text-transform:uppercase; letter-spacing:.04em; }
+.cue-table th:first-child,.cue-table td:first-child{ padding-left:0; }
+.cue-table tbody th{ font-weight:650; }
+.cue-table .cue-date,.cue-table .cue-last,.cue-last-m{ color:var(--muted); }
+.cue-table .cue-next b{ color:var(--accent); }
+.cue-table .cue-date,.cue-table .cue-next{ white-space:nowrap; }
+.cue-table .cue-more{ width:36px; padding-right:0; text-align:right; }
+.cue-table .cue-more .icon-btn{ width:36px; height:36px; font-size:18px; line-height:1; }
+.cue-last-m{ display:none; font-size:var(--fs-xs); font-weight:400; }
+.cue-note{ display:block; color:var(--warning); font-size:var(--fs-xs); font-weight:400; }
+.cue-actions-row td{ border-top:0; padding-top:0; }
+.cue-actions-row .load-cue-actions{ margin-top:0; }
+/* a phone has room for four columns: the last result folds under the name */
+@media (max-width:480px){
+  .cue-table .cue-last{ display:none; }
+  .cue-last-m{ display:block; }
+}
 .load-cue{ border-left:3px solid var(--accent); background:var(--surface-2); padding:var(--sp-3); margin-top:var(--sp-2); border-radius:var(--radius); }
 .load-cue-main,.load-cue-actions{ display:flex; align-items:center; gap:var(--sp-2); flex-wrap:wrap; }
 .load-cue-state{ color:var(--accent); font-size:var(--fs-xs); font-weight:650; }
@@ -1151,7 +1171,6 @@ dialog::backdrop{ background:rgb(15 17 20 / .5); }
   #detail-dup span{ display:none; }
   #detail-dup{ min-width:44px; padding-inline:10px; }
 }
-.detail-cues .load-cue:first-of-type{ margin-top:0; }
 .detail-stats{ display:flex; flex-wrap:wrap; gap:var(--sp-1) var(--sp-4); font-size:var(--fs-sm); font-variant-numeric:tabular-nums; }
 .detail-stats b{ font-weight:650; }
 @media (max-width:640px){
@@ -2203,7 +2222,7 @@ function validateBackup(s){
   if (s.settings != null){
     object(s.settings, 'settings');
     fields(s.settings, 'settings', ['theme', 'unit', 'effortMetric', 'historyLinksDismissedKey'], text);
-    fields(s.settings, 'settings', ['defaultRest', 'lastFileBackupAt', 'lastModifiedAt', 'seededAt'], number);
+    fields(s.settings, 'settings', ['defaultRest', 'loadStep', 'lastFileBackupAt', 'lastModifiedAt', 'seededAt'], number);
     fields(s.settings, 'settings', ['autoRest', 'sound', 'vibrate'], bool);
   }
   const exercises = new Set(), routines = new Set(), workouts = new Set(), bodyweights = new Set();
@@ -2456,6 +2475,7 @@ function normalizeState(s){
   set.theme = THEMES.some(t => t.id === set.theme) ? set.theme : d.theme;
   set.unit = set.unit === 'lb' ? 'lb' : 'kg';
   set.defaultRest = clamp(Math.round(toNum(set.defaultRest) || d.defaultRest), REST_MIN, REST_MAX);
+  set.loadStep = toNum(set.loadStep) > 0 ? clamp(toNum(set.loadStep), ...LOAD_STEP_BOUNDS) : LOAD_STEP_DEFAULT[set.unit];
   set.autoRest = !!set.autoRest;
   set.sound = !!set.sound;
   set.vibrate = !!set.vibrate;
@@ -2565,9 +2585,13 @@ function normalizeState(s){
    In Reserve) the lifter prefers — the two are inverses of roughly the same
    scale, so only one is shown at a time rather than both. */
 const EFFORT_METRICS = ['none', 'rpe', 'rir'];
+/* The load a suggestion adds, in the display unit: the smallest plate pair
+   on a bar, and a step most stacks can make. */
+const LOAD_STEP_DEFAULT = { kg:2.5, lb:5 };
+const LOAD_STEP_BOUNDS = [0.25, 50];
 function defaultSettings(){
   return { theme:'system', unit:'kg', defaultRest:90, autoRest:true, sound:true, vibrate:true, effortMetric:'none',
-           lastFileBackupAt:null, lastModifiedAt:null, seededAt:null, historyLinksDismissedKey:'' };
+           loadStep:LOAD_STEP_DEFAULT.kg, lastFileBackupAt:null, lastModifiedAt:null, seededAt:null, historyLinksDismissedKey:'' };
 }
 /* History is kept newest-first everywhere; every mutation that can change a
    start time re-establishes that instead of sorting again at each read. */
@@ -2733,6 +2757,7 @@ function freshUI(){
     trendExId:null,
     trendMode:'exercise',       /* Progress panel: 'exercise' or 'muscle' */
     weeklyMetric:'volume',      /* weekly chart: 'volume' or 'sets' */
+    cueMenuId:null,             /* load-guidance row whose actions are open */
     trendMuscle:null,           /* selected muscle group in 'muscle' mode */
     historyLinksOpen:false,     /* reconciliation panel in History */
     historyLinksShowAll:false,  /* unresolved-only is the useful default */
@@ -4486,6 +4511,10 @@ function setUnit(v){
   if (v === from) return;
   state.settings.unit = v;
   const conv = x => { const n = toNum(x); return n == null ? x : roundHalf(convertWeight(n, from, v)); };
+  /* the step is in the display unit too; the default follows the unit rather
+     than becoming 5.5 lb */
+  state.settings.loadStep = state.settings.loadStep === LOAD_STEP_DEFAULT[from]
+    ? LOAD_STEP_DEFAULT[v] : clamp(conv(state.settings.loadStep) || LOAD_STEP_DEFAULT[v], ...LOAD_STEP_BOUNDS);
   /* Weighted movement definitions describe a measurement kind; kg/lb comes
      from the global setting. Keep the legacy unit field synchronized so lists,
      routine transfers and history reconciliation cannot disagree with logging. */
@@ -5634,8 +5663,9 @@ function htmlPicker(){
   html += '<div class="mt-3"><button type="button" class="btn" data-action="start-empty">' + IC.plus + '<span>Start empty session</span></button></div>';
   return html;
 }
-/* The load cues a routine's current targets have earned, one per movement:
-   under the picker on Today, and at the top of the routine's detail sheet. */
+/* The load cues a routine's current targets have earned, one per movement,
+   each with the routine item that earned it: under the picker on Today, and
+   at the top of the routine's detail sheet. */
 function routineLoadCues(routine){
   const seen = new Set(), cues = [];
   routine.items.forEach(item => {
@@ -5643,14 +5673,62 @@ function routineLoadCues(routine){
     if (seen.has(id)) return;
     seen.add(id);
     const cue = loadCueFor(id, item), ex = exerciseById(id);
-    if (cue && ex) cues.push(loadCueHTML(cue, ex.name));
+    if (cue && ex) cues.push({ cue, ex, item });
   });
   return cues;
 }
-function htmlRoutineLoadCues(routine){
+/* What to load next time: the last working load plus the Settings step, at
+   the bottom of the rep range — double progression, climbing again from the
+   low end. Bodyweight work steps its added load, which progressionStatus()
+   folds into a total with the bodyweight, so it is read from the logged sets. */
+function nextLoadFor({ cue, ex, item }){
+  const unit = unitLabel(), step = state.settings.loadStep, last = cue.latest;
+  const reps = toNum(item.repsMin) > 0 ? item.repsMin : last.targetMax;
+  if (last.kind === 'bw'){
+    const w = state.workouts.find(x => x.id === last.workoutId);
+    const set = w && w.exercises[last.blockIndex] && w.exercises[last.blockIndex].sets.find(s => s.completed && !isWarmup(s));
+    const added = set && toNum(set.addedWeight) ? convertWeight(toNum(set.addedWeight), set.addedWeightUnit === 'lb' ? 'lb' : 'kg', unit) : 0;
+    return { last:'+' + fmtNum(roundHalf(added)) + ' ' + unit, next:'+' + fmtNum(roundHalf(added + step)) + ' ' + unit, reps };
+  }
+  const load = convertWeight(last.load, 'kg', unit), label = exerciseLoadLabel(ex);
+  /* the convention (stack, per hand) is on the last result; Next stays short */
+  return { last:fmtNum(roundHalf(load)) + ' ' + label, next:fmtNum(roundHalf(load + step)) + ' ' + unit, reps };
+}
+/* One row per movement whose target was met: when, what was lifted, and what
+   to put on the stack next time. What can be done about a result — look at
+   it, dismiss it, stop suggesting — is behind the row's ⋯, since it is
+   occasional and the table is what gets read before every session. */
+function loadCueTableHTML(routine){
   const cues = routineLoadCues(routine);
-  return cues.length ? '<section class="panel today-cues" aria-label="Load guidance for ' + esc(routine.name) + '">' +
-    '<h3>For ' + esc(routine.name) + '</h3>' + cues.join('') + '</section>' : '';
+  if (!cues.length) return '';
+  const rows = cues.map(c => {
+    const { cue, ex } = c, last = cue.latest, n = nextLoadFor(c);
+    const menuId = 'cue-menu-' + encodeURIComponent(cue.id), open = ui.cueMenuId === cue.id;
+    return '<tr>' +
+      '<th scope="row"><span class="cue-name">' + esc(ex.name) + '</span>' +
+        /* no RIR was prescribed, so the reps alone say nothing about effort */
+        (cue.targetRir == null ? '<span class="cue-note">Reps met — check technique and 1–2 RIR first</span>' : '') +
+        '<span class="cue-last-m">' + esc(n.last) + ' · ' + last.reps.map(fmtNum).join(' / ') + '</span></th>' +
+      '<td class="cue-date">' + fmtMonthDay(last.date) + '</td>' +
+      '<td class="cue-last">' + esc(n.last) + ' · ' + last.reps.map(fmtNum).join(' / ') + '</td>' +
+      '<td class="cue-next"><b>' + esc(n.next) + '</b> × ' + fmtNum(n.reps) + '</td>' +
+      '<td class="cue-more"><button type="button" class="icon-btn" id="' + esc(menuId) + '" data-action="cue-menu" data-id="' + esc(cue.id) + '" ' +
+        'aria-expanded="' + open + '" aria-label="Actions for ' + esc(ex.name) + '">⋯</button></td>' +
+    '</tr>' +
+    (open ? '<tr class="cue-actions-row"><td colspan="5"><div class="load-cue-actions">' +
+      '<button type="button" class="btn btn-sm" data-action="cue-view-session" data-workout="' + esc(last.workoutId) + '" data-idx="' + last.blockIndex + '">View last session</button>' +
+      '<button type="button" class="btn btn-sm" data-action="cue-dismiss" data-id="' + esc(cue.id) + '">Dismiss this result</button>' +
+      '<button type="button" class="btn btn-sm" data-action="cue-off" data-id="' + esc(cue.id) + '">Turn off load suggestions</button>' +
+    '</div></td></tr>' : '');
+  }).join('');
+  return '<table class="cue-table"><caption class="sr-only">Ready to increase load for ' + esc(routine.name) + '</caption>' +
+    '<thead><tr><th scope="col">Exercise</th><th scope="col" class="cue-date">Last</th><th scope="col" class="cue-last">Load × reps</th>' +
+    '<th scope="col">Next</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody>' + rows + '</tbody></table>';
+}
+function htmlRoutineLoadCues(routine){
+  const table = loadCueTableHTML(routine);
+  return table ? '<section class="panel today-cues" aria-label="Load guidance for ' + esc(routine.name) + '">' +
+    '<h3>Ready to increase load</h3>' + table + '</section>' : '';
 }
 
 function htmlActiveWorkout(w){
@@ -6166,9 +6244,9 @@ function routineDetailHTML(r){
   if (!r.items.length) return '<div class="detail-section"><p class="muted small">No exercises yet — edit the routine to add some.</p></div>';
   /* Guidance first: it is the part of the sheet that changes what you load
      next time, and it exists only when a target has actually been met. */
-  const cues = routineLoadCues(r);
-  let html = (cues.length ? '<section class="detail-section detail-cues" aria-label="Load guidance">' +
-    '<h3>Load guidance</h3>' + cues.join('') + '</section>' : '') +
+  const cues = loadCueTableHTML(r);
+  let html = (cues ? '<section class="detail-section detail-cues" aria-label="Load guidance">' +
+    '<h3>Ready to increase load</h3>' + cues + '</section>' : '') +
     '<div role="list" aria-label="Exercises">';
   routineGroups(r.items).forEach(group => {
     const pairStyle = group.length > 1 ? (group[0].supersetOf ? 'superset' : 'either') : '';
@@ -7546,6 +7624,10 @@ function viewSettings(){
         '<label class="field rest-field"><span class="cap">Rest between sets (seconds)</span>' +
         '<input type="number" min="' + REST_MIN + '" max="' + REST_MAX + '" step="15" inputmode="numeric" ' +
         'data-change="default-rest" value="' + s.defaultRest + '"></label>' +
+        '<label class="field rest-field"><span class="cap">Load increase step (' + unitLabel() + ')</span>' +
+        '<input type="number" id="load-step" min="' + LOAD_STEP_BOUNDS[0] + '" max="' + LOAD_STEP_BOUNDS[1] + '" step="0.25" inputmode="decimal" ' +
+        'data-change="load-step" value="' + s.loadStep + '">' +
+        '<span class="hint">Added to the last load when a target is met</span></label>' +
       '</div>' +
       '<div class="switch-row">' +
         '<label for="sw-autorest"><strong>Auto-start after each set</strong><br><span class="hint">Starts the rest above the moment a set is logged</span></label>' +
@@ -7675,9 +7757,14 @@ const actions = {
     ui.trendMode = 'exercise'; ui.trendExId = d.id;
     ui.focus = 'progress-exercise-select'; render();
   },
-  'cue-view-session'(d){ viewHistoryExercise(d.workout, Number(d.idx)); },
-  'cue-dismiss'(d){ dismissLoadCue(d.id); },
-  'cue-off'(d){ setLoadCuesOff(d.id, true); },
+  'cue-view-session'(d){ ui.cueMenuId = null; viewHistoryExercise(d.workout, Number(d.idx)); },
+  'cue-menu'(d){
+    ui.cueMenuId = ui.cueMenuId === d.id ? null : d.id;
+    ui.focus = 'cue-menu-' + encodeURIComponent(d.id);
+    render();
+  },
+  'cue-dismiss'(d){ ui.cueMenuId = null; dismissLoadCue(d.id); },
+  'cue-off'(d){ ui.cueMenuId = null; setLoadCuesOff(d.id, true); },
   'cue-on'(d){ setLoadCuesOff(d.id, false); },
   'cue-undismiss'(d){
     const pref = progressionPreference(d.id);
@@ -8256,6 +8343,11 @@ const changeHandlers = {
     if (t.checked && key === 'sound') beep();
     if (t.checked && key === 'vibrate') buzz();
     toast(SETTING_LABEL[key] + ' ' + (t.checked ? 'on' : 'off'));
+  },
+  'load-step'(t){
+    const n = toNum(t.value);
+    const v = n > 0 ? clamp(n, ...LOAD_STEP_BOUNDS) : LOAD_STEP_DEFAULT[unitLabel()];
+    state.settings.loadStep = v; t.value = v; save();
   },
   'default-rest'(t){
     const v = clamp(Math.round(toNum(t.value) || defaultSettings().defaultRest), REST_MIN, REST_MAX);

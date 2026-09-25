@@ -132,7 +132,15 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
       t.setUnit('lb');
       check(t.state.exercises.filter(ex => ex.unit === 'kg' || ex.unit === 'lb').every(ex => ex.unit === 'lb'),
         'global unit change synchronizes every weighted exercise definition');
+      check(t.state.settings.loadStep === 5, 'the default load step follows the unit (2.5 kg → 5 lb)');
       t.setUnit('kg');
+      check(t.state.settings.loadStep === 2.5, 'and back (5 lb → 2.5 kg)');
+      t.state.settings.loadStep = 4; t.setUnit('lb');
+      check(t.state.settings.loadStep === 9, 'a custom step is converted');
+      t.setUnit('kg'); t.state.settings.loadStep = 2.5;
+      const badStep = {version:13, settings:{unit:'lb', loadStep:-3}, exercises:[], routines:[], workouts:[]};
+      t.normalizeState(t.migrateState(badStep));
+      check(badStep.settings.loadStep === 5, 'an invalid stored step falls back to the unit default');
       const roundtrip = structuredClone(t.routinesPayload(t.state.exercises, [r]));
       roundtrip.routines[0].name = 'Round trip';
       t.importRoutines(file(roundtrip)); await wait();
@@ -511,14 +519,28 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
         {id:'cue-item',exerciseId:squat.id,sets:3,repsMin:5,repsMax:8,targetRir:2,weight:100}]});
       t.ui.selectedRoutineId='cue-routine'; t.ui.view='today'; t.render();
     });
-    assert.equal(await page.locator('.today-cues .load-cue').count(), 0,
+    assert.equal(await page.locator('.today-cues .cue-table tbody tr:not(.cue-actions-row)').count(), 0,
       'current routine target RIR prevents a cue when latest sets have no RIR');
     await page.evaluate(() => { const t=window.testAPI;
       t.state.routines.find(r => r.id==='cue-routine').items[0].targetRir=null; t.render(); });
-    assert.match(await page.locator('.today-cues').innerText(), /Rep target met.*Confirm good technique/s,
+    assert.match(await page.locator('.today-cues').innerText(), /Reps met — check technique and 1–2 RIR first/,
       'missing target RIR gets a rep cue and technique check rather than an unconditional load increase');
+    assert.match(await page.locator('.today-cues .cue-next').innerText(), /^102\.5 kg × 5$/,
+      'next load is the last load plus the step, at the bottom of the rep range');
+    assert.equal(await page.locator('.today-cues .cue-date').last().innerText(), await page.evaluate(() => {
+      const d = new Date(window.testAPI.state.workouts[0].startedAt);
+      return String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+    }), 'the last result is dated MM-DD');
+    await page.getByRole('button', {name:'Settings'}).click();
+    await page.locator('#load-step').fill('5');
+    await page.locator('#load-step').press('Tab');
+    await page.getByRole('button', {name:'Today', exact:true}).click();
+    assert.match(await page.locator('.today-cues .cue-next').innerText(), /^105 kg × 5$/, 'the step comes from Settings');
+    assert.equal(await page.locator('.today-cues [data-action="cue-dismiss"]').count(), 0, 'row actions start hidden');
+    await page.locator('.today-cues [data-action="cue-menu"]').click();
+    assert.equal(await page.locator('.today-cues [data-action="cue-menu"]').getAttribute('aria-expanded'), 'true', 'the row menu opens');
     await page.locator('.today-cues [data-action="cue-dismiss"]').click();
-    assert.equal(await page.locator('.today-cues .load-cue').count(), 0,
+    assert.equal(await page.locator('.today-cues .cue-table tbody tr:not(.cue-actions-row)').count(), 0,
       'dismissing hides the current exposure');
     assert.equal(await page.evaluate(() => window.testAPI.prepareBackup(window.testAPI.backupPayload())
       .progressionPreferences.some(pref => pref.exerciseId==='ex-squat' && pref.dismissedExposureKey)), true,
@@ -528,10 +550,11 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
       next.exercises[0].sets.forEach((set,i) => {set.id='cue-set-new-'+i;});
       next.exercises[1].sets[0].id='historic-set-new';
       t.state.workouts.unshift(next); t.render(); });
-    assert.equal(await page.locator('.today-cues .load-cue').count(), 1,
+    assert.equal(await page.locator('.today-cues .cue-table tbody tr:not(.cue-actions-row)').count(), 1,
       'a new exposure restores the dismissed cue');
+    await page.locator('.today-cues [data-action="cue-menu"]').click();
     await page.locator('.today-cues [data-action="cue-off"]').click();
-    assert.equal(await page.locator('.today-cues .load-cue').count(), 0,
+    assert.equal(await page.locator('.today-cues .cue-table tbody tr:not(.cue-actions-row)').count(), 0,
       'turning suggestions off hides the routine cue');
     await page.getByRole('button', {name:'History', exact:true}).click();
     if (!await page.locator('[data-progression-analysis]').evaluate(el => el.open))
@@ -924,9 +947,12 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
     });
     await ds.getByRole('button', {name:'Push day', exact:true}).click();
     const cueSheet = ds.getByRole('dialog', {name:'Push day'});
-    sheetCheck(await cueSheet.locator('.detail-cues .load-cue').count() === 1 &&
-      (await cueSheet.locator('.detail-cues').innerText()).includes('Bench Press'),
-      'the routine sheet leads with load guidance for a met target');
+    sheetCheck(await cueSheet.locator('.detail-cues .cue-table tbody tr').count() === 1 &&
+      (await cueSheet.locator('.detail-cues').innerText()).includes('Bench Press') &&
+      /^87\.5 kg × 5$/.test(await cueSheet.locator('.cue-next').innerText()),
+      'the routine sheet leads with the load table for a met target');
+    sheetCheck(await ds.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'the load table fits phone width');
+    await cueSheet.getByRole('button', {name:'Actions for Bench Press'}).click();
     await cueSheet.getByRole('button', {name:'Dismiss this result'}).click();
     sheetCheck(await cueSheet.locator('.detail-cues').count() === 0 && (await sheetState()).open,
       'dismissing a cue from the sheet removes it and keeps the sheet open');

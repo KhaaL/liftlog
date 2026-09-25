@@ -222,7 +222,8 @@ clear workout data) is cheap. Currently every one of them is a confirm-and-hope.
   more recogniser in `GESTURES`; it was left out of the detail sheet so the
   pattern could land before a gesture that needs tuning on real devices.
 - **Load guidance in the routine sheet — done.** A routine's detail sheet leads
-  with the same load cues Today shows under the picker (`routineLoadCues()`).
+  with the same table Today shows under the picker (`loadCueTableHTML()`),
+  including the suggested next load and reps.
 - **Sheets that open each other.** A routine's sheet lists exercises that have
   sheets of their own, and an exercise's sheet lists sessions that do too.
   Following them needs a back stack in `ui.detail` (and a back control), since
