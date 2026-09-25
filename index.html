@@ -812,6 +812,12 @@ kbd{
 .trend-picker{ min-width:180px; }
 .trend-foot{ display:flex; justify-content:space-between; gap:var(--sp-3); flex-wrap:wrap; margin-top:6px; }
 .trend-delta{ font-weight:650; }
+.records{ margin-top:var(--sp-4); padding-top:var(--sp-3); border-top:1px solid var(--border); }
+.records-title{ font-size:var(--fs-sm); font-weight:650; margin:0; }
+.records-list{ list-style:none; margin:var(--sp-2) 0 0; padding:0; font-size:var(--fs-sm); font-variant-numeric:tabular-nums; }
+.records-list li{ display:grid; grid-template-columns:1fr auto 4.5em; gap:var(--sp-3); padding:var(--sp-1) 0; border-top:1px solid var(--border); }
+.records-list li:first-child{ border-top:0; }
+.records-list .trend-delta{ text-align:right; }
 .trend-delta.up{ color:var(--success); }
 .trend-delta.down{ color:var(--danger); }
 .progression-panel{ padding:var(--sp-4); border-left:3px solid var(--warning); }
@@ -1125,6 +1131,7 @@ dialog::backdrop{ background:rgb(15 17 20 / .5); }
   #detail-dup span{ display:none; }
   #detail-dup{ min-width:44px; padding-inline:10px; }
 }
+.detail-cues .load-cue:first-of-type{ margin-top:0; }
 .detail-stats{ display:flex; flex-wrap:wrap; gap:var(--sp-1) var(--sp-4); font-size:var(--fs-sm); font-variant-numeric:tabular-nums; }
 .detail-stats b{ font-weight:650; }
 @media (max-width:640px){
@@ -2700,6 +2707,7 @@ function freshUI(){
     exerciseFilter:'',          /* Exercises search box, kept so re-renders don't drop it */
     trendExId:null,
     trendMode:'exercise',       /* Progress panel: 'exercise' or 'muscle' */
+    weeklyMetric:'volume',      /* weekly chart: 'volume' or 'sets' */
     trendMuscle:null,           /* selected muscle group in 'muscle' mode */
     historyLinksOpen:false,     /* reconciliation panel in History */
     historyLinksShowAll:false,  /* unresolved-only is the useful default */
@@ -5601,7 +5609,9 @@ function htmlPicker(){
   html += '<div class="mt-3"><button type="button" class="btn" data-action="start-empty">' + IC.plus + '<span>Start empty session</span></button></div>';
   return html;
 }
-function htmlRoutineLoadCues(routine){
+/* The load cues a routine's current targets have earned, one per movement:
+   under the picker on Today, and at the top of the routine's detail sheet. */
+function routineLoadCues(routine){
   const seen = new Set(), cues = [];
   routine.items.forEach(item => {
     const id = canonicalExerciseId(item.exerciseId);
@@ -5610,6 +5620,10 @@ function htmlRoutineLoadCues(routine){
     const cue = loadCueFor(id, item), ex = exerciseById(id);
     if (cue && ex) cues.push(loadCueHTML(cue, ex.name));
   });
+  return cues;
+}
+function htmlRoutineLoadCues(routine){
+  const cues = routineLoadCues(routine);
   return cues.length ? '<section class="panel today-cues" aria-label="Load guidance for ' + esc(routine.name) + '">' +
     '<h3>For ' + esc(routine.name) + '</h3>' + cues.join('') + '</section>' : '';
 }
@@ -6126,7 +6140,12 @@ function routineItemTarget(it, e){
    the same wherever the routine is drawn. */
 function routineDetailHTML(r){
   if (!r.items.length) return '<div class="detail-section"><p class="muted small">No exercises yet — edit the routine to add some.</p></div>';
-  let html = '<div role="list" aria-label="Exercises">';
+  /* Guidance first: it is the part of the sheet that changes what you load
+     next time, and it exists only when a target has actually been met. */
+  const cues = routineLoadCues(r);
+  let html = (cues.length ? '<section class="detail-section detail-cues" aria-label="Load guidance">' +
+    '<h3>Load guidance</h3>' + cues.join('') + '</section>' : '') +
+    '<div role="list" aria-label="Exercises">';
   routineGroups(r.items).forEach(group => {
     const pairStyle = group.length > 1 ? (group[0].supersetOf ? 'superset' : 'either') : '';
     group.forEach((it, gi) => {
@@ -6617,13 +6636,41 @@ function weekBarsSVG(weeks, ariaLabel, tip){
   });
   return '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(ariaLabel) + '">' + bars + '</svg>';
 }
+/* Completed working sets in a session, every movement counted: the unit the
+   movement-family view uses, here for the whole week. */
+const workoutWorkingSets = w => w.exercises.reduce((a,x) => a + x.sets.filter(countsVolume).length, 0);
+/* Two measures of one week. Volume adds up weight × reps, which is what a
+   barbell program wants and what a machine program cannot honestly sum —
+   stacks on different machines are not the same kilogram — so working sets,
+   which count the same on anything, sit one tap away. */
+const WEEKLY_METRICS = {
+  volume:{ title:'Weekly volume', label:'Volume', sub:'total weight × reps per week',
+    of:workoutVolume, fmt:v => fmtNum(Math.round(v)) + ' ' + unitLabel() },
+  sets:{ title:'Weekly working sets', label:'Working sets', sub:'completed sets per week, warm-ups excluded',
+    of:workoutWorkingSets, fmt:v => plural(v, 'set') }
+};
 function weeklyChart(ws){
-  const weeks = weekBuckets(ws, list => list.reduce((a,w) => a + workoutVolume(w), 0));
-  return '<section class="panel chart-panel mt-4" aria-label="Weekly volume, last 8 weeks">' +
-    '<div class="chart-head"><h2 class="panel-title">Weekly volume</h2>' +
-    '<span class="muted xs">total weight × reps per week</span></div>' +
-    weekBarsSVG(weeks, 'Bar chart of training volume for the last eight weeks',
-                v => fmtNum(v) + ' ' + unitLabel()) +
+  const key = WEEKLY_METRICS[ui.weeklyMetric] ? ui.weeklyMetric : 'volume';
+  const m = WEEKLY_METRICS[key];
+  const weeks = weekBuckets(ws, list => list.reduce((a,w) => a + m.of(w), 0));
+  /* the last four weeks, this one included, against the four before */
+  const recent = weeks.slice(4).reduce((a,w) => a + w.val, 0);
+  const prev = weeks.slice(0, 4).reduce((a,w) => a + w.val, 0);
+  const pct = prev > 0 ? Math.round((recent - prev) / prev * 100) : null;
+  const tab = (k, label) => '<button type="button" data-action="weekly-metric" data-metric="' + k + '" ' +
+    'aria-pressed="' + (k === key) + '">' + label + '</button>';
+  return '<section class="panel chart-panel mt-4" aria-label="' + m.title + ', last 8 weeks">' +
+    '<div class="chart-head"><div><h2 class="panel-title">' + m.title + '</h2>' +
+    '<span class="muted xs">' + m.sub + '</span></div>' +
+    '<div class="progress-modes" role="group" aria-label="Weekly measure">' +
+      tab('volume', WEEKLY_METRICS.volume.label) + tab('sets', WEEKLY_METRICS.sets.label) + '</div></div>' +
+    weekBarsSVG(weeks, 'Bar chart of ' + m.title.toLowerCase() + ' for the last eight weeks', m.fmt) +
+    '<div class="trend-foot weekly-foot">' +
+      '<span class="muted xs">' + m.fmt(recent) + ' in the last 4 weeks vs ' + m.fmt(prev) + ' in the 4 before</span>' +
+      (pct == null || pct === 0
+        ? '<span class="muted xs">' + (pct === 0 ? 'no change' : '') + '</span>'
+        : '<span class="xs trend-delta ' + (pct > 0 ? 'up' : 'down') + '">' + (pct > 0 ? '▲ +' : '▼ ') + Math.abs(pct) + '%</span>') +
+    '</div>' +
   '</section>';
 }
 /* What "better" means for one movement, in one place. Bodyweight work uses
@@ -6890,7 +6937,7 @@ function trendPanel(){
   const metricName = m.name;
   const unit = m.unit;
 
-  const sessions = exSessions(ex);
+  const sessions = sessionRecords(exSessions(ex));
 
   let body = '';
   if (sessions.length < 2){
@@ -6903,8 +6950,11 @@ function trendPanel(){
     const y = v => max === min ? H/2 : (H - pad - ((v - min)/(max - min)) * (H - pad*2));
     const r1 = n => Math.round(n*10)/10;
     const pts = vals.map((v,i) => r1(x(i)) + ',' + r1(y(v))).join(' ');
+    /* a filled dot is a session that beat every one before it */
     const dots = vals.map((v,i) =>
-      '<circle cx="' + r1(x(i)) + '" cy="' + r1(y(v)) + '" r="' + (i === vals.length-1 ? 4 : 2.5) + '" fill="' + (i === vals.length-1 ? 'var(--accent)' : 'var(--surface)') + '" stroke="var(--accent)" stroke-width="1.6"><title>' + fmtDate(sessions[i].date) + ' — ' + fmtNum(roundHalf(v)) + ' ' + esc(unit) + '</title></circle>').join('');
+      '<circle cx="' + r1(x(i)) + '" cy="' + r1(y(v)) + '" r="' + (i === vals.length-1 ? 4 : 2.8) + '" fill="' + (sessions[i].pr ? 'var(--accent)' : 'var(--surface)') + '" stroke="var(--accent)" stroke-width="1.6"' +
+        (sessions[i].pr ? ' data-record' : '') + '><title>' + fmtDate(sessions[i].date) + ' — ' + fmtNum(roundHalf(v)) + ' ' + esc(unit) +
+        (sessions[i].pr && i > 0 ? ' · new best' : '') + '</title></circle>').join('');
     const delta = roundHalf(vals[vals.length-1] - vals[0]);
     body = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Trend of ' + metricName + ' for ' + esc(ex.name) + ' across ' + vals.length + ' sessions">' +
       '<polyline points="' + pts + '" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>' + dots + '</svg>' +
@@ -6915,7 +6965,8 @@ function trendPanel(){
           : '<span class="xs trend-delta ' + (delta > 0 ? 'up' : 'down') + '">' +
               (delta > 0 ? '▲ +' : '▼ ') + fmtNum(Math.abs(delta)) + ' ' + esc(unit) + '</span>') +
       '</div>' +
-      '<p class="sr-only">' + metricName + ' went from ' + fmtNum(roundHalf(vals[0])) + ' to ' + fmtNum(roundHalf(vals[vals.length-1])) + ' ' + esc(unit) + '.</p>';
+      '<p class="sr-only">' + metricName + ' went from ' + fmtNum(roundHalf(vals[0])) + ' to ' + fmtNum(roundHalf(vals[vals.length-1])) + ' ' + esc(unit) + '.</p>' +
+      recordsHTML(sessions, unit);
   }
 
   return '<section class="panel chart-panel mt-4" aria-label="Exercise trend">' +
@@ -6930,6 +6981,34 @@ function trendPanel(){
     '<p class="muted xs mb-2">' + esc(metricName) + ' per session</p>' +
     body +
   '</section>';
+}
+
+/* Marks each session (oldest first) that beat every session before it. The
+   first one is the baseline rather than a record; ties do not count. */
+function sessionRecords(sessions){
+  let top = -Infinity;
+  return sessions.map((s, i) => {
+    const pr = s.best > top + 1e-9;
+    const out = Object.assign({}, s, { pr, first:i === 0, gain:pr && i > 0 ? s.best - top : 0 });
+    if (pr) top = s.best;
+    return out;
+  });
+}
+/* Newest first, the sessions that set a new best and by how much. A trend
+   line says which way a movement is going; this says when it last got
+   better, which is the question behind a plateau. */
+function recordsHTML(sessions, unit){
+  const records = sessions.filter(s => s.pr && !s.first).reverse();
+  const last = records[0];
+  const lead = last
+    ? plural(records.length, 'new best') + ' since ' + fmtDate(sessions[0].date) + ' · latest ' + sinceLabel(last.date)
+    : 'No new best since the first session, ' + fmtDate(sessions[0].date);
+  return '<div class="records"><h3 class="records-title">Records</h3><p class="muted xs">' + esc(lead) + '</p>' +
+    (records.length ? '<ul class="records-list">' + records.slice(0, 5).map(r =>
+      '<li><span class="muted">' + fmtDate(r.date) + '</span>' +
+      '<span><b>' + fmtNum(roundHalf(r.best)) + '</b> ' + esc(unit) + '</span>' +
+      '<span class="trend-delta up">+' + fmtNum(roundHalf(r.gain)) + '</span></li>').join('') + '</ul>' : '') +
+  '</div>';
 }
 
 /* Movement-family volume is deliberately separate from progression identity. */
@@ -7527,6 +7606,7 @@ const actions = {
     else toast('Clipboard unavailable here');
   },
   'trend-mode'(d){ ui.trendMode = d.mode === 'muscle' ? 'muscle' : 'exercise'; render(); },
+  'weekly-metric'(d){ ui.weeklyMetric = d.metric === 'sets' ? 'sets' : 'volume'; render(); },
   'progression-select'(d){
     if (!historyExerciseById(d.id)) return;
     ui.trendMode = 'exercise'; ui.trendExId = d.id;

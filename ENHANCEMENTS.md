@@ -78,10 +78,16 @@ Distance is outside Liftlog's supported exercise model. Transfer schema 1.7 no
 longer exports or advertises it; imports drop unsupported distance sets, and
 state normalization removes stale distance fields.
 
-### 2.5 Richer progress views
-Per-muscle-group volume over time, set/rep tonnage per week, PR history for a
-movement, and estimated 1RM trend lines against a target. The aggregation
-helpers (`exerciseStats`, `sumVolume`) already do the hard part.
+### 2.5 Richer progress views — **mostly done**
+Done: working sets per movement family per week; a weekly chart that switches
+between volume and working sets, with the last four weeks against the four
+before; and records — the sessions that set a new best for a movement, marked
+on its trend and listed with their gains.
+
+Still open: an estimated-1RM **target** drawn on the trend. It needs a stored
+per-exercise goal, which means a new field on the exercise, a schema version,
+and a place in the transfer format — worth doing once there is a clear use for
+the number beyond the line itself.
 
 ### 2.6 Plate calculator — **withdrawn**
 The program Liftlog is used for is built on machines with pin-selected stacks,
@@ -215,6 +221,8 @@ clear workout data) is cheap. Currently every one of them is a confirm-and-hope.
   the far edge from the thumb. A downward drag on `.sheet-head` would be one
   more recogniser in `GESTURES`; it was left out of the detail sheet so the
   pattern could land before a gesture that needs tuning on real devices.
+- **Load guidance in the routine sheet — done.** A routine's detail sheet leads
+  with the same load cues Today shows under the picker (`routineLoadCues()`).
 - **Sheets that open each other.** A routine's sheet lists exercises that have
   sheets of their own, and an exercise's sheet lists sessions that do too.
   Following them needs a back stack in `ui.detail` (and a back control), since

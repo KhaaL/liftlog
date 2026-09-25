@@ -428,8 +428,17 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
     }), true, 'progression warnings precede the aggregate chart');
     assert.match(await page.locator('#progression-flags').innerText(), /Last: .*100 kg · 8 \/ 8 \/ 8 reps/,
       'flag shows the latest working-set load and reps');
-    assert.match(await page.locator('.trend-foot').first().innerText(), /No change/,
+    assert.match(await page.locator('[aria-label="Exercise trend"] .trend-foot').innerText(), /No change/,
       'flat strength trend is neutral rather than a green gain');
+    assert.match(await page.locator('[aria-label="Exercise trend"] .records').innerText(), /No new best since the first session/,
+      'a flat series reports no record after its baseline');
+    await page.getByRole('button', {name:'Working sets'}).click();
+    assert.equal(await page.locator('[aria-label="Weekly working sets, last 8 weeks"] [aria-pressed="true"]').innerText(), 'Working sets',
+      'the weekly chart switches to working sets');
+    assert.match(await page.locator('.weekly-foot').innerText(), /12 sets in the last 4 weeks vs 0 sets in the 4 before/,
+      'the weekly foot compares the last four weeks with the four before');
+    await page.getByRole('button', {name:'Volume', exact:true}).click();
+    assert.equal(await page.locator('[aria-label="Weekly volume, last 8 weeks"]').count(), 1, 'and back to volume');
     await page.getByRole('button', {name:'Show progress for Back Squat'}).click();
     assert.equal(await page.locator('#progress-exercise-select').inputValue(),
       await page.evaluate(() => window.testAPI.state.exercises.find(ex => ex.name === 'Back Squat').id),
@@ -442,6 +451,10 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
     });
     assert.equal(await page.locator('#progression-flags').count(), 0,
       'correcting a logged set clears a stale flag without stored flag state');
+    assert.equal(await page.locator('[aria-label="Exercise trend"] .records-list li').count(), 1,
+      'the session that beat its predecessors is listed as a record');
+    assert.equal(await page.locator('[aria-label="Exercise trend"] circle[data-record]').count(), 2,
+      'the baseline and the record are the filled dots on the trend');
     await page.evaluate(() => {
       const ex = window.testAPI.state.workouts[0].exercises[0];
       ex.targetRepsMin = 5; ex.targetRepsMax = 8; ex.targetRir = 2;
@@ -872,6 +885,24 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
       window.testAPI.ui.detail.id === id && document.querySelector('#detail-dlg').open, finished),
       'finishing a workout opens it in its sheet as the summary');
     await ds.screenshot({path:'/tmp/liftlog-session-sheet.png'});
+    await ds.keyboard.press('Escape');
+
+    /* a met target shows its load guidance in the routine sheet too */
+    await ds.evaluate(() => {
+      const t = window.testAPI, at = Date.now() + 60000;
+      t.state.workouts.unshift({id:'ds-ready',routineId:'ds-push',routineName:'Push day',startedAt:at,finishedAt:at + 600000,notes:'',
+        exercises:[{exerciseId:'ds-bench',name:'Bench Press',category:'Push',unit:'kg',loadMode:'total',plannedSets:3,targetRepsMin:5,targetRepsMax:8,targetRir:2,
+          sets:[1,2,3].map(n => ({id:'ds-r' + n,weight:85,reps:8,rir:2,unit:'kg',completed:true}))}]});
+      t.navigate('routines');
+    });
+    await ds.getByRole('button', {name:'Push day', exact:true}).click();
+    const cueSheet = ds.getByRole('dialog', {name:'Push day'});
+    sheetCheck(await cueSheet.locator('.detail-cues .load-cue').count() === 1 &&
+      (await cueSheet.locator('.detail-cues').innerText()).includes('Bench Press'),
+      'the routine sheet leads with load guidance for a met target');
+    await cueSheet.getByRole('button', {name:'Dismiss this result'}).click();
+    sheetCheck(await cueSheet.locator('.detail-cues').count() === 0 && (await sheetState()).open,
+      'dismissing a cue from the sheet removes it and keeps the sheet open');
     await ds.close();
     console.log('PASS detail sheets: ' + sheetChecks.length + ' checks across routines, exercises and history');
 

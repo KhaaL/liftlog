@@ -1,11 +1,11 @@
 # Runs both browser suites (tests/README.md) on every pull request and on main.
 #
-# The job runs inside Playwright's own image rather than on a bare runner: the
-# suites assert layout at phone widths, and those results depend on which fonts
+# The suites run inside Playwright's own image rather than on a bare runner:
+# they assert layout at phone widths, and those results depend on which fonts
 # are installed. The image fixes the font set as well as the browser, so a run
-# means the same thing every time. Its tag must match the playwright version in
-# package.json — on a mismatch Playwright stops with "Executable doesn't exist"
-# and says which image to use.
+# means the same thing every time. Its tag is read from package.json by the
+# first job, so bumping Playwright there (by hand or by Dependabot) is the only
+# edit an upgrade needs.
 name: Browser tests
 
 on:
@@ -22,11 +22,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  playwright-version:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      # the exact version package.json pins, which the image tags follow
+      - id: read
+        run: |
+          version=$(node -p "require('./package.json').devDependencies.playwright")
+          echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "playwright must be pinned to an exact version, got '$version'"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
   browser-tests:
+    needs: playwright-version
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     container:
-      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      image: mcr.microsoft.com/playwright:v${{ needs.playwright-version.outputs.version }}-noble
       options: --user 1001
     steps:
       - uses: actions/checkout@v4
