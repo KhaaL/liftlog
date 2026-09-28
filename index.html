@@ -1893,6 +1893,21 @@ function sameProgressionContract(a, b){
   if (x.loadMode === 'machine_stack') return !!x.equipmentKey && x.equipmentKey === y.equipmentKey;
   return x.equipmentKey === y.equipmentKey;
 }
+/* Whether a planned load written for one exercise means the same number on
+   another. Equipment identity decides which series a set joins, not what the
+   number means; a per-hand or added-to-bodyweight load is a different number. */
+function sameLoadNumbers(a, b){
+  const x = progressionContract(a), y = progressionContract(b);
+  if (!x || !y || x.kind !== y.kind) return false;
+  const plain = mode => mode === 'total' || mode === 'machine_stack';
+  return x.loadMode === y.loadMode || (plain(x.loadMode) && plain(y.loadMode));
+}
+/* Two keys that are both present and differ name two different implements;
+   a missing key is a less detailed record, not a different machine. */
+const differentEquipment = (a, b) => {
+  const x = String(a.equipmentKey || '').trim().toLowerCase(), y = String(b.equipmentKey || '').trim().toLowerCase();
+  return !!x && !!y && x !== y;
+};
 /* kg/lb is a display preference, not a property of one movement. Exercise
    definitions store the active display unit only as the legacy representation
    of "weighted"; logged sets remain the source of truth for their actual unit. */
@@ -2870,6 +2885,23 @@ function historyExerciseById(id){
     notes:'', url:'', historical:true } : null;
 }
 const normalizedExerciseName = name => String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+/* Library names are unique, archived exercises included: two entries a picker
+   cannot tell apart are how one series gets split across duplicates. */
+const exerciseNameTaken = (name, exceptId) =>
+  state.exercises.some(e => e.id !== exceptId && normalizedExerciseName(e.name) === normalizedExerciseName(name));
+function distinctExerciseName(name, def){
+  const base = String(name).trim();
+  if (!exerciseNameTaken(base)) return base;
+  const detail = String(def.equipmentKey || '').trim() || LOAD_MODE_TEXT[normalizeLoadMode(def.loadMode, def.unit)];
+  let candidate = base + ' (' + detail + ')';
+  for (let n = 2; exerciseNameTaken(candidate); n++) candidate = base + ' (' + detail + ') ' + n;
+  return candidate;
+}
+const exerciseHasHistory = id => state.workouts.some(w => (w.exercises || []).some(ex => ex.exerciseId === id)) ||
+  (state.exerciseLinks || []).some(link => link.targetId === id);
+function exerciseSessionCount(id){
+  return state.workouts.filter(w => (w.exercises || []).some(ex => canonicalExerciseId(ex.exerciseId) === id)).length;
+}
 function suggestedExercise(identity){
   const matches = state.exercises.filter(ex => normalizedExerciseName(ex.name) === normalizedExerciseName(identity.name) &&
     compatibleHistoryLink(identity.id, ex.id));
@@ -2886,6 +2918,18 @@ function compatibleHistoryLink(sourceId, targetId){
   const target = exerciseById(targetId);
   const sources = historyProgressionContracts(sourceId);
   return !!(target && sources.length && sources.every(source => sameProgressionContract(source, target)));
+}
+/* The links into an exercise that hold today and would not under `updated`:
+   the same every-logged-block rule normalizeState() applies on each load, so
+   this is exactly what the next load would silently drop. */
+function linksBrokenBy(exerciseId, updated){
+  const current = exerciseById(exerciseId);
+  const holds = (sourceId, def) => {
+    const sources = historyProgressionContracts(sourceId);
+    return sources.length > 0 && sources.every(source => sameProgressionContract(source, def));
+  };
+  return (state.exerciseLinks || []).filter(link => link.targetId === exerciseId && current &&
+    holds(link.sourceId, current) && !holds(link.sourceId, updated));
 }
 function unresolvedHistoryExercises(){
   const separate = new Set(state.historySeparateIds || []);
@@ -2925,7 +2969,7 @@ function addHistoricalExerciseToLibrary(sourceId){
   if (exerciseById(sourceId)) return false;
   const x = historyExerciseIdentities().find(item => item.id === sourceId);
   if (!x) return false;
-  state.exercises.push({ id:x.id, name:x.name, category:normalizeCategory(x.category, x.name),
+  state.exercises.push({ id:x.id, name:distinctExerciseName(x.name, x), category:normalizeCategory(x.category, x.name),
     unit:normalizedExerciseUnit(x.unit, state.settings.unit), loadMode:normalizeLoadMode(x.loadMode, x.unit),
     equipmentKey:x.equipmentKey || '', movementFamily:x.movementFamily || inferMovementFamily(x.name, x.category),
     archived:false, notes:'', url:'' });
@@ -4391,7 +4435,7 @@ function addRoutineItem(exId){
 function saveNewExercise(form){
   const name = form.name.trim();
   if (!name){ ui.exerciseFormError = 'Name is required.'; render(); return; }
-  if (state.exercises.some(e => e.name.toLowerCase() === name.toLowerCase())){
+  if (exerciseNameTaken(name)){
     ui.exerciseFormError = 'An exercise with this name already exists.'; render(); return;
   }
   /* A link that cannot be made into an http(s) one is dropped rather than
@@ -4449,6 +4493,9 @@ function saveExerciseDraft(){
   const i = state.exercises.findIndex(e => e.id === d.id);
   if (i === -1) return;
   const previous = state.exercises[i];
+  if (normalizedExerciseName(d.name) !== normalizedExerciseName(previous.name) && exerciseNameTaken(d.name, d.id)){
+    toast('Another exercise is already named “' + d.name.trim() + '” — use Merge to combine them'); return;
+  }
   const url = safeUrl(d.url);
   const badUrl = !url && String(d.url || '').trim() !== '';
   const updated = { id:d.id, name:d.name.trim(), category:normalizeCategory(d.category, d.name),
@@ -4456,12 +4503,47 @@ function saveExerciseDraft(){
                     loadMode:normalizeLoadMode(d.loadMode, d.unit), equipmentKey:String(d.equipmentKey || '').trim(),
                     movementFamily:String(d.movementFamily || '').trim() || inferMovementFamily(d.name, d.category),
                     archived:!!d.archived, notes:d.notes.trim(), url };
+  const broken = linksBrokenBy(d.id, updated);
+  if (!broken.length) return applyExerciseDraft(updated, badUrl ? ['the link was not a valid web address'] : []);
+  return confirmHistorySplit(previous, updated, broken).then(choice => {
+    if (!choice || !exerciseById(d.id) || ui.exerciseDraft !== d) return;
+    const notes = badUrl ? ['the link was not a valid web address'] : [];
+    if (choice === 'keep'){
+      notes.push('load convention kept so its history stays in one series');
+      applyExerciseDraft({ ...updated, unit:previous.unit, loadMode:previous.loadMode, equipmentKey:previous.equipmentKey }, notes);
+      return;
+    }
+    const gone = new Set(broken.map(link => link.sourceId));
+    state.exerciseLinks = state.exerciseLinks.filter(link => !(link.targetId === d.id && gone.has(link.sourceId)));
+    state.settings.historyLinksDismissedKey = '';
+    notes.push(plural(gone.size, 'earlier exercise') + ' separated — review them in History');
+    applyExerciseDraft(updated, notes);
+  });
+}
+/* Editing the definition of a linked exercise can change the contract its
+   links were accepted under. The next load would drop them without a word, so
+   the user chooses now: keep the convention, or separate them knowingly. */
+function confirmHistorySplit(previous, updated, broken){
+  const describe = ex => LOAD_MODE_TEXT[normalizeLoadMode(ex.loadMode, ex.unit)] +
+    (String(ex.equipmentKey || '').trim() ? ' · ' + ex.equipmentKey.trim() : ', no equipment key');
+  const ids = new Set(broken.map(link => link.sourceId));
+  const sessions = state.workouts.filter(w => w.exercises.some(ex => ids.has(ex.exerciseId))).length;
+  return dialog({ title:'Keep this exercise’s history together?',
+    body:'“' + previous.name + '” is joined with ' + plural(ids.size, 'earlier exercise') + ' (' + plural(sessions, 'session') +
+      ') recorded as ' + describe(previous) + '. Recording it as ' + describe(updated) +
+      ' separates them from its progress chart.',
+    buttons:[{ label:'Cancel', value:null },
+      { label:'Change anyway', value:'change' },
+      { label:'Keep history together', value:'keep', cls:'btn-primary', autofocus:true }] });
+}
+function applyExerciseDraft(updated, notes){
+  const i = state.exercises.findIndex(e => e.id === updated.id);
+  if (i === -1) return;
+  const previous = state.exercises[i];
   state.exercises[i] = updated;
   const activeSync = syncExerciseDefinitionToActiveWorkout(previous, updated);
   ui.exerciseDraft = null;
   save(); render();
-  const notes = [];
-  if (badUrl) notes.push('the link was not a valid web address');
   if (activeSync.unitDeferred) notes.push('the new unit starts next workout');
   if (activeSync.loadDeferred) notes.push('the new load convention starts next workout');
   toast('Exercise updated' + (notes.length ? ' — ' + notes.join('; ') : ''));
@@ -4472,16 +4554,30 @@ function setExerciseArchived(id, archived){
   if (ui.exerciseDraft && ui.exerciseDraft.id === id) ui.exerciseDraft = null;
   save(); render(); toast(ex.archived ? 'Exercise archived' : 'Exercise restored');
 }
-function mergeExercises(sourceId, targetId){
+/* The same contract, or a source with nothing logged under it and not in the
+   ongoing workout: with no sets there is no series whose meaning a different
+   load convention could change. */
+function canMergeExercises(source, target){
+  if (exerciseMeasureKind(source.unit) !== exerciseMeasureKind(target.unit)) return false;
+  return sameProgressionContract(source, target) || (!exerciseHasHistory(source.id) &&
+    !(state.activeWorkout && state.activeWorkout.exercises.some(ex => ex.exerciseId === source.id)));
+}
+/* Writes state only; mergeExercises() is the Library action around it. */
+function mergeExerciseInto(sourceId, targetId){
   const source = exerciseById(sourceId), target = exerciseById(targetId);
   if (!source || !target || sourceId === targetId) return 'Choose a different surviving exercise.';
-  if (!sameProgressionContract(source, target)) return 'These exercises do not share the same load convention, equipment, and movement family.';
+  if (!canMergeExercises(source, target)) return '“' + source.name + '” has logged history under a different load convention or equipment, so it can only merge into an exercise recorded the same way.';
   const collision = state.routines.find(r => r.items.some(it => it.exerciseId === sourceId) && r.items.some(it => it.exerciseId === targetId));
   if (collision) return '“' + collision.name + '” contains both exercises. Remove or reconcile one routine item first.';
   if (state.activeWorkout && state.activeWorkout.exercises.some(ex => ex.exerciseId === sourceId) &&
       state.activeWorkout.exercises.some(ex => ex.exerciseId === targetId))
     return 'The ongoing workout contains both exercises. Finish it or remove one exercise before merging.';
-  state.routines.forEach(r => r.items.forEach(it => { if (it.exerciseId === sourceId) it.exerciseId = targetId; }));
+  const keepWeight = sameLoadNumbers(source, target);
+  state.routines.forEach(r => r.items.forEach(it => {
+    if (it.exerciseId !== sourceId) return;
+    it.exerciseId = targetId;
+    if (!keepWeight) it.weight = null;
+  }));
   if (state.activeWorkout) state.activeWorkout.exercises.forEach(ex => {
     if (ex.exerciseId !== sourceId) return;
     ex.exerciseId = targetId; ex.name = target.name; ex.category = target.category; ex.unit = target.unit;
@@ -4490,13 +4586,20 @@ function mergeExercises(sourceId, targetId){
   });
   const links = (state.exerciseLinks || []).filter(link => link.sourceId !== sourceId && link.sourceId !== targetId)
     .map(link => link.targetId === sourceId ? { sourceId:link.sourceId, targetId } : link);
-  links.push({ sourceId, targetId });
+  /* Normalization drops a link with no logged sets behind it anyway. */
+  if (state.workouts.some(w => w.exercises.some(ex => ex.exerciseId === sourceId))) links.push({ sourceId, targetId });
   const seen = new Set();
   state.exerciseLinks = links.filter(link => !seen.has(link.sourceId) && seen.add(link.sourceId));
   combineProgressionPreferences(sourceId, targetId);
   state.historySeparateIds = (state.historySeparateIds || []).filter(id => id !== sourceId);
   state.exercises = state.exercises.filter(ex => ex.id !== sourceId);
   state.settings.historyLinksDismissedKey = '';
+  return '';
+}
+function mergeExercises(sourceId, targetId){
+  const source = exerciseById(sourceId), target = exerciseById(targetId);
+  const error = mergeExerciseInto(sourceId, targetId);
+  if (error) return error;
   ui.mergeExerciseId = null; ui.mergeExerciseError = ''; ui.exerciseDraft = null;
   save(); render(); toast('Merged “' + source.name + '” into “' + target.name + '”');
   return '';
@@ -5095,11 +5198,6 @@ function exerciseNameSimilarity(a, b){
   return shared && shared / (x.size + y.size - shared) >= 0.5 ? 'weak' : null;
 }
 const MATCH_TIER_RANK = { name:0, strong:1, weak:2 };
-/* Different machines' stacks are not comparable loads, which is what the
-   contract's equipment key exists to say; every other difference is a
-   recording convention the user can knowingly override. */
-const machineStackConflict = (a, b) => !sameProgressionContract(a, b) &&
-  [a, b].some(x => normalizeLoadMode(x.loadMode, x.unit) === 'machine_stack');
 function matchImportedExercise(source){
   const byId = validId(source.id) ? exerciseById(source.id) : null;
   if (byId && normalizedExerciseName(byId.name) === normalizedExerciseName(source.name) &&
@@ -5109,7 +5207,7 @@ function matchImportedExercise(source){
     if (exerciseMeasureKind(ex.unit) !== kind) return null;
     const tier = normalizedExerciseName(ex.name) === normalizedExerciseName(source.name) ? 'name' :
       exerciseNameSimilarity(key, exerciseNameKey(ex.name));
-    return tier ? { ex, tier, compatible:sameProgressionContract(ex, source) } : null;
+    return tier ? { ex, tier, compatible:sameProgressionContract(ex, source), keepsLoad:sameLoadNumbers(ex, source) } : null;
   }).filter(Boolean).sort((a, b) => MATCH_TIER_RANK[a.tier] - MATCH_TIER_RANK[b.tier] ||
     b.compatible - a.compatible || !!a.ex.archived - !!b.ex.archived || compareExerciseNames(a.ex, b.ex));
   const exact = candidates.filter(c => c.tier === 'name' && c.compatible);
@@ -5117,10 +5215,14 @@ function matchImportedExercise(source){
   const unique = live.length ? live : exact;
   if (unique.length === 1) return { status:'exact', target:unique[0].ex.id, candidates };
   if (!candidates.length) return { status:'new', target:null, candidates };
-  const best = candidates[0];
-  const preselect = best.tier !== 'weak' && !machineStackConflict(best.ex, source) &&
-    candidates.filter(c => c.tier === best.tier).length === 1;
-  return { status:'review', target:preselect ? best.ex.id : null, candidates };
+  /* Two different, named implements (gym A's leg press, gym B's) are never
+     pre-selected. Among same-name exercises any existing one beats creating
+     another identical name, so a tie goes to the one with the most history;
+     a tie between merely similar names is left to the user. */
+  const top = candidates.filter(c => c.tier === candidates[0].tier && !differentEquipment(c.ex, source));
+  const pick = !top.length || top[0].tier === 'weak' ? null : top.length === 1 ? top[0] :
+    top[0].tier === 'name' ? [...top].sort((a, b) => exerciseSessionCount(b.ex.id) - exerciseSessionCount(a.ex.id))[0] : null;
+  return { status:'review', target:pick ? pick.ex.id : null, candidates };
 }
 /* Pure: reads state, writes nothing. Routines are filtered exactly as before
    (invalid or already-present names skipped), and only exercises those
@@ -5162,15 +5264,15 @@ function applyRoutineImport(plan, choices){
          file keeps its relationship to the Library. */
       const src = m.src;
       const id = validId(src.id) && !exerciseById(src.id) ? src.id : uid();
-      local = { id, name:String(src.name), category:normalizeCategory(src.category, src.name),
+      local = { id, name:distinctExerciseName(src.name, m.source), category:normalizeCategory(src.category, src.name),
         unit:normalizedExerciseUnit(m.source.unit, state.settings.unit),
         loadMode:m.source.loadMode, equipmentKey:m.source.equipmentKey.trim(), movementFamily:m.source.movementFamily,
         archived:!!src.archived, notes:String(src.notes || ''), url:safeUrl(src.url) };
       state.exercises.push(local); addedEx++;
     }
-    /* A planned load recorded under another load convention would be read as
-       this exercise's load, so it is left for the workout to fill in. */
-    resolved.set(m.src, { id:local.id, keepWeight:sameProgressionContract(local, m.source) });
+    /* A planned load that means a different number here (per hand, added to
+       bodyweight) is left for the workout to fill in. */
+    resolved.set(m.src, { id:local.id, keepWeight:sameLoadNumbers(local, m.source) });
   });
   plan.routines.forEach(r => {
     const itemIds = new Set();
@@ -5221,9 +5323,10 @@ function importMatchNote(m){
 function importMatchRowHTML(m, i){
   const meta = ex => esc(exerciseLoadLabel(ex)) + (ex.equipmentKey ? ' · ' + esc(ex.equipmentKey) : '');
   const options = m.candidates.map(c => '<option value="' + esc(c.ex.id) + '"' + (m.target === c.ex.id ? ' selected' : '') +
-      (c.compatible ? '' : ' data-drops-load="1"') + '>' +
+      (c.keepsLoad ? '' : ' data-drops-load="1"') + '>' +
       esc(c.ex.name) + ' · ' + meta(c.ex) + (c.ex.archived ? ' · archived' : '') + '</option>').join('') +
-    '<option value=""' + (m.target ? '' : ' selected') + '>Create as a new exercise</option>';
+    '<option value=""' + (m.target ? '' : ' selected') + '>Create as a new exercise' +
+      (exerciseNameTaken(m.source.name) ? ' (“' + esc(distinctExerciseName(m.source.name, m.source)) + '”)' : '') + '</option>';
   const selected = m.candidates.find(c => c.ex.id === m.target);
   return '<div class="history-link-row">' +
     '<div><div class="history-link-name">' + esc(m.source.name) + '</div>' +
@@ -5231,8 +5334,8 @@ function importMatchRowHTML(m, i){
       '<div class="history-link-suggestion">' + esc(importMatchNote(m)) + '</div></div>' +
     '<div><label class="field"><span class="cap">In your Library</span>' +
       '<select id="import-match-' + i + '">' + options + '</select></label>' +
-      '<p class="history-link-meta" id="import-match-' + i + '-load"' + (selected && !selected.compatible ? '' : ' hidden') +
-        '>The file\u2019s planned load is left out: it was recorded differently.</p></div></div>';
+      '<p class="history-link-meta" id="import-match-' + i + '-load"' + (selected && !selected.keepsLoad ? '' : ' hidden') +
+        '>The file\u2019s planned load is left out: it is a different number there (per hand or added to bodyweight).</p></div></div>';
 }
 /* Resolves to the user's choices, or null when the import is cancelled
    (the Cancel button, Esc or Android back). */
@@ -7457,12 +7560,17 @@ function loadModeOptions(selected){
   return ['total','per_hand','machine_stack'].map(x => '<option value="' + x + '"' + (x === selected ? ' selected' : '') + '>' + LOAD_MODE_TEXT[x] + '</option>').join('');
 }
 function htmlExerciseMergeRow(source){
-  const compatible = state.exercises.filter(e => e.id !== source.id && !e.archived && sameProgressionContract(source,e)).sort(compareExerciseNames);
+  const sameName = e => normalizedExerciseName(e.name) === normalizedExerciseName(source.name);
+  const compatible = state.exercises.filter(e => e.id !== source.id && !e.archived && canMergeExercises(source, e))
+    .sort((a, b) => sameName(b) - sameName(a) || compareExerciseNames(a, b));
+  const label = e => esc(e.name) + (sameProgressionContract(source, e) ? '' : ' · recorded as ' + esc(exerciseLoadLabel(e)) +
+    (e.equipmentKey ? ' · ' + esc(e.equipmentKey) : ' · no equipment key'));
   return '<li class="list-row is-editing"><form data-form="ex-merge" id="ex-merge-form" tabindex="-1" data-source="' + esc(source.id) + '">' +
     '<h3 class="panel-title">Merge “' + esc(source.name) + '”</h3>' +
     '<p class="hint mt-2">Routine and active-workout references move to the survivor. Finished workouts keep their original snapshots and join the same progression series for analytics.</p>' +
+    (exerciseHasHistory(source.id) ? '' : '<p class="hint mt-2">Nothing is logged under this exercise, so it can also merge into one recorded differently; its routines then follow the survivor’s load convention.</p>') +
     '<label class="field mt-3"><span class="cap">Surviving exercise</span><select name="merge-target"' + (compatible.length ? '' : ' disabled') + '>' +
-      (compatible.length ? compatible.map(e => '<option value="' + esc(e.id) + '">' + esc(e.name) + '</option>').join('') : '<option>No compatible active exercise</option>') + '</select></label>' +
+      (compatible.length ? compatible.map(e => '<option value="' + esc(e.id) + '">' + label(e) + '</option>').join('') : '<option>No compatible active exercise</option>') + '</select></label>' +
     (ui.mergeExerciseError ? '<p class="error-text mt-2">' + esc(ui.mergeExerciseError) + '</p>' : '') +
     '<div class="form-actions mt-3"><button class="btn btn-primary btn-sm" type="submit"' + (compatible.length ? '' : ' disabled') + '>Merge exercises</button>' +
       '<button class="btn btn-sm" type="button" data-action="ex-merge-cancel">Cancel</button></div></form></li>';

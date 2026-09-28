@@ -684,17 +684,34 @@ imports without a dialog, as before.
   a few abbreviations (`BB`, `DB`, `RDL`, …) and keeps equipment words apart
   from the movement. "Pull-ups" and "Pullup" are the same movement, and so are
   "Back Squat" and "Barbell Back Squat". "Barbell Row" and "Dumbbell Row" are
-  not. A same-name or strong match is pre-selected only when it is the only
-  candidate at that level. Weak matches (shared words, such as "Bench Press" /
-  "Incline Bench Press") and ties are offered with **Create as a new exercise**
-  pre-selected.
+  not. A strong match is pre-selected only when it is the only one; weak
+  matches (shared words, such as "Bench Press" / "Incline Bench Press") and
+  ties between strong ones are offered with **Create as a new exercise**
+  pre-selected. Among several same-name exercises the one with the most
+  logged sessions is pre-selected, because creating yet another identical name
+  is never the better default.
 - **new** — no candidate; the exercise is created (source id kept when free).
 
-Candidates must have the same measurement kind. A mismatched machine stack is
-never pre-selected, because the equipment key exists to say that two machines'
-stacks are not comparable. The user can still choose it. A routine item matched
-to an exercise with a different contract drops its planned `weight`, which was
-recorded under the other convention; sets, reps and RIR are kept.
+Candidates must have the same measurement kind. An exercise is not
+pre-selected when it and the file's exercise both name an equipment key and
+the keys differ (`differentEquipment()`): that is two implements, such as two
+gyms' leg presses. A missing key is a less detailed record of the same thing,
+so a Library "Leg Curl" with no key is pre-selected for a file's machine-stack
+"Leg Curl" with `gym-a-leg-curl`. Generated routine files repeat exactly that
+shape, and pre-selecting "Create new" for it filled one Library with 17
+same-name copies.
+
+A routine item matched to another exercise keeps its planned `weight` when the
+number means the same there (`sameLoadNumbers()`): the same load mode, or
+total against machine stack. It is dropped for per-hand or bodyweight-plus
+loads, which are different numbers; sets, reps and RIR are always kept.
+
+Library names are unique, archived exercises included (`exerciseNameTaken()`).
+The New-exercise form and renaming refuse a taken name. Import and history's
+**Create exercise** name a new exercise through `distinctExerciseName()`, which
+appends the equipment key or load convention ("Leg Press (gym-b-press)"), so
+two entries a picker cannot tell apart are not created. A full restore accepts
+whatever names a valid backup holds.
 
 Fuzzy similarity never applies a match by itself. A wrong match logs future
 sets into another series, and that is harder to notice and undo than a
@@ -1415,6 +1432,27 @@ family remains an independent volume grouping. Machine stacks require the same n
 only offers compatible Library exercises. A merge rewrites routine and active
 workout references, removes the obsolete library definition, and creates this
 analytics join; finished workout snapshots remain unchanged.
+
+Normalization re-checks every link on each load, so editing a linked
+exercise's definition (measurement, load convention or equipment key) could
+break links it was accepted under, and the next load would drop them without a
+word. `saveExerciseDraft()` therefore asks first when `linksBrokenBy()`, which
+applies the same every-logged-block rule, finds any. **Keep history together**
+saves the other fields under the old convention. **Change anyway** saves the new
+one and removes exactly those links at once, so they reappear in the review
+rather than disappearing at the next load. An exercise's own logged blocks never
+split: progress and progression group by canonical id, whatever the blocks'
+snapshot convention. Load cues just wait for a session under the new
+convention, because `loadCueFor()` compares the latest block with the definition.
+
+The one exception is a merge from an exercise with no history: nothing logged
+under its id, no link pointing at it, and not in the ongoing workout
+(`canMergeExercises()`). With no sets there is no series whose meaning a
+different convention could change, so it may merge into any exercise of the
+same measurement kind. Its routine items move over, and keep their planned load
+per `sameLoadNumbers()`. No analytics link is created for it; normalization
+would drop a link with no sets behind it. This is what makes duplicate copies
+created by an import removable from the Library.
 
 A history import always leaves an inline result with separate counts for new,
 already-present, invalid, and conflicting workouts. This result and the review
