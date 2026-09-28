@@ -7,7 +7,7 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
     const page = await browser.newPage({ viewport:{ width:390, height:844 } });
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
-    const html = appWithTestAPI(`{ sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, planRoutineImport, applyRoutineImport, exerciseNameKey, exerciseNameSimilarity, sameLoadNumbers, distinctExerciseName, linksBrokenBy, importHistory, normalizeImportedSet, normalizeImportedWorkout, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, workoutVolume, progressionStatus, loadCueFor, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, compatibleHistoryLink, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, setExerciseArchived, mergeExercises, sameProgressionContract, exerciseLoadLabel, setSummary, remoteStartupSync, autoRemoteBackup, flushSave, save, render, supersetRun, currentMemberIndex, isSettledRow, switchSupersetMember, navigate, currentExercise, settleSupersets, pauseTimer, finishWorkout, sampleExercises, sampleRoutines, get timer(){return timer}, get state(){return state}, get ui(){return ui} }`);
+    const html = appWithTestAPI(`{ sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, planRoutineImport, applyRoutineImport, exerciseNameKey, exerciseNameSimilarity, sameLoadNumbers, distinctExerciseName, linksBrokenBy, sortedPlans, planDay, defaultRoutineId, newPlanDraft, localDay, importHistory, normalizeImportedSet, normalizeImportedWorkout, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, workoutVolume, progressionStatus, loadCueFor, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, compatibleHistoryLink, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, setExerciseArchived, mergeExercises, sameProgressionContract, exerciseLoadLabel, setSummary, remoteStartupSync, autoRemoteBackup, flushSave, save, render, supersetRun, currentMemberIndex, isSettledRow, switchSupersetMember, navigate, currentExercise, settleSupersets, pauseTimer, finishWorkout, sampleExercises, sampleRoutines, get timer(){return timer}, get state(){return state}, get ui(){return ui} }`);
     await page.route('https://liftlog.test/**', route => route.fulfill({ contentType:'text/html', body:html }));
     await page.goto('https://liftlog.test/');
     const result = await page.evaluate(async () => {
@@ -17,9 +17,11 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
       const wait = () => new Promise(r => setTimeout(r, 60));
       t.state.exercises = []; t.state.routines = []; t.state.workouts = [];
       const sample = t.sampleRoutinesFile();
-      check(sample.version === 13 && sample.schemaVersion === '1.11.0', 'sample version markers');
+      check(sample.version === 14 && sample.schemaVersion === '1.12.0', 'sample version markers');
       t.importRoutines(file(sample)); await wait();
-      check(t.state.routines.length === 1 && t.state.exercises.length === 3, 'routine sample imports all definitions');
+      check(t.state.routines.length === 2 && t.state.exercises.length === 3, 'routine sample imports all definitions');
+      check(t.state.routines[1].plan === true && /^\d{4}-\d{2}-\d{2}$/.test(t.state.routines[1].plannedFor) && !('plan' in t.state.routines[0]),
+        'the sample plan imports as a plan and the routine stays stable');
       const r = t.state.routines[0];
       check(r.id === 'rt-lower' && t.state.exercises.some(ex => ex.id === 'ex-squat'),
         'routine import preserves safe source identities');
@@ -27,7 +29,7 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
       check(r.items[0].repsMin === 5 && r.items[0].repsMax === 8 && r.items[0].targetRir === 2,
         'routine sample preserves rep range and target RIR');
       t.importRoutines(file(sample)); await wait();
-      check(t.state.routines.length === 1, 'routine import deduplicates');
+      check(t.state.routines.length === 2, 'routine import deduplicates');
       const history = t.sampleHistoryFile();
       t.importHistory(file(history)); await wait();
       const sets = t.state.workouts[0].exercises.flatMap(e => e.sets);
@@ -103,7 +105,7 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
         'rep range is ordered and target RIR is clamped');
       const old = {version:3, settings:{theme:'invalid',effortMetric:'invalid'}, exercises:[], routines:[{items:[{rest:60,sets:3,reps:5}]}],workouts:[{startedAt:1,exercises:[{restSeconds:60,sets:[{rpe:8}]}]}]};
       t.normalizeState(t.migrateState(old));
-      check(old.version === 13 && Array.isArray(old.exerciseLinks) && Array.isArray(old.historySeparateIds) && Array.isArray(old.bodyweights) && Array.isArray(old.progressionPreferences) &&
+      check(old.version === 14 && Array.isArray(old.exerciseLinks) && Array.isArray(old.historySeparateIds) && Array.isArray(old.bodyweights) && Array.isArray(old.progressionPreferences) &&
         old.routines[0].items[0].repsMin === 5 && old.routines[0].items[0].repsMax === 5 &&
         old.settings.effortMetric === 'rpe' && old.settings.theme === 'system' && !('rest' in old.routines[0].items[0]) &&
         !('restSeconds' in old.workouts[0].exercises[0]), 'complete migration chain and settings fallback');
@@ -127,7 +129,7 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
       t.state.schemaVersion = 'stale'; t.state.source = 'stale'; t.state.exportedAt = 'stale';
       const freshEnvelope = t.backupPayload();
       delete t.state.schemaVersion; delete t.state.source; delete t.state.exportedAt;
-      check(freshEnvelope.schemaVersion === '1.11.0' && freshEnvelope.source === 'liftlog-web' && freshEnvelope.exportedAt !== 'stale',
+      check(freshEnvelope.schemaVersion === '1.12.0' && freshEnvelope.source === 'liftlog-web' && freshEnvelope.exportedAt !== 'stale',
         'fresh export metadata wins over stale state fields');
       t.setUnit('lb');
       check(t.state.exercises.filter(ex => ex.unit === 'kg' || ex.unit === 'lb').every(ex => ex.unit === 'lb'),
@@ -373,7 +375,7 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
     });
     await page.getByRole('button', {name:'Import & replace', exact:true}).click();
     await page.waitForFunction(() => window.testAPI.state.activeWorkout?.timer?.remaining === 37);
-    assert.equal(await page.evaluate(() => window.testAPI.state.version), 13, 'full backup restore migrates');
+    assert.equal(await page.evaluate(() => window.testAPI.state.version), 14, 'full backup restore migrates');
     assert.equal(await page.evaluate(() => window.testAPI.state.activeWorkout.timer.remaining), 37, 'backup restore retains rest timer');
     await page.reload();
     assert.equal(await page.evaluate(() => window.testAPI.state.activeWorkout.exercises[0].name), 'Leg Press', 'settled workout survives reload');
@@ -723,7 +725,7 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
         'routine import preserves the superset');
       t.state.routines = t.state.routines.filter(r => r !== copy);
       const legacy = t.backupPayload(); legacy.version = 12;
-      check(t.prepareBackup(legacy).version === 13, 'v12 data migrates to v13 unchanged');
+      check(t.prepareBackup(legacy).version === 14, 'v12 data migrates to v14 unchanged');
 
       t.state.settings.autoRest = true;
       const resting = () => { const on = t.timer.running; t.pauseTimer(); t.timer.remaining = 0; return on; };
@@ -980,7 +982,7 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
       ['lib-squat', 'f-press', 'lib-bench', 'lib-plank', 'lib-pullup'], 'confirmed choices are applied');
     await im.evaluate(() => { const t = window.testAPI; t.state.exercises = []; t.state.routines = [];
       t.importRoutines(new File([JSON.stringify(t.sampleRoutinesFile())], 's.json', {type:'application/json'})); });
-    await im.waitForFunction(() => window.testAPI.state.routines.length === 1);
+    await im.waitForFunction(() => window.testAPI.state.routines.length === 2);
     assert.equal(await im.locator('#import-match-dlg').evaluate(d => d.open), false, 'a clean import asks nothing');
     await im.close();
     console.log(matchChecks.map(s => 'PASS ' + s).join('\n') + '\nPASS routine import review: cancel, Esc, choose, confirm, clean import');
@@ -1052,6 +1054,94 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
       ['total', 2], 'the editor keeps the convention and the links when asked to');
     await lg.close();
     console.log(guardChecks.map(s => 'PASS ' + s).join('\n') + '\nPASS the exercise editor asks before splitting history');
+
+    /* One-off plans: routines with plan/plannedFor that are spent once their
+       session is saved. */
+    const pl = await browser.newPage({ viewport:{ width:390, height:844 } });
+    pl.on('pageerror', e => errors.push(e.message));
+    await pl.route('https://liftlog.test/**', route => route.fulfill({ contentType:'text/html', body:html }));
+    await pl.goto('https://liftlog.test/');
+    const planChecks = await pl.evaluate(async () => {
+      const t = window.testAPI, checks = [];
+      const check = (condition, label) => { if (!condition) throw Error(label); checks.push(label); };
+      const wait = () => new Promise(r => setTimeout(r, 30));
+      const press = label => [...document.querySelectorAll('#dlg-actions button')].find(b => b.textContent === label).click();
+      const day = offset => t.localDay(Date.now() + offset * 86400000);
+      const item = id => ({ id, exerciseId:'bench', sets:1, repsMin:5, repsMax:5, targetRir:null, weight:60 });
+      const setup = () => {
+        t.state.activeWorkout = null; t.state.workouts = [];
+        t.state.exercises = [{ id:'bench', name:'Bench Press', category:'Push', unit:'kg', loadMode:'total', equipmentKey:'',
+          movementFamily:'horizontal_push', archived:false, notes:'', url:'' }];
+        t.state.routines = [
+          { id:'rt-b', name:'Day B', items:[item('b1')] },
+          { id:'pl-later', name:'Next week', plan:true, plannedFor:day(7), items:[item('l1')] },
+          { id:'pl-any', name:'Whenever', plan:true, plannedFor:null, items:[item('a1')] },
+          { id:'pl-today', name:'Push today', plan:true, plannedFor:day(0), items:[item('t1')] },
+          { id:'pl-late', name:'Day B', plan:true, plannedFor:day(-1), items:[item('o1')] }];
+      };
+      setup();
+      const order = t.sortedPlans();
+      check(order.map(x => x.r.id).join() === 'pl-late,pl-today,pl-any,pl-later', 'plans order overdue, today, anytime, later');
+      check(/^Overdue · /.test(order[0].day.label) && order[0].day.overdue && order[1].day.label === 'Today' &&
+        order[2].day.label === 'Anytime' && !order[3].day.overdue, 'each plan is labelled by its day');
+      check(t.defaultRoutineId() === 'pl-late', 'Today highlights the most pressing plan first');
+      const complete = () => { t.state.activeWorkout.exercises[0].sets[0].completed = true; };
+      t.startRoutine('pl-today'); complete(); t.finishWorkout();
+      check(!t.state.routines.some(r => r.id === 'pl-today') && t.state.workouts.some(w => w.routineName === 'Push today' && w.routineId === 'pl-today') &&
+        t.state.workouts[0].exercises[0].targetRepsMin === 5, 'saving a plan’s session removes the plan and History keeps what it prescribed');
+      t.startRoutine('pl-any'); let pending = t.finishWorkout(); await wait();
+      press('Discard'); await wait();
+      check(t.state.routines.some(r => r.id === 'pl-any') && !t.state.activeWorkout, 'discarding a plan’s session keeps the plan');
+      t.startRoutine('rt-b'); complete(); t.finishWorkout();
+      check(t.state.routines.some(r => r.id === 'rt-b'), 'a stable routine is never used up');
+      t.ui.routineDraft = { ...structuredClone(t.state.routines.find(r => r.id === 'rt-b')), plan:true, plannedFor:'2030-02-30' };
+      t.saveRoutineDraft();
+      check(t.ui.routineDraft && t.ui.routineError && !t.state.routines.find(r => r.id === 'rt-b').plan, 'an impossible plan day is refused');
+      t.ui.routineDraft.plannedFor = '2030-03-04'; t.saveRoutineDraft();
+      const converted = t.state.routines.find(r => r.id === 'rt-b');
+      check(converted.plan === true && converted.plannedFor === '2030-03-04', 'the editor turns a routine into a plan');
+      t.ui.routineDraft = { ...structuredClone(converted), plan:false }; t.saveRoutineDraft();
+      const back = t.state.routines.find(r => r.id === 'rt-b');
+      check(!('plan' in back) && !('plannedFor' in back), 'and back into a stable routine with no plan fields left');
+      const draft = t.newPlanDraft(back);
+      check(draft.id === null && draft.plan === true && draft.plannedFor === t.localDay() && draft.items[0].id !== 'b1' &&
+        back.items[0].id === 'b1' && !back.plan, 'Plan… copies a routine as today’s plan and leaves the routine alone');
+      setup();
+      const file = t.routinesPayload(t.state.exercises, [
+        { id:'f1', name:'Day B', plan:true, plannedFor:day(-1), items:[item('x1')] },
+        { id:'f2', name:'Day B', plan:true, plannedFor:day(14), items:[item('x2')] },
+        { id:'f3', name:'Day B', items:[item('x3')] },
+        { id:'f4', name:'Loose', plan:true, plannedFor:'not a day', items:[item('x4')] }]);
+      t.importRoutines(new File([JSON.stringify(file)], 'p.json', {type:'application/json'})); await wait(); await wait();
+      check(!t.state.routines.some(r => r.id === 'f1') && t.state.routines.some(r => r.id === 'f2' && r.plannedFor === day(14)) &&
+        !t.state.routines.some(r => r.id === 'f3'), 'import dedupes a plan by name and day, and a routine by name');
+      check(t.state.routines.find(r => r.id === 'f4').plannedFor === null, 'an imported plan with an invalid day becomes anytime');
+      const round = t.prepareBackup(t.backupPayload());
+      check(round.routines.find(r => r.id === 'f2').plan === true && round.routines.find(r => r.id === 'f2').plannedFor === day(14) &&
+        !('plan' in round.routines.find(r => r.id === 'rt-b')), 'a backup keeps plans and stable routines apart');
+      const v13 = t.backupPayload(); v13.version = 13; v13.routines.forEach(r => { delete r.plan; delete r.plannedFor; });
+      check(t.prepareBackup(v13).version === 14 && t.prepareBackup(v13).routines.every(r => !r.plan), 'v13 data migrates, every routine stable');
+      setup(); t.navigate('today');
+      return checks;
+    });
+    await pl.waitForTimeout(3000); // let the setup's toasts leave before the screenshots
+    const planned = pl.getByRole('group', {name:'Choose a plan'});
+    assert.equal(await planned.locator('.routine-pick-row').count(), 4, 'Today lists every plan');
+    assert.equal(await planned.locator('.routine-pick-row').first().getByText('Overdue', {exact:true}).isVisible(), true, 'an overdue plan is marked');
+    assert.equal(await pl.getByRole('group', {name:'Choose a routine'}).locator('.routine-pick-row').count(), 1, 'the routine list holds stable routines only');
+    assert.equal(await pl.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'Today with plans fits phone width');
+    await pl.screenshot({path:'/tmp/liftlog-plans-today.png', fullPage:true});
+    await pl.evaluate(() => window.testAPI.navigate('routines'));
+    assert.equal(await pl.getByRole('list', {name:'Planned sessions'}).locator('li').count(), 4, 'Routines lists plans in their own section');
+    await pl.screenshot({path:'/tmp/liftlog-plans-routines.png', fullPage:true});
+    await pl.getByRole('list', {name:'Routines'}).getByRole('button', {name:'Day B'}).click();
+    await pl.getByRole('button', {name:'Plan a session from Day B'}).click();
+    await pl.locator('#routine-planned-for').fill('2031-05-06');
+    await pl.locator('#routine-form').getByRole('button', {name:'Save'}).click();
+    assert.equal(await pl.evaluate(() => window.testAPI.state.routines.filter(r => r.name === 'Day B' && r.plannedFor === '2031-05-06').length), 1,
+      'Plan… in a routine’s sheet saves a dated copy');
+    await pl.close();
+    console.log(planChecks.map(s => 'PASS ' + s).join('\n') + '\nPASS plans on Today and Routines, and Plan… from a routine sheet');
 
     /* Detail sheets: a routine, an exercise and a logged session all open in
        the same read-only sheet, and Edit hands over to the editor in the page. */
