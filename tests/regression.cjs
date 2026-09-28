@@ -7,7 +7,7 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
     const page = await browser.newPage({ viewport:{ width:390, height:844 } });
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
-    const html = appWithTestAPI(`{ sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, planRoutineImport, applyRoutineImport, exerciseNameKey, exerciseNameSimilarity, importHistory, normalizeImportedSet, normalizeImportedWorkout, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, workoutVolume, progressionStatus, loadCueFor, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, compatibleHistoryLink, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, setExerciseArchived, mergeExercises, sameProgressionContract, exerciseLoadLabel, setSummary, remoteStartupSync, autoRemoteBackup, flushSave, save, render, supersetRun, currentMemberIndex, isSettledRow, switchSupersetMember, navigate, currentExercise, settleSupersets, pauseTimer, finishWorkout, sampleExercises, sampleRoutines, get timer(){return timer}, get state(){return state}, get ui(){return ui} }`);
+    const html = appWithTestAPI(`{ sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, planRoutineImport, applyRoutineImport, exerciseNameKey, exerciseNameSimilarity, sameLoadNumbers, distinctExerciseName, importHistory, normalizeImportedSet, normalizeImportedWorkout, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, workoutVolume, progressionStatus, loadCueFor, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, compatibleHistoryLink, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, setExerciseArchived, mergeExercises, sameProgressionContract, exerciseLoadLabel, setSummary, remoteStartupSync, autoRemoteBackup, flushSave, save, render, supersetRun, currentMemberIndex, isSettledRow, switchSupersetMember, navigate, currentExercise, settleSupersets, pauseTimer, finishWorkout, sampleExercises, sampleRoutines, get timer(){return timer}, get state(){return state}, get ui(){return ui} }`);
     await page.route('https://liftlog.test/**', route => route.fulfill({ contentType:'text/html', body:html }));
     await page.goto('https://liftlog.test/');
     const result = await page.evaluate(async () => {
@@ -837,14 +837,16 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
       t.state.exercises = [ex('lib-squat','Back Squat','kg','total'), ex('lib-press','Leg Press','kg','machine_stack','gym-a-press'),
         ex('lib-bench','Bench Press','kg','total'), ex('lib-plank','Plank','time','duration'),
         ex('lib-pullup','Pull-up','bw','bodyweight_added'), ex('lib-row-old','Cable Row','kg','total','',true),
-        ex('lib-row','Cable Row','kg','total')];
+        ex('lib-row','Cable Row','kg','total'), ex('lib-dbpress','DB Shoulder Press','kg','per_hand'),
+        ex('lib-curl','Leg Curl','kg','total')];
       const file = { app:'liftlog', kind:'routines', exercises:[
           ex('f-squat','Back Squat','kg','total','olympic-bar'), ex('f-press','Leg Press','kg','machine_stack','gym-b-press'),
           ex('f-incline','Incline Bench Press','kg','total'), ex('f-plank','plank ','time','duration'),
           ex('f-pullups','Pull-ups','bw','bodyweight_added'), ex('f-curl','Hammer Curl','kg','total'),
           ex('lib-bench','Lat Pulldown','kg','total'), ex('f-row','Cable Row','kg','total'),
-          ex('f-timed-bench','Bench Press','time','duration')],
-        routines:[{ id:'rt-new', name:'Imported', items:['f-squat','f-press','f-incline','f-plank','f-pullups','f-curl','lib-bench','f-row','f-timed-bench']
+          ex('f-timed-bench','Bench Press','time','duration'), ex('f-dbpress','DB Shoulder Press','kg','total'),
+          ex('f-legcurl','Leg Curl','kg','machine_stack','gym-a-leg-curl')],
+        routines:[{ id:'rt-new', name:'Imported', items:['f-squat','f-press','f-incline','f-plank','f-pullups','f-curl','lib-bench','f-row','f-timed-bench','f-dbpress','f-legcurl']
           .map((exerciseId, i) => ({ id:'it-' + i, exerciseId, sets:3, repsMin:5, repsMax:8, weight:40 })) }] };
       const before = JSON.stringify(t.state);
       const plan = t.planRoutineImport(structuredClone(file));
@@ -854,7 +856,10 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
       check(by('f-row').status === 'exact' && by('f-row').target === 'lib-row', 'a live same-name exercise wins over an archived one');
       check(by('f-squat').status === 'review' && by('f-squat').target === 'lib-squat',
         'same name, different equipment is reviewed with the existing exercise pre-selected');
-      check(by('f-press').status === 'review' && by('f-press').target === null, 'another machine stack is reviewed with create pre-selected');
+      check(by('f-press').status === 'review' && by('f-press').target === null,
+        'two different named implements (gym A and gym B stacks) pre-select create');
+      check(by('f-legcurl').status === 'review' && by('f-legcurl').target === 'lib-curl',
+        'a machine-stack copy of a less detailed Library entry pre-selects the existing exercise');
       check(by('f-incline').status === 'review' && by('f-incline').target === null, 'a weak name match is offered but not pre-selected');
       check(by('f-pullups').status === 'review' && by('f-pullups').target === 'lib-pullup', 'a strong name match is pre-selected');
       check(by('f-curl').status === 'new' && by('lib-bench').status === 'new', 'no candidate, and an id reused for another name, create');
@@ -862,7 +867,13 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
       const count = t.state.exercises.length;
       t.applyRoutineImport(plan, null);
       const items = t.state.routines.find(r => r.id === 'rt-new').items, at = i => items[i];
-      check(at(0).exerciseId === 'lib-squat' && at(0).weight === null, 'a match across load conventions drops the planned load');
+      check(at(0).exerciseId === 'lib-squat' && at(0).weight === 40 && at(10).exerciseId === 'lib-curl' && at(10).weight === 40,
+        'equipment and total/stack differences keep the planned load');
+      check(at(9).exerciseId === 'lib-dbpress' && at(9).weight === null, 'a per-hand/total difference drops the planned load');
+      check(t.sameLoadNumbers(ex('a','A','kg','total'), ex('b','B','kg','machine_stack','k')) &&
+        !t.sameLoadNumbers(ex('a','A','kg','total'), ex('b','B','bw','bodyweight_added')), 'load numbers compare by what they mean');
+      check(t.state.exercises.find(e => e.id === 'f-timed-bench').name === 'Bench Press (Duration)',
+        'an import never creates a second exercise with a name already in the Library');
       check(at(4).exerciseId === 'lib-pullup' && at(4).weight === 40 && at(3).exerciseId === 'lib-plank', 'compatible matches keep the plan');
       check(at(1).exerciseId === 'f-press' && at(2).exerciseId === 'f-incline' && at(5).exerciseId === 'f-curl',
         'created exercises keep their free source ids');
@@ -877,15 +888,56 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
       check(chosen[2].exerciseId === 'lib-bench' && chosen[0].exerciseId !== 'lib-squat', 'review choices override the defaults');
       t.state.routines = []; t.state.exercises.splice(count);
       t.state.exercises.push(ex('lib-row-2','Cable Row','kg','total'));
+      const logged = (id, exerciseId, name, unit = 'kg') => ({ id, routineId:null, routineName:'Log', startedAt:1000, finishedAt:2000, notes:'',
+        exercises:[{ exerciseId, name, unit, loadMode:'total', equipmentKey:'', sets:[{ id:id + '-s', weight:40, reps:8, completed:true, unit }] }] });
+      t.state.workouts.push(logged('w-row-2', 'lib-row-2', 'Cable Row'));
       const twice = t.planRoutineImport(structuredClone(file));
       check(twice.matches.find(m => m.src.id === 'f-row').status === 'review' &&
-        twice.matches.find(m => m.src.id === 'f-row').target === null,
-        'several same-name exercises are reviewed without guessing between them');
-      t.state.exercises.pop();
+        twice.matches.find(m => m.src.id === 'f-row').target === 'lib-row-2',
+        'among several same-name exercises the one with history is pre-selected');
+      t.state.exercises.pop(); t.state.workouts = [];
+
+      /* Merging across load conventions is safe exactly when nothing is logged under the copy. */
+      t.state.workouts.push(logged('w-curl', 'lib-curl', 'Leg Curl'));
+      t.state.exercises.push(ex('dup-curl','Leg Curl','kg','machine_stack','gym-a-leg-curl'), ex('dup-dbpress','DB Shoulder Press','kg','total'),
+        ex('dup-logged','Leg Curl Old','kg','machine_stack','gym-b'));
+      t.state.workouts.push(logged('w-dup', 'dup-logged', 'Leg Curl Old'));
+      t.state.routines = [{ id:'rt-merge', name:'Merge', items:[
+        { id:'m1', exerciseId:'dup-curl', sets:3, repsMin:8, repsMax:10, weight:50 },
+        { id:'m2', exerciseId:'dup-dbpress', sets:3, repsMin:8, repsMax:10, weight:30 }] }];
+      t.navigate('exercises'); t.ui.mergeExerciseId = 'dup-curl'; t.render();
+      check([...document.querySelectorAll('#ex-merge-form option')].some(o => o.value === 'lib-curl'),
+        'the merge picker offers an exercise recorded differently for a copy with no history');
+      t.ui.mergeExerciseId = null;
+      check(t.mergeExercises('dup-curl', 'lib-curl') === '' && !t.state.exercises.some(e => e.id === 'dup-curl') &&
+        t.state.routines[0].items[0].exerciseId === 'lib-curl' && t.state.routines[0].items[0].weight === 50 &&
+        !t.state.exerciseLinks.some(l => l.sourceId === 'dup-curl'),
+        'a copy with no history merges across load conventions, keeping a planned load that means the same');
+      check(t.mergeExercises('dup-dbpress', 'lib-dbpress') === '' && t.state.routines[0].items[1].weight === null,
+        'merging into a per-hand exercise drops a total-load plan');
+      check(t.mergeExercises('dup-logged', 'lib-curl') !== '' && t.state.exercises.some(e => e.id === 'dup-logged'),
+        'a copy with its own history still needs the same contract');
+      t.state.exercises = t.state.exercises.filter(e => e.id !== 'dup-logged'); t.state.routines = []; t.state.workouts = [];
+
+      /* Names stay distinguishable wherever an exercise is created or renamed. */
+      t.ui.exerciseDraft = { ...structuredClone(t.state.exercises.find(e => e.id === 'lib-bench')), name:'back  SQUAT' };
+      t.saveExerciseDraft();
+      check(t.state.exercises.find(e => e.id === 'lib-bench').name === 'Bench Press' && t.ui.exerciseDraft,
+        'renaming to another exercise’s name is refused and the edit stays open');
+      t.ui.exerciseDraft = { ...structuredClone(t.state.exercises.find(e => e.id === 'lib-bench')), name:'BENCH PRESS' };
+      t.saveExerciseDraft();
+      check(t.state.exercises.find(e => e.id === 'lib-bench').name === 'BENCH PRESS' && !t.ui.exerciseDraft, 'changing only case is a rename of itself');
+      t.state.exercises.find(e => e.id === 'lib-bench').name = 'Bench Press';
+      t.state.workouts.push(logged('w-hist', 'hist-squat', 'Back Squat'));
+      check(t.addHistoricalExerciseToLibrary('hist-squat') && t.state.exercises.find(e => e.id === 'hist-squat').name === 'Back Squat (Total load)',
+        'creating a Library exercise from history keeps names distinct');
+      t.state.exercises = t.state.exercises.filter(e => e.id !== 'hist-squat'); t.state.workouts = [];
+      check(t.distinctExerciseName('Leg Press', ex('x','Leg Press','kg','machine_stack','gym-b-press')) === 'Leg Press (gym-b-press)',
+        'a distinct name names the equipment when there is one');
       t.state.exercises.push(ex('lib-bb-curl','Barbell Curl','kg','total'), ex('lib-db-curl','Dumbbell Curl','kg','total'));
       const curl = t.planRoutineImport({ exercises:[ex('f-curl-plain','Curls','kg','total')],
         routines:[{ name:'Arms', items:[{ exerciseId:'f-curl-plain' }] }] }).matches[0];
-      check(curl.status === 'review' && curl.target === null && curl.candidates.length === 2,
+      check(curl.status === 'review' && curl.target === null && curl.candidates.filter(c => c.tier === 'strong').length === 2,
         'two equally strong candidates are offered, neither pre-selected');
       t.state.exercises.splice(-2);
       window.__matchFile = file;
@@ -896,7 +948,9 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
     const matchDialog = im.getByRole('dialog', {name:'Match imported exercises'});
     await importFile();
     await matchDialog.waitFor();
-    assert.equal(await matchDialog.locator('.history-link-row').count(), 4, 'only uncertain matches are listed for review');
+    assert.equal(await matchDialog.locator('.history-link-row').count(), 6, 'only uncertain matches are listed for review');
+    assert.equal(await matchDialog.locator('.history-link-row', {hasText:'Leg Press'}).getByRole('option', {name:/Create as a new exercise \(“Leg Press \(gym-b-press\)”\)/}).count(), 1,
+      'creating beside a same-name exercise says which name it will get');
     assert.match(await im.locator('#import-match-auto').innerText(), /2 other exercises matched exactly · 3 exercises with no match will be created/,
       'the review counts what was decided without asking');
     assert.equal(await im.evaluate(() => document.activeElement && document.activeElement.id), 'import-match-0', 'focus starts on the first choice');
@@ -911,12 +965,14 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
     assert.equal(await im.evaluate(() => window.testAPI.state.routines.length), 0, 'Esc cancels the import too');
     await importFile();
     await matchDialog.waitFor();
-    const importSquatRow = matchDialog.locator('.history-link-row', {hasText:'Back Squat'});
-    assert.equal(await importSquatRow.getByText('planned load is left out').isVisible(), true,
-      'a pre-selected match across load conventions says its planned load is dropped');
-    await importSquatRow.locator('select').selectOption('');
-    assert.equal(await importSquatRow.getByText('planned load is left out').isVisible(), false, 'the note follows the choice');
-    await importSquatRow.locator('select').selectOption('lib-squat');
+    assert.equal(await matchDialog.locator('.history-link-row', {hasText:'Back Squat'}).getByText('planned load is left out').isVisible(), false,
+      'an equipment-only difference keeps the planned load, and says nothing');
+    const importPressRow = matchDialog.locator('.history-link-row', {hasText:'DB Shoulder Press'});
+    assert.equal(await importPressRow.getByText('planned load is left out').isVisible(), true,
+      'a pre-selected per-hand match says its planned load is dropped');
+    await importPressRow.locator('select').selectOption('');
+    assert.equal(await importPressRow.getByText('planned load is left out').isVisible(), false, 'the note follows the choice');
+    await importPressRow.locator('select').selectOption('lib-dbpress');
     await matchDialog.locator('.history-link-row', {hasText:'Incline Bench Press'}).locator('select').selectOption('lib-bench');
     await matchDialog.getByRole('button', {name:'Import routines'}).click();
     await im.waitForFunction(() => window.testAPI.state.routines.length === 1);
