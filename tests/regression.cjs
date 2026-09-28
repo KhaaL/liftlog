@@ -7,7 +7,7 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
     const page = await browser.newPage({ viewport:{ width:390, height:844 } });
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
-    const html = appWithTestAPI(`{ sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, planRoutineImport, applyRoutineImport, exerciseNameKey, exerciseNameSimilarity, sameLoadNumbers, distinctExerciseName, importHistory, normalizeImportedSet, normalizeImportedWorkout, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, workoutVolume, progressionStatus, loadCueFor, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, compatibleHistoryLink, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, setExerciseArchived, mergeExercises, sameProgressionContract, exerciseLoadLabel, setSummary, remoteStartupSync, autoRemoteBackup, flushSave, save, render, supersetRun, currentMemberIndex, isSettledRow, switchSupersetMember, navigate, currentExercise, settleSupersets, pauseTimer, finishWorkout, sampleExercises, sampleRoutines, get timer(){return timer}, get state(){return state}, get ui(){return ui} }`);
+    const html = appWithTestAPI(`{ sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, planRoutineImport, applyRoutineImport, exerciseNameKey, exerciseNameSimilarity, sameLoadNumbers, distinctExerciseName, linksBrokenBy, importHistory, normalizeImportedSet, normalizeImportedWorkout, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, workoutVolume, progressionStatus, loadCueFor, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, compatibleHistoryLink, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, setExerciseArchived, mergeExercises, sameProgressionContract, exerciseLoadLabel, setSummary, remoteStartupSync, autoRemoteBackup, flushSave, save, render, supersetRun, currentMemberIndex, isSettledRow, switchSupersetMember, navigate, currentExercise, settleSupersets, pauseTimer, finishWorkout, sampleExercises, sampleRoutines, get timer(){return timer}, get state(){return state}, get ui(){return ui} }`);
     await page.route('https://liftlog.test/**', route => route.fulfill({ contentType:'text/html', body:html }));
     await page.goto('https://liftlog.test/');
     const result = await page.evaluate(async () => {
@@ -984,6 +984,74 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
     assert.equal(await im.locator('#import-match-dlg').evaluate(d => d.open), false, 'a clean import asks nothing');
     await im.close();
     console.log(matchChecks.map(s => 'PASS ' + s).join('\n') + '\nPASS routine import review: cancel, Esc, choose, confirm, clean import');
+
+    /* Editing a linked exercise's load convention: the next load would drop
+       links whose history no longer fits, so the editor asks first. */
+    const lg = await browser.newPage({ viewport:{ width:390, height:844 } });
+    lg.on('pageerror', e => errors.push(e.message));
+    await lg.route('https://liftlog.test/**', route => route.fulfill({ contentType:'text/html', body:html }));
+    await lg.goto('https://liftlog.test/');
+    const guardChecks = await lg.evaluate(async () => {
+      const t = window.testAPI, checks = [];
+      const check = (condition, label) => { if (!condition) throw Error(label); checks.push(label); };
+      const wait = () => new Promise(r => setTimeout(r, 30));
+      const press = label => [...document.querySelectorAll('#dlg-actions button')].find(b => b.textContent === label).click();
+      const block = (exerciseId, loadMode = 'total', equipmentKey = '') => ({ exerciseId, name:'Leg Curl', unit:'kg', loadMode, equipmentKey,
+        sets:[{ id:exerciseId + '-s', weight:40, reps:10, completed:true, unit:'kg' }] });
+      const reset = () => {
+        t.state.activeWorkout = null; t.state.routines = [];
+        t.state.exercises = [{ id:'lc', name:'Leg Curl', category:'Legs', unit:'kg', loadMode:'total', equipmentKey:'',
+          movementFamily:'hinge', archived:false, notes:'', url:'' }];
+        t.state.workouts = [['w1','lc'], ['w2','old-lc'], ['w3','old-bad','machine_stack','gym-x']].map(([id, ...b], n) =>
+          ({ id, routineId:null, routineName:'Log', startedAt:1000 + n, finishedAt:2000 + n, notes:'', exercises:[block(...b)] }));
+        t.state.exerciseLinks = [{ sourceId:'old-lc', targetId:'lc' }, { sourceId:'old-bad', targetId:'lc' }];
+        t.state.historySeparateIds = [];
+      };
+      const draft = changes => { t.ui.exerciseDraft = { ...structuredClone(t.state.exercises[0]), ...changes }; };
+      const stack = { loadMode:'machine_stack', equipmentKey:'gym-a-leg-curl' };
+      reset();
+      const lc = t.state.exercises[0];
+      check(t.linksBrokenBy('lc', { ...lc, ...stack }).map(l => l.sourceId).join() === 'old-lc',
+        'the edit predicts exactly the links it would break, not one already failing');
+      check(t.linksBrokenBy('lc', { ...lc, notes:'cue' }).length === 0, 'an edit outside the contract breaks nothing');
+      draft({ notes:'cue' }); t.saveExerciseDraft();
+      check(!document.querySelector('#dlg').open && t.state.exercises[0].notes === 'cue' && !t.ui.exerciseDraft,
+        'an edit that breaks no link saves without asking');
+      draft(stack); let pending = t.saveExerciseDraft(); await wait();
+      check(document.querySelector('#dlg').open && /1 earlier exercise \(1 session\) recorded as Total load, no equipment key/.test(document.querySelector('#dlg-body').textContent),
+        'a breaking edit asks first, naming what would separate');
+      press('Cancel'); await pending;
+      check(t.state.exercises[0].loadMode === 'total' && t.ui.exerciseDraft && t.state.exerciseLinks.length === 2,
+        'cancel changes nothing and keeps the editor open');
+      draft({ ...stack, notes:'kept' }); pending = t.saveExerciseDraft(); await wait();
+      press('Keep history together'); await pending;
+      const kept = t.state.exercises[0];
+      check(kept.loadMode === 'total' && kept.equipmentKey === '' && kept.notes === 'kept' && !t.ui.exerciseDraft,
+        'keeping history together saves the other fields and the old convention');
+      check(t.prepareBackup(t.backupPayload()).exerciseLinks.some(l => l.sourceId === 'old-lc'),
+        'the kept link survives the next load');
+      draft(stack); pending = t.saveExerciseDraft(); await wait();
+      press('Change anyway'); await pending;
+      check(t.state.exercises[0].loadMode === 'machine_stack' && !t.state.exerciseLinks.some(l => l.sourceId === 'old-lc') &&
+        t.state.exerciseLinks.some(l => l.sourceId === 'old-bad'),
+        'changing anyway saves the new convention and removes exactly the broken links now');
+      check(t.unresolvedHistoryExercises().some(x => x.id === 'old-lc'), 'the separated history is offered for review');
+      reset(); t.navigate('exercises'); draft({}); t.render();
+      return checks;
+    });
+    await lg.locator('#ex-edit-form select[data-field="loadMode"]').selectOption('machine_stack');
+    await lg.locator('#ex-edit-form input[data-field="equipmentKey"]').fill('gym-a-leg-curl');
+    await lg.locator('#ex-edit-form').getByRole('button', {name:'Save'}).click();
+    const splitDialog = lg.getByRole('dialog', {name:'Keep this exercise’s history together?'});
+    await splitDialog.waitFor();
+    assert.equal(await lg.evaluate(() => document.activeElement && document.activeElement.textContent), 'Keep history together',
+      'keeping history together is the focused choice');
+    await splitDialog.getByRole('button', {name:'Keep history together'}).click();
+    await lg.waitForFunction(() => !window.testAPI.ui.exerciseDraft);
+    assert.deepEqual(await lg.evaluate(() => [window.testAPI.state.exercises[0].loadMode, window.testAPI.state.exerciseLinks.length]),
+      ['total', 2], 'the editor keeps the convention and the links when asked to');
+    await lg.close();
+    console.log(guardChecks.map(s => 'PASS ' + s).join('\n') + '\nPASS the exercise editor asks before splitting history');
 
     /* Detail sheets: a routine, an exercise and a logged session all open in
        the same read-only sheet, and Edit hands over to the editor in the page. */

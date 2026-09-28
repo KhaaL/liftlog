@@ -1433,6 +1433,18 @@ only offers compatible Library exercises. A merge rewrites routine and active
 workout references, removes the obsolete library definition, and creates this
 analytics join; finished workout snapshots remain unchanged.
 
+Normalization re-checks every link on each load, so editing a linked
+exercise's definition (measurement, load convention or equipment key) could
+break links it was accepted under, and the next load would drop them without a
+word. `saveExerciseDraft()` therefore asks first when `linksBrokenBy()`, which
+applies the same every-logged-block rule, finds any. **Keep history together**
+saves the other fields under the old convention. **Change anyway** saves the new
+one and removes exactly those links at once, so they reappear in the review
+rather than disappearing at the next load. An exercise's own logged blocks never
+split: progress and progression group by canonical id, whatever the blocks'
+snapshot convention. Load cues just wait for a session under the new
+convention, because `loadCueFor()` compares the latest block with the definition.
+
 The one exception is a merge from an exercise with no history: nothing logged
 under its id, no link pointing at it, and not in the ongoing workout
 (`canMergeExercises()`). With no sets there is no series whose meaning a

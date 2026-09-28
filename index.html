@@ -2919,6 +2919,18 @@ function compatibleHistoryLink(sourceId, targetId){
   const sources = historyProgressionContracts(sourceId);
   return !!(target && sources.length && sources.every(source => sameProgressionContract(source, target)));
 }
+/* The links into an exercise that hold today and would not under `updated`:
+   the same every-logged-block rule normalizeState() applies on each load, so
+   this is exactly what the next load would silently drop. */
+function linksBrokenBy(exerciseId, updated){
+  const current = exerciseById(exerciseId);
+  const holds = (sourceId, def) => {
+    const sources = historyProgressionContracts(sourceId);
+    return sources.length > 0 && sources.every(source => sameProgressionContract(source, def));
+  };
+  return (state.exerciseLinks || []).filter(link => link.targetId === exerciseId && current &&
+    holds(link.sourceId, current) && !holds(link.sourceId, updated));
+}
 function unresolvedHistoryExercises(){
   const separate = new Set(state.historySeparateIds || []);
   return historyExerciseIdentities().filter(x => !exerciseById(x.id) && !exerciseLink(x.id) && !separate.has(x.id));
@@ -4491,12 +4503,47 @@ function saveExerciseDraft(){
                     loadMode:normalizeLoadMode(d.loadMode, d.unit), equipmentKey:String(d.equipmentKey || '').trim(),
                     movementFamily:String(d.movementFamily || '').trim() || inferMovementFamily(d.name, d.category),
                     archived:!!d.archived, notes:d.notes.trim(), url };
+  const broken = linksBrokenBy(d.id, updated);
+  if (!broken.length) return applyExerciseDraft(updated, badUrl ? ['the link was not a valid web address'] : []);
+  return confirmHistorySplit(previous, updated, broken).then(choice => {
+    if (!choice || !exerciseById(d.id) || ui.exerciseDraft !== d) return;
+    const notes = badUrl ? ['the link was not a valid web address'] : [];
+    if (choice === 'keep'){
+      notes.push('load convention kept so its history stays in one series');
+      applyExerciseDraft({ ...updated, unit:previous.unit, loadMode:previous.loadMode, equipmentKey:previous.equipmentKey }, notes);
+      return;
+    }
+    const gone = new Set(broken.map(link => link.sourceId));
+    state.exerciseLinks = state.exerciseLinks.filter(link => !(link.targetId === d.id && gone.has(link.sourceId)));
+    state.settings.historyLinksDismissedKey = '';
+    notes.push(plural(gone.size, 'earlier exercise') + ' separated — review them in History');
+    applyExerciseDraft(updated, notes);
+  });
+}
+/* Editing the definition of a linked exercise can change the contract its
+   links were accepted under. The next load would drop them without a word, so
+   the user chooses now: keep the convention, or separate them knowingly. */
+function confirmHistorySplit(previous, updated, broken){
+  const describe = ex => LOAD_MODE_TEXT[normalizeLoadMode(ex.loadMode, ex.unit)] +
+    (String(ex.equipmentKey || '').trim() ? ' · ' + ex.equipmentKey.trim() : ', no equipment key');
+  const ids = new Set(broken.map(link => link.sourceId));
+  const sessions = state.workouts.filter(w => w.exercises.some(ex => ids.has(ex.exerciseId))).length;
+  return dialog({ title:'Keep this exercise’s history together?',
+    body:'“' + previous.name + '” is joined with ' + plural(ids.size, 'earlier exercise') + ' (' + plural(sessions, 'session') +
+      ') recorded as ' + describe(previous) + '. Recording it as ' + describe(updated) +
+      ' separates them from its progress chart.',
+    buttons:[{ label:'Cancel', value:null },
+      { label:'Change anyway', value:'change' },
+      { label:'Keep history together', value:'keep', cls:'btn-primary', autofocus:true }] });
+}
+function applyExerciseDraft(updated, notes){
+  const i = state.exercises.findIndex(e => e.id === updated.id);
+  if (i === -1) return;
+  const previous = state.exercises[i];
   state.exercises[i] = updated;
   const activeSync = syncExerciseDefinitionToActiveWorkout(previous, updated);
   ui.exerciseDraft = null;
   save(); render();
-  const notes = [];
-  if (badUrl) notes.push('the link was not a valid web address');
   if (activeSync.unitDeferred) notes.push('the new unit starts next workout');
   if (activeSync.loadDeferred) notes.push('the new load convention starts next workout');
   toast('Exercise updated' + (notes.length ? ' — ' + notes.join('; ') : ''));
