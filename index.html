@@ -981,6 +981,7 @@ html.is-reordering{ user-select:none; -webkit-user-select:none; }
 .ex-edit-grid{ display:grid; grid-template-columns:2fr 1fr 120px; gap:var(--sp-3); align-items:end; }
 .list-row.is-editing{ background:var(--accent-soft); display:block; }
 .tag-plain{ border:0; background:var(--surface-2); }
+.tag-warn{ border-color:transparent; color:var(--warning); background:var(--warning-soft); }
 @media (max-width:640px){ .ex-edit-grid{ grid-template-columns:1fr 1fr; } }
 
 /* settings */
@@ -1983,7 +1984,7 @@ const SHORTCUTS = [
 const LS_KEY = 'liftlog.v1';
 const LS_RESCUE_KEY = 'liftlog.v1.unreadable';  /* holds data we could not load, so nothing is lost silently */
 const LS_REMOTE_RESTORE_KEY = 'liftlog.v1.before-remote-restore';
-const SCHEMA_VERSION = 13;  /* v3: sets carry durationSeconds (time no longer overloads reps)
+const SCHEMA_VERSION = 14;  /* v3: sets carry durationSeconds (time no longer overloads reps)
                                + countForVolume / countForPR split execution from analytics
                                v4: settings carry effortMetric ('none'|'rpe'|'rir'), sets carry rir
                                v5: library exercises carry url (how to perform the movement)
@@ -1995,8 +1996,9 @@ const SCHEMA_VERSION = 13;  /* v3: sets carry durationSeconds (time no longer ov
                                v10: dated bodyweights and added load on bodyweight sets
                                v11: archive, load convention, equipment and movement family
                                v12: per-series load cue preferences
-                               v13: routine items can share a supersetOf pair key */
-const EXPORT_SCHEMA = '1.11.0'; /* version of the documented import/export contract — 1.1: sets[].rir;
+                               v13: routine items can share a supersetOf pair key
+                               v14: routines can be one-off plans (plan, plannedFor) */
+const EXPORT_SCHEMA = '1.12.0'; /* version of the documented import/export contract — 1.1: sets[].rir;
                                   1.2: exercises[].url; 1.3: per-item rest dropped; 1.4: items[].eitherOf;
                                   1.5: lower/upper rep targets and optional target RIR;
                                   1.6: reversible historical exercise links;
@@ -2004,7 +2006,7 @@ const EXPORT_SCHEMA = '1.11.0'; /* version of the documented import/export contr
                                   1.8: settings.lastModifiedAt for automatic remote backup/restore;
                                   1.9: archived/loadMode/equipmentKey/movementFamily exercise metadata;
                                   1.10: progressionPreferences in full backups and history transfers;
-                                  1.11: items[].supersetOf */
+                                  1.11: items[].supersetOf; 1.12: routines[].plan/plannedFor */
 
 /* Set by load() when stored data could not be used, surfaced once after init. */
 let loadWarning = '';
@@ -2292,6 +2294,8 @@ function validateBackup(s){
   s.routines.forEach((r, i) => {
     const path = 'routines[' + i + ']'; object(r, path);
     id(r.id, path + '.id', routines); text(r.name, path + '.name', true);
+    bool(r.plan, path + '.plan');
+    if (r.plannedFor != null && !validPlanDay(r.plannedFor)) fail(path + '.plannedFor', 'a calendar day as YYYY-MM-DD');
     array(r.items, path + '.items');
     const items = new Set();
     r.items.forEach((it, j) => {
@@ -2366,6 +2370,7 @@ function migrateState(s){
   if (s.version === 10) migrateToV11(s);
   if (s.version === 11) migrateToV12(s);
   if (s.version === 12) s.version = 13; // optional supersetOf: old routines need no conversion
+  if (s.version === 13) s.version = 14; // optional plan fields: old routines stay stable routines
   return s;
 }
 /* v1 shipped an earlier seed library/routines. v2 refreshes both to the
@@ -2545,7 +2550,7 @@ function normalizeState(s){
     separateSeen.add(id); return true;
   }).map(String);
   s.routines  = s.routines || [];
-  s.routines.forEach(r => { r.items.forEach(normalizeRoutineItem); cleanRoutinePairs(r.items); keepRoutinePairsAdjacent(r.items); });
+  s.routines.forEach(r => { normalizePlanFields(r); r.items.forEach(normalizeRoutineItem); cleanRoutinePairs(r.items); keepRoutinePairsAdjacent(r.items); });
   s.workouts  = s.workouts || [];
   s.activeWorkout = s.activeWorkout || null;
   const normalizeWorkout = (w, active) => {
@@ -4148,6 +4153,11 @@ function finishWorkout(){
     w.exercises = w.exercises.filter(ex => ex.sets.length > 0 || ex.skipped);
     state.workouts.push(w);
     sortWorkouts();
+    /* A plan is spent once its session is saved; the workout keeps what it
+       prescribed. Discarding the session leaves the plan in place. */
+    const plan = w.routineId ? routineById(w.routineId) : null;
+    const planDone = isPlan(plan);
+    if (planDone) state.routines = state.routines.filter(r => r !== plan);
     state.activeWorkout = null;
     save(); loadTimer(state.settings.defaultRest);
     /* the finished session opens in its sheet, as the summary of what was
@@ -4156,7 +4166,7 @@ function finishWorkout(){
     ui.focus = 'detail-title';
     navigate('history', { kind:'workout', id:w.id });
     window.scrollTo(0,0);
-    toast('Workout saved — ' + fmtNum(workoutVolume(w)) + ' ' + unitLabel() + ' total');
+    toast('Workout saved — ' + fmtNum(workoutVolume(w)) + ' ' + unitLabel() + ' total' + (planDone ? ' · plan done' : ''));
     maybeNagBackup();
   };
   if (done === 0){
@@ -4364,8 +4374,60 @@ function addRoutinePair(){
   error.textContent = 'Choose two different, unpaired exercises.';
   error.hidden = false;
 }
+/* ---------- plans ----------
+   A plan is a routine marked one-off, optionally for a calendar day. Saving
+   the session started from it removes it: the workout already copied its
+   prescription, so History is where it lives on. The day is a local calendar
+   date string, never a timestamp, so time zones cannot move it. */
+const isPlan = r => !!r && r.plan === true;
+const stableRoutines = () => state.routines.filter(r => !isPlan(r));
+function localDay(ts = Date.now()){
+  const d = new Date(ts);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function validPlanDay(v){
+  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const [y, m, d] = v.split('-').map(Number), date = new Date(y, m - 1, d);
+  return date.getFullYear() === y && date.getMonth() === m - 1 && date.getDate() === d;
+}
+/* Stable routines carry no plan fields at all, so their exports stay as before. */
+function normalizePlanFields(r){
+  if (r.plan === true) r.plannedFor = validPlanDay(r.plannedFor) ? r.plannedFor : null;
+  else { delete r.plan; delete r.plannedFor; }
+  return r;
+}
+function planDay(r){
+  if (!r.plannedFor) return { rank:2, label:'Anytime', overdue:false };
+  const [y, m, d] = r.plannedFor.split('-').map(Number);
+  const when = fmtDate(new Date(y, m - 1, d).getTime()), today = localDay();
+  if (r.plannedFor < today) return { rank:0, label:'Overdue · ' + when, when, overdue:true };
+  if (r.plannedFor === today) return { rank:1, label:'Today', overdue:false };
+  return { rank:3, label:when, overdue:false };
+}
+/* Overdue (oldest first), today, anytime, then later days in order. */
+function sortedPlans(){
+  return state.routines.filter(isPlan).map(r => ({ r, day:planDay(r) }))
+    .sort((a, b) => a.day.rank - b.day.rank || String(a.r.plannedFor || '').localeCompare(String(b.r.plannedFor || '')) ||
+      a.r.name.localeCompare(b.r.name));
+}
+/* A plan is known by its name on its day, so "Day B" can be a routine and
+   next week's plan at once; a stable routine by its name alone. */
+const routineKey = r => isPlan(r)
+  ? 'plan|' + normalizedExerciseName(r.name) + '|' + (validPlanDay(r.plannedFor) ? r.plannedFor : '')
+  : normalizedExerciseName(r.name);
+function defaultRoutineId(){
+  const first = sortedPlans()[0];
+  return first ? first.r.id : (stableRoutines()[0] || {}).id || null;
+}
 function newRoutineDraft(r){
   return r ? deepCopy(r) : { id:null, name:'', items:[] };
+}
+/* The stable routine stays as it is; the copy is that one day's version. */
+function newPlanDraft(r){
+  const draft = deepCopy(r);
+  draft.id = null; draft.plan = true; draft.plannedFor = localDay();
+  draft.items.forEach(it => { it.id = uid(); });
+  return draft;
 }
 function saveRoutineDraft(){
   const d = ui.routineDraft; if (!d) return;
@@ -4374,14 +4436,14 @@ function saveRoutineDraft(){
   d.items.forEach(normalizeRoutineItem);
   cleanRoutinePairs(d.items);
   keepRoutinePairsAdjacent(d.items);
-  if (d.id){
-    const i = state.routines.findIndex(r => r.id === d.id);
-    if (i !== -1) state.routines[i] = { id:d.id, name:d.name.trim(), items:d.items };
-  } else {
-    state.routines.push({ id:uid(), name:d.name.trim(), items:d.items });
-  }
+  if (d.plan && d.plannedFor && !validPlanDay(d.plannedFor)){ ui.routineError = 'Choose a valid day, or leave it empty for anytime.'; render(); return; }
+  const routine = normalizePlanFields({ id:d.id || uid(), name:d.name.trim(), items:d.items,
+    plan:d.plan === true, plannedFor:d.plannedFor || null });
+  const i = d.id ? state.routines.findIndex(r => r.id === d.id) : -1;
+  if (i !== -1) state.routines[i] = routine;
+  else state.routines.push(routine);
   ui.routineDraft = null; ui.routineError = '';
-  save(); render(); toast('Routine saved');
+  save(); render(); toast(isPlan(routine) ? 'Plan saved — ' + planDay(routine).label : 'Routine saved');
 }
 function duplicateRoutine(id){
   const r = routineById(id); if (!r) return;
@@ -5231,13 +5293,13 @@ function planRoutineImport(obj){
   const list = Array.isArray(obj) ? obj : obj && obj.routines;
   if (!Array.isArray(list) || !list.length) return null;
   const exIn = Array.isArray(obj.exercises) ? obj.exercises.filter(e => e && typeof e.name === 'string' && e.name.trim()) : [];
-  const names = new Set(state.routines.map(r => normalizedExerciseName(r.name)));
+  const names = new Set(state.routines.map(routineKey));
   const routines = [], matches = new Map();
   let skipped = 0;
   list.forEach(r => {
     const name = r && typeof r.name === 'string' ? normalizedExerciseName(r.name) : '';
-    if (!name || !Array.isArray(r.items) || names.has(name)){ skipped++; return; }
-    names.add(name);
+    if (!name || !Array.isArray(r.items) || names.has(routineKey(r))){ skipped++; return; }
+    names.add(routineKey(r));
     routines.push(r);
     r.items.forEach(it => {
       const src = it && exIn.find(e => e.id === it.exerciseId);
@@ -5295,7 +5357,8 @@ function applyRoutineImport(plan, choices){
     keepRoutinePairsAdjacent(items);
     if (!items.length){ skippedR++; return; }
     const routineId = validId(r.id) && !state.routines.some(x => x.id === r.id) ? r.id : uid();
-    state.routines.push({ id:routineId, name:String(r.name).trim(), items });
+    state.routines.push(normalizePlanFields({ id:routineId, name:String(r.name).trim(), items,
+      plan:r.plan === true, plannedFor:r.plannedFor }));
     addedR++;
   });
   /* A routine import may promote an ID that was previously known only from
@@ -5396,6 +5459,13 @@ function importFixture(){
       { id:'it-3', exerciseId:'ex-leg-press', sets:3, repsMin:10, repsMax:15, targetRir:2, weight:120, eitherOf:'pair-legs' },
       { id:'it-2', exerciseId:'ex-plank', sets:2, repsMin:45, repsMax:60, targetRir:null, weight:null }
     ]
+  }, {
+    /* a one-off plan two days ahead: the same shape plus plan and plannedFor */
+    id:'plan-lighter-legs', name:'Lighter legs', plan:true, plannedFor:localDay(Date.now() + 2 * 86400000),
+    items:[
+      { id:'it-4', exerciseId:'ex-squat', sets:3, repsMin:5, repsMax:5, targetRir:3, weight:90 },
+      { id:'it-5', exerciseId:'ex-plank', sets:2, repsMin:45, repsMax:45, targetRir:null, weight:null }
+    ]
   }];
   /* two days back, so relative-date displays have something sensible to show */
   const started = Date.now() - 2 * 86400000;
@@ -5450,7 +5520,9 @@ function schemaHelpHTML(){
       'Routines whose name you already have are skipped.</p>' +
     rows([
       ['routines[]', 'required', 'The list. A bare top-level array is accepted too.'],
-      ['routines[].name', 'string, required', 'Skipped if missing, or if a routine of that name already exists.'],
+      ['routines[].name', 'string, required', 'Skipped if missing, or if a routine of that name already exists (for a plan: that name on that day).'],
+      ['routines[].plan', 'optional boolean', '<code>true</code> makes it a one-off plan: listed under Planned on Today, and removed once the session started from it is saved. The workout keeps what it prescribed. Omitted: a stable routine.'],
+      ['routines[].plannedFor', 'optional string', 'A plan’s calendar day as <code>YYYY-MM-DD</code>. Missing or invalid means anytime; a past day stays listed as overdue until the plan is started or deleted.'],
       ['routines[].items[]', 'required', 'One entry per exercise; order is the order you train in.'],
       ['items[].exerciseId', 'string, required', 'Resolved by id, then name, then created from <code>exercises[]</code>. Uncertain matches are confirmed in a review before import.'],
       ['items[].sets', 'integer', 'Clamped to ' + L.sets[0] + '\u2013' + L.sets[1] + '. Default 3.'],
@@ -5837,7 +5909,7 @@ function trackHeaderHeight(){
 function normalizeSelections(){
   if (ui.detail && (!detailItem(ui.detail) || DETAIL_SHEETS[ui.detail.kind].view !== ui.view)) ui.detail = null;
   if (state.routines.length && !routineById(ui.selectedRoutineId))
-    ui.selectedRoutineId = state.routines[0].id;
+    ui.selectedRoutineId = defaultRoutineId();
   const trendable = trendCandidates();
   if (trendable.length && !trendable.some(e => e.id === ui.trendExId))
     ui.trendExId = trendable[0].id;
@@ -5902,26 +5974,31 @@ function htmlPicker(){
         '<button type="button" class="btn btn-sm push-right" data-action="go-history">Open history</button>' +
       '</div></section>';
   }
+  const pickRow = (r, day) => {
+    const sel = r.id === ui.selectedRoutineId;
+    return '<div class="routine-pick-row' + (sel ? ' is-selected' : '') + '">' +
+      '<button type="button" class="rp-select" data-action="select-routine" data-id="' + esc(r.id) + '" aria-pressed="' + sel + '">' +
+        '<span class="rp-name">' + esc(r.name) + (day && day.overdue ? ' <span class="tag tag-warn">Overdue</span>' : '') + '</span>' +
+        '<span class="rp-meta">' + (day ? esc(day.overdue ? day.when : day.label) + ' · ' : '') + routineSummary(r.items) + '</span>' +
+      '</button>' +
+      '<span class="rp-go"><button type="button" class="btn btn-primary btn-sm" data-action="routine-start" data-id="' + esc(r.id) + '" ' +
+        'aria-label="Start ' + esc(r.name) + '">' + IC.play + '<span>Start</span></button></span>' +
+    '</div>';
+  };
+  const plans = sortedPlans(), routines = stableRoutines();
+  if (plans.length){
+    html += '<section aria-labelledby="plan-title" class="mb-4"><div class="section-title"><h2 id="plan-title">Planned</h2><span class="rule"></span></div>' +
+      '<div class="routine-pick" role="group" aria-label="Choose a plan">' + plans.map(({ r, day }) => pickRow(r, day)).join('') + '</div>' +
+      '<p class="hint mt-2">A plan leaves this list once its session is saved; History keeps what it prescribed.</p></section>';
+  }
   html += '<section aria-labelledby="pick-title"><div class="section-title"><h2 id="pick-title">Start a workout</h2><span class="rule"></span></div>';
   if (state.routines.length === 0){
     html += '<div class="empty"><h3>No routines yet</h3><p>Build one from your exercises, or import a routines file.</p>' +
       '<div class="form-actions"><button type="button" class="btn btn-primary" data-action="nav" data-view="routines">Go to Routines</button>' +
       '<button type="button" class="btn" data-action="nav" data-view="settings">Import a file</button></div></div>';
   } else {
-    html += '<div class="routine-pick" role="group" aria-label="Choose a routine">';
-    state.routines.forEach(r => {
-      const sel = r.id === ui.selectedRoutineId;
-      html += '<div class="routine-pick-row' + (sel ? ' is-selected' : '') + '">' +
-        '<button type="button" class="rp-select" data-action="select-routine" data-id="' + esc(r.id) + '" aria-pressed="' + sel + '">' +
-          '<span class="rp-name">' + esc(r.name) + '</span>' +
-          '<span class="rp-meta">' + routineSummary(r.items) + '</span>' +
-        '</button>' +
-        '<span class="rp-go"><button type="button" class="btn btn-primary btn-sm" data-action="routine-start" data-id="' + esc(r.id) + '" ' +
-          'aria-label="Start ' + esc(r.name) + '">' + IC.play + '<span>Start</span></button></span>' +
-      '</div>';
-    });
-    html += '</div>' +
-      '<p class="hint mt-2 keyboard-only">Tip: press <kbd>s</kbd> to start the highlighted routine.</p>';
+    if (routines.length) html += '<div class="routine-pick" role="group" aria-label="Choose a routine">' + routines.map(r => pickRow(r, null)).join('') + '</div>';
+    html += '<p class="hint mt-2 keyboard-only">Tip: press <kbd>s</kbd> to start the highlighted routine.</p>';
     const selected = routineById(ui.selectedRoutineId);
     if (selected) html += htmlRoutineLoadCues(selected);
   }
@@ -6439,7 +6516,7 @@ function exerciseOptions(selected, skip){
 const DETAIL_SHEETS = {
   routine:{
     view:'routines', noun:'routine', find:id => routineById(id),
-    title:r => r.name, sub:r => routineSummary(r.items),
+    title:r => r.name, sub:r => (isPlan(r) ? 'Plan · ' + planDay(r).label + ' · ' : '') + routineSummary(r.items),
     body:routineDetailHTML, actions:routineDetailActions
   },
   exercise:{
@@ -6536,6 +6613,7 @@ function routineDetailHTML(r){
 }
 function routineDetailActions(r){
   return detailBtn('detail-del', 'routine-del', r.id, 'Delete ' + r.name, IC.trash + '<span class="sr-only">Delete</span>', 'btn-danger') +
+    (isPlan(r) ? '' : detailBtn('detail-plan', 'routine-plan-new', r.id, 'Plan a session from ' + r.name, IC.plus + '<span>Plan…</span>')) +
     detailBtn('detail-dup', 'routine-dup', r.id, 'Duplicate ' + r.name, IC.copy + '<span>Duplicate</span>') +
     detailBtn('detail-edit', 'routine-edit', r.id, 'Edit ' + r.name, IC.pen + '<span>Edit</span>') +
     detailBtn('detail-start', 'routine-start', r.id, 'Start ' + r.name, IC.play + '<span>Start</span>', 'btn-primary');
@@ -6591,8 +6669,10 @@ function workoutDetailActions(w){
 
 /* ---------- ROUTINES ---------- */
 function viewRoutines(){
+  const plans = sortedPlans(), routines = stableRoutines();
   const head = '<div class="view-head"><div><h1>Routines</h1>' +
-    '<p class="view-sub">' + plural(state.routines.length, 'routine') + ' · starting one begins today’s workout</p></div>' +
+    '<p class="view-sub">' + plural(routines.length, 'routine') + (plans.length ? ' · ' + plural(plans.length, 'plan') : '') +
+      ' · starting one begins today’s workout</p></div>' +
     (ui.routineDraft ? '' : '<button type="button" class="btn btn-primary" data-action="routine-new">' + IC.plus + '<span>New routine</span></button>') +
   '</div>';
   if (ui.routineDraft) return head + htmlRoutineEditor();
@@ -6604,23 +6684,30 @@ function viewRoutines(){
       '<button type="button" class="btn" data-action="nav" data-view="settings">Import routines</button></div></div>';
     return head + html;
   }
-  html += '<ul class="list">';
-  state.routines.forEach(r => {
+  const row = (r, day) => {
     const names = routineGroups(r.items).map(g => g.map(it => (exerciseById(it.exerciseId) || {}).name || '(removed)').join(' or ')).slice(0,4).join(', ');
     /* The row opens the routine's sheet; Start stays beside it because
        starting is what this list is for. Everything else is in the sheet. */
-    html += '<li class="list-row is-openable">' +
+    return '<li class="list-row is-openable">' +
       '<button type="button" class="list-open" ' + detailRowAttrs('routine', r.id, r.name, detailRowId('routine', r.id) + '-meta') + '>' +
         '<span class="list-main">' +
-          '<span class="list-name">' + esc(r.name) + '</span>' +
-          '<span class="list-meta" id="' + esc(detailRowId('routine', r.id) + '-meta') + '">' + routineSummary(r.items) + ' — ' + esc(names) + (routineGroups(r.items).length > 4 ? '…' : '') + '</span>' +
+          '<span class="list-name">' + esc(r.name) + (day && day.overdue ? ' <span class="tag tag-warn">Overdue</span>' : '') + '</span>' +
+          '<span class="list-meta" id="' + esc(detailRowId('routine', r.id) + '-meta') + '">' + (day ? esc(day.overdue ? day.when : day.label) + ' · ' : '') +
+            routineSummary(r.items) + ' — ' + esc(names) + (routineGroups(r.items).length > 4 ? '…' : '') + '</span>' +
         '</span>' + IC.chev +
       '</button>' +
       '<span class="list-actions">' +
         '<button type="button" class="btn btn-sm btn-primary" data-action="routine-start" data-id="' + esc(r.id) + '">' + IC.play + '<span>Start</span></button>' +
       '</span></li>';
-  });
-  html += '</ul>';
+  };
+  if (plans.length){
+    html += '<div class="section-title"><h2>Planned</h2><span class="rule"></span></div>' +
+      '<ul class="list mb-4" aria-label="Planned sessions">' + plans.map(({ r, day }) => row(r, day)).join('') + '</ul>';
+  }
+  if (routines.length){
+    html += (plans.length ? '<div class="section-title"><h2>Routines</h2><span class="rule"></span></div>' : '') +
+      '<ul class="list" aria-label="Routines">' + routines.map(r => row(r, null)).join('') + '</ul>';
+  }
   return head + html;
 }
 
@@ -6632,6 +6719,16 @@ function htmlRoutineEditor(){
       '<div class="form-row">' +
         '<label class="field flex-2"><span class="cap">Routine name</span>' +
         '<input type="text" data-bind="rdraft" data-field="name" value="' + esc(d.name) + '" placeholder="e.g. Upper Power" required></label>' +
+        (d.plan ? '<label class="field"><span class="cap">Planned for</span>' +
+          '<input type="date" id="routine-planned-for" data-bind="rdraft" data-field="plannedFor" value="' + esc(d.plannedFor || '') + '">' +
+          '<span class="hint">Empty means anytime</span></label>' : '') +
+      '</div>' +
+      '<div class="switch-row mt-3">' +
+        '<label for="routine-plan"><strong>One-off plan</strong><br><span class="hint">' +
+          (d.plan ? 'Listed under Planned, and gone once its session is saved; History keeps what it prescribed.'
+                  : 'For a single session: it disappears once that session is saved.') + '</span></label>' +
+        '<span class="switch"><input type="checkbox" id="routine-plan" data-change="routine-plan"' + (d.plan ? ' checked' : '') +
+          '><span class="track" aria-hidden="true"></span></span>' +
       '</div>' +
       (ui.routineError ? '<p class="error-text mt-2" role="alert">' + esc(ui.routineError) + '</p>' : '') +
       '<div class="section-title mt-5"><h2>Exercises</h2><span class="rule"></span>' +
@@ -8064,6 +8161,10 @@ const actions = {
     const r = routineById(d.id);
     if (r) editFromDetail(() => { ui.routineDraft = newRoutineDraft(r); ui.routineError = ''; }, 'routine-form');
   },
+  'routine-plan-new'(d){
+    const r = routineById(d.id);
+    if (r) editFromDetail(() => { ui.routineDraft = newPlanDraft(r); ui.routineError = ''; }, 'routine-planned-for');
+  },
   'routine-dup'(d){ duplicateRoutine(d.id); },
   'routine-del'(d){ deleteRoutine(d.id); },
   'routine-cancel'(){ ui.routineDraft = null; ui.routineError=''; render(); },
@@ -8578,6 +8679,12 @@ document.addEventListener('input', e => {
 /* Controls that commit on change rather than per keystroke. Keyed by data-change. */
 const changeHandlers = {
   'routine-pair-first'(){ refreshSecondPairPicker(); },
+  'routine-plan'(t){
+    const d = ui.routineDraft; if (!d) return;
+    d.plan = t.checked;
+    if (d.plan && d.plannedFor === undefined) d.plannedFor = localDay();
+    ui.focus = 'routine-plan'; render();
+  },
   theme(t){ setTheme(t.value); },
   unit(t){ setUnit(t.value); },
   'effort-metric'(t){
@@ -8805,7 +8912,7 @@ document.addEventListener('keydown', e => {
       if (ui.view === 'routines' && ui.routineDraft){ saveRoutineDraft(); }
       else if (ui.view === 'exercises' && ui.exerciseDraft){ saveExerciseDraft(); }
       else if (ui.view === 'today' && !state.activeWorkout){
-        const id = ui.selectedRoutineId || (state.routines[0] && state.routines[0].id);
+        const id = ui.selectedRoutineId || defaultRoutineId();
         if (id) startRoutine(id);
       }
       break;

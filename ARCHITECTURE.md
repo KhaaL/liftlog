@@ -401,7 +401,7 @@ state
 ├─ progressionPreferences[] { exerciseId, loadCuesOff, dismissedExposureKey }
 │                    — per-series load guidance, including historical IDs
 ├─ bodyweights[]   { id, loggedAt, weight, unit } — dated bodyweight log, newest first
-├─ routines[]      { id, name, items[] }                      — the plan
+├─ routines[]      { id, name, plan?, plannedFor?, items[] }  — the plan; plan: true is one-off
 │   └─ items[]     { id, exerciseId, sets, repsMin, repsMax, targetRir?, weight, eitherOf?, supersetOf? }
 ├─ workouts[]      logged sessions, newest first              — the log
 │   └─ exercises[] { exerciseId, name, category, movementFamily, unit, loadMode,
@@ -574,6 +574,8 @@ sequence for older data. Startup and file/remote restore all use it:
   with no disabled or dismissed cues; full backups and history transfers carry
   the new field.
 - **v12 → v13** — introduces the optional `supersetOf` key; no conversion needed.
+- **v13 → v14** — introduces optional `plan` / `plannedFor` on routines; every
+  existing routine stays a stable routine, so nothing converts.
 
 Data that cannot be read — corrupt JSON, an unrecognized shape, or a *newer*
 schema version — is never overwritten in place. It is copied to
@@ -586,7 +588,7 @@ save banner and startup message explain this state; explicitly restoring a
 
 ## Import / export
 
-Four flows, all plain JSON (`EXPORT_SCHEMA = '1.10.0'`). Every file names itself
+Four flows, all plain JSON (`EXPORT_SCHEMA = '1.12.0'`). Every file names itself
 with `app: 'liftlog'` and a `kind`:
 
 - **`backup`** — the entire `state`; importing replaces everything. Built by
@@ -605,7 +607,9 @@ with `app: 'liftlog'` and a `kind`:
   import into another browser can rebuild missing library entries. Exercises are
   resolved by id, then by name, then created. Safe source exercise, routine, and
   item IDs are preserved so a separately transferred history file still lines up.
-  Duplicate routine names are skipped. See [Matching imported
+  Duplicate routine names are skipped; plans travel in the same file and are
+  skipped only for the same name on the same day (see [One-off
+  plans](#one-off-plans-state-v14-transfer-schema-1120)). See [Matching imported
   exercises](#matching-imported-exercises) for how uncertain matches are handled.
 - **`history`** — workouts, with an explicit `setType` (`reps` / `time` / `hold`)
   on every set so importers never guess at field semantics. Explicit `setType`
@@ -1395,6 +1399,43 @@ Supersets describe how a session is performed, not what was logged:
 removes them from any finished workout. History and history transfers never
 carry them; routine export, routine import and full backups (including an
 active workout) do.
+
+### One-off plans (state v14, transfer schema 1.12.0)
+
+A routine is either stable, reused for as long as it is kept, or a **plan**: a
+prescription for a single session, marked `plan: true` with an optional
+`plannedFor` day. Plans are routines rather than a collection of their own, so
+the editor, either-of pairs, supersets, load cues, starting, transfer and
+validation all apply to them unchanged. What differs is where they are listed
+and how they end.
+
+- **The day** is a local calendar date string (`YYYY-MM-DD`), never a
+  timestamp, so time zones cannot move it. Missing means anytime.
+  `validateBackup` rejects anything that is not a real calendar day;
+  normalization and the routines importer turn an invalid day into anytime,
+  and strip both fields from a stable routine, so stable routines export
+  exactly as before.
+- **Order** (`sortedPlans()`, `planDay()`): overdue first, oldest first; then
+  today; then anytime; then later days. A plan whose day has passed stays,
+  marked overdue, until it is started or deleted. Nothing disappears on its
+  own, so a session done a day late still uses its plan. Today lists plans
+  under **Planned** above the stable routines and highlights the most pressing
+  one (`defaultRoutineId()`); Routines lists them in their own section.
+- **Ending.** When `finishWorkout()` saves the session started from a plan, the
+  plan is removed. Nothing is lost: the workout already copied the exercises,
+  targets, planned sets and loads when it began, and keeps the plan's name.
+  Its `routineId` then points at nothing, which history already allows, as
+  after a routine is deleted. Discarding the session keeps the plan.
+- **Making one:**
+  - the editor's **One-off plan** switch turns any routine into a plan and
+    back;
+  - **Plan…** in a stable routine's sheet (`newPlanDraft()`) opens a copy with
+    fresh item IDs, dated today, to adjust for that day, leaving the routine
+    as it is;
+  - a routines file marks one with `"plan": true, "plannedFor": "…"`.
+- **Identity.** A plan is known by its name on its day (`routineKey()`), so
+  "Day B" can be a stable routine and next week's plan at once. The routines
+  importer skips a plan only when one with the same name and day exists.
 
 ### Double-progression targets (state v8, transfer schema 1.5.0)
 
