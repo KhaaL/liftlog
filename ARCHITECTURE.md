@@ -605,7 +605,8 @@ with `app: 'liftlog'` and a `kind`:
   import into another browser can rebuild missing library entries. Exercises are
   resolved by id, then by name, then created. Safe source exercise, routine, and
   item IDs are preserved so a separately transferred history file still lines up.
-  Duplicate routine names are skipped.
+  Duplicate routine names are skipped. See [Matching imported
+  exercises](#matching-imported-exercises) for how uncertain matches are handled.
 - **`history`** — workouts, with an explicit `setType` (`reps` / `time` / `hold`)
   on every set so importers never guess at field semantics. Explicit `setType`
   wins over a contradictory unit; unsupported types such as the former
@@ -662,6 +663,43 @@ exercise the importing browser may not have.
 There is no "load sample data" button. It would silently replace the user's
 own library and routines, which is not a thing an app should offer to do;
 importing a file you chose is the same convenience without the surprise.
+
+### Matching imported exercises
+
+A routine import points each item at a Library exercise, and that choice
+decides which progression series future sets join. `planRoutineImport()` makes
+every decision without writing state; `applyRoutineImport()` writes them. In
+between, `reviewRoutineImport()` shows a dialog, but only when some exercise's
+match is uncertain. A round trip of the app's own export matches exactly and
+imports without a dialog, as before.
+
+`matchImportedExercise()` sorts each file exercise into one of three outcomes:
+
+- **exact** — the same id, or the same normalized name, with the same
+  progression contract (measurement, load mode, equipment key), and exactly
+  one such Library exercise (non-archived preferred). Applied without asking.
+- **review** — anything with a plausible candidate: the same name recorded
+  differently, several same-name exercises, or a similar name. Similarity comes
+  from `exerciseNameKey()`, which folds case, accents, punctuation, plurals and
+  a few abbreviations (`BB`, `DB`, `RDL`, …) and keeps equipment words apart
+  from the movement. "Pull-ups" and "Pullup" are the same movement, and so are
+  "Back Squat" and "Barbell Back Squat". "Barbell Row" and "Dumbbell Row" are
+  not. A same-name or strong match is pre-selected only when it is the only
+  candidate at that level. Weak matches (shared words, such as "Bench Press" /
+  "Incline Bench Press") and ties are offered with **Create as a new exercise**
+  pre-selected.
+- **new** — no candidate; the exercise is created (source id kept when free).
+
+Candidates must have the same measurement kind. A mismatched machine stack is
+never pre-selected, because the equipment key exists to say that two machines'
+stacks are not comparable. The user can still choose it. A routine item matched
+to an exercise with a different contract drops its planned `weight`, which was
+recorded under the other convention; sets, reps and RIR are kept.
+
+Fuzzy similarity never applies a match by itself. A wrong match logs future
+sets into another series, and that is harder to notice and undo than a
+duplicate, which **Merge exercises** in the Library already repairs. Cancelling the
+review leaves state untouched.
 
 ## Remote storage (optional)
 

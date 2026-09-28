@@ -1529,6 +1529,20 @@ button,.btn,.icon-btn,.nav-btn,.strip-step,.strip-num,.set-num,.done-ex-row,.his
   </div>
 </dialog>
 
+<dialog id="import-match-dlg" class="dlg-wide" aria-labelledby="import-match-title" aria-describedby="import-match-desc">
+  <div class="dlg-body">
+    <h2 id="import-match-title">Match imported exercises</h2>
+    <p class="desc" id="import-match-desc">Using an exercise you already have keeps its history and progression in one series.
+      Nothing is imported until you confirm.</p>
+    <div id="import-match-list" class="history-link-list"></div>
+    <p id="import-match-auto" class="hint mt-3"></p>
+  </div>
+  <div class="dlg-actions">
+    <button type="button" class="btn" id="import-match-cancel">Cancel import</button>
+    <button type="button" class="btn btn-primary" id="import-match-ok">Import routines</button>
+  </div>
+</dialog>
+
 <noscript><p class="noscript-note">Liftlog needs JavaScript to run. Please enable it — everything stays on this device.</p></noscript>
 
 <script>
@@ -5046,68 +5060,215 @@ function exportRoutines(){
   downloadJSON(routinesPayload(state.exercises, state.routines), dateStamp('liftlog-routines'));
   toast('Routines exported');
 }
-function importRoutines(file){
-  readJSONFile(file, obj => {
-    if (!obj) return;
-    const list = Array.isArray(obj) ? obj : obj.routines;
-    const exIn = Array.isArray(obj.exercises) ? obj.exercises.filter(e => e && typeof e.name === 'string' && e.name.trim()) : [];
-    if (!Array.isArray(list) || !list.length){ toast('No routines found in that file'); return; }
-    const byName = n => state.exercises.find(e => e.name.trim().toLowerCase() === String(n || '').trim().toLowerCase());
-    let addedR = 0, skippedR = 0, addedEx = 0;
-    list.forEach(r => {
-      if (!r || typeof r.name !== 'string' || !r.name.trim() || !Array.isArray(r.items) ||
-          state.routines.some(x => x.name.trim().toLowerCase() === String(r.name).trim().toLowerCase())){ skippedR++; return; }
-      const itemIds = new Set();
-      const items = r.items.map(it => {
-        if (!it) return null;
-        /* Preserve source IDs when safe so separately transferred history keeps
-           its relationship to the Library. An ID collision with a different
-           definition falls back to name, then to a fresh local ID. */
-        const src = exIn.find(e => e.id === it.exerciseId);
-        let local = it.exerciseId ? state.exercises.find(e => e.id === it.exerciseId) : null;
-        const sourceDef = src && { ...src, unit:isUnit(src.unit) ? src.unit : 'kg',
-          loadMode:normalizeLoadMode(src.loadMode, src.unit), equipmentKey:String(src.equipmentKey || ''),
-          movementFamily:String(src.movementFamily || inferMovementFamily(src.name, src.category)) };
-        if (local && src && (normalizedExerciseName(local.name) !== normalizedExerciseName(src.name) ||
-            !sameProgressionContract(local, sourceDef))) local = null;
-        if (!local && src){
-          const named = byName(src.name);
-          if (named && sameProgressionContract(named, sourceDef)) local = named;
-        }
-        if (!local && src){
-          const sourceId = validId(src.id) && !state.exercises.some(e => e.id === src.id) ? src.id : uid();
-          state.exercises.push({ id:sourceId, name:String(src.name), category:normalizeCategory(src.category, src.name),
-            unit:normalizedExerciseUnit(isUnit(src.unit) ? src.unit : 'kg', state.settings.unit),
-            loadMode:normalizeLoadMode(src.loadMode, src.unit), equipmentKey:String(src.equipmentKey || '').trim(),
-            movementFamily:String(src.movementFamily || inferMovementFamily(src.name, src.category)),
-            archived:!!src.archived, notes:String(src.notes || ''), url:safeUrl(src.url) });
-          local = state.exercises[state.exercises.length - 1]; addedEx++;
-        }
-        if (!local) return null;
-        const sourceItemId = validId(it.id) && !itemIds.has(it.id) ? it.id : uid();
-        itemIds.add(sourceItemId);
-        return normalizeRoutineItem({ id:sourceItemId, exerciseId:local.id,
-          sets:it.sets == null ? 3 : it.sets,
-          repsMin:it.repsMin == null ? (it.reps == null ? 8 : it.reps) : it.repsMin,
-          repsMax:it.repsMax == null ? (it.reps == null ? (it.repsMin == null ? 8 : it.repsMin) : it.reps) : it.repsMax,
-          targetRir:it.targetRir, weight:it.weight, eitherOf:it.eitherOf, supersetOf:it.supersetOf });
-      }).filter(Boolean);
-      cleanRoutinePairs(items);
-      keepRoutinePairsAdjacent(items);
-      if (!items.length){ skippedR++; return; }
-      const routineId = validId(r.id) && !state.routines.some(x => x.id === r.id) ? r.id : uid();
-      state.routines.push({ id:routineId, name:String(r.name).trim(), items });
-      addedR++;
+/* ---------- routine import: matching exercises to the Library ----------
+   Planned first, written second, so uncertain matches can be put to the user
+   before anything changes. A wrong match is worse than a duplicate: a duplicate
+   can be merged later, a wrong match logs future sets into another series. So
+   name similarity only pre-selects a choice in the review; a match is applied
+   unasked only for an identical name with the same progression contract. */
+const NAME_EQUIPMENT = new Set(['barbell','dumbbell','kettlebell','cable','machine','smith','band','ez']);
+const NAME_FILLER = new Set(['a','an','the','with','on','of','and']);
+const NAME_ALIASES = { bb:'barbell', db:'dumbbell', dumbell:'dumbbell', kb:'kettlebell',
+  rdl:'romanian deadlift', ohp:'overhead press', flye:'fly', flie:'fly', calve:'calf' };
+const singularWord = w => w.endsWith('sses') ? w.slice(0, -2) :
+  w.length > 2 && w.endsWith('s') && !/(ss|us)$/.test(w) ? w.slice(0, -1) : w;
+/* Equipment words are kept apart from the movement: "Barbell Row" and
+   "Dumbbell Row" share a movement but are not the same exercise. */
+function exerciseNameKey(name){
+  const words = String(name || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    .split(/[^a-z0-9]+/).filter(Boolean).map(singularWord)
+    .flatMap(w => (NAME_ALIASES[w] || w).split(' ')).filter(w => !NAME_FILLER.has(w));
+  const core = words.filter(w => !NAME_EQUIPMENT.has(w));
+  return { core, sorted:[...core].sort().join(' '), joined:core.join(''),
+    equipment:[...new Set(words.filter(w => NAME_EQUIPMENT.has(w)))].sort().join(' ') };
+}
+/* 'strong': the same movement named differently ("Pull-ups" / "Pullup",
+   "Back Squat" / "Barbell Back Squat"). 'weak': related, e.g. "Bench Press" /
+   "Incline Bench Press" — offered, never pre-selected. */
+function exerciseNameSimilarity(a, b){
+  if (!a.core.length || !b.core.length) return null;
+  const sameMovement = a.sorted === b.sorted || a.joined === b.joined;
+  if (sameMovement && (!a.equipment || !b.equipment || a.equipment === b.equipment)) return 'strong';
+  if (sameMovement) return 'weak';
+  const x = new Set(a.core), y = new Set(b.core);
+  const shared = [...x].filter(w => y.has(w)).length;
+  return shared && shared / (x.size + y.size - shared) >= 0.5 ? 'weak' : null;
+}
+const MATCH_TIER_RANK = { name:0, strong:1, weak:2 };
+/* Different machines' stacks are not comparable loads, which is what the
+   contract's equipment key exists to say; every other difference is a
+   recording convention the user can knowingly override. */
+const machineStackConflict = (a, b) => !sameProgressionContract(a, b) &&
+  [a, b].some(x => normalizeLoadMode(x.loadMode, x.unit) === 'machine_stack');
+function matchImportedExercise(source){
+  const byId = validId(source.id) ? exerciseById(source.id) : null;
+  if (byId && normalizedExerciseName(byId.name) === normalizedExerciseName(source.name) &&
+      sameProgressionContract(byId, source)) return { status:'exact', target:byId.id, candidates:[] };
+  const key = exerciseNameKey(source.name), kind = exerciseMeasureKind(source.unit);
+  const candidates = state.exercises.map(ex => {
+    if (exerciseMeasureKind(ex.unit) !== kind) return null;
+    const tier = normalizedExerciseName(ex.name) === normalizedExerciseName(source.name) ? 'name' :
+      exerciseNameSimilarity(key, exerciseNameKey(ex.name));
+    return tier ? { ex, tier, compatible:sameProgressionContract(ex, source) } : null;
+  }).filter(Boolean).sort((a, b) => MATCH_TIER_RANK[a.tier] - MATCH_TIER_RANK[b.tier] ||
+    b.compatible - a.compatible || !!a.ex.archived - !!b.ex.archived || compareExerciseNames(a.ex, b.ex));
+  const exact = candidates.filter(c => c.tier === 'name' && c.compatible);
+  const live = exact.filter(c => !c.ex.archived);
+  const unique = live.length ? live : exact;
+  if (unique.length === 1) return { status:'exact', target:unique[0].ex.id, candidates };
+  if (!candidates.length) return { status:'new', target:null, candidates };
+  const best = candidates[0];
+  const preselect = best.tier !== 'weak' && !machineStackConflict(best.ex, source) &&
+    candidates.filter(c => c.tier === best.tier).length === 1;
+  return { status:'review', target:preselect ? best.ex.id : null, candidates };
+}
+/* Pure: reads state, writes nothing. Routines are filtered exactly as before
+   (invalid or already-present names skipped), and only exercises those
+   routines use are matched. */
+function planRoutineImport(obj){
+  const list = Array.isArray(obj) ? obj : obj && obj.routines;
+  if (!Array.isArray(list) || !list.length) return null;
+  const exIn = Array.isArray(obj.exercises) ? obj.exercises.filter(e => e && typeof e.name === 'string' && e.name.trim()) : [];
+  const names = new Set(state.routines.map(r => normalizedExerciseName(r.name)));
+  const routines = [], matches = new Map();
+  let skipped = 0;
+  list.forEach(r => {
+    const name = r && typeof r.name === 'string' ? normalizedExerciseName(r.name) : '';
+    if (!name || !Array.isArray(r.items) || names.has(name)){ skipped++; return; }
+    names.add(name);
+    routines.push(r);
+    r.items.forEach(it => {
+      const src = it && exIn.find(e => e.id === it.exerciseId);
+      if (!src || matches.has(src)) return;
+      const source = { ...src, unit:isUnit(src.unit) ? src.unit : 'kg',
+        loadMode:normalizeLoadMode(src.loadMode, src.unit), equipmentKey:String(src.equipmentKey || ''),
+        movementFamily:String(src.movementFamily || inferMovementFamily(src.name, src.category)) };
+      matches.set(src, { src, source, ...matchImportedExercise(source) });
     });
-    /* A routine import may promote an ID that was previously known only from
-       history. It is now its own live Library identity, so any older review
-       decision for that source is obsolete. */
-    state.exerciseLinks = (state.exerciseLinks || []).filter(link => !exerciseById(link.sourceId));
-    state.historySeparateIds = (state.historySeparateIds || []).filter(id => !exerciseById(id));
-    save(); render();
-    toast('Imported ' + plural(addedR, 'routine') +
-      (skippedR ? ' · skipped ' + skippedR + ' duplicate or invalid' : '') +
-      (addedEx ? ' · added ' + plural(addedEx, 'new exercise', 's') : ''));
+  });
+  return { exIn, routines, skipped, matches:[...matches.values()] };
+}
+/* choices: Map from a plan match's src to a Library id, or '' to create. A
+   choice whose exercise has gone since the review falls back to creating. */
+function applyRoutineImport(plan, choices){
+  const resolved = new Map();
+  let addedR = 0, skippedR = plan.skipped, addedEx = 0, matchedEx = 0;
+  plan.matches.forEach(m => {
+    const choice = choices && choices.has(m.src) ? choices.get(m.src) : m.target;
+    let local = choice ? exerciseById(choice) : null;
+    if (local) matchedEx++;
+    else {
+      /* Preserve the source ID when free so a separately transferred history
+         file keeps its relationship to the Library. */
+      const src = m.src;
+      const id = validId(src.id) && !exerciseById(src.id) ? src.id : uid();
+      local = { id, name:String(src.name), category:normalizeCategory(src.category, src.name),
+        unit:normalizedExerciseUnit(m.source.unit, state.settings.unit),
+        loadMode:m.source.loadMode, equipmentKey:m.source.equipmentKey.trim(), movementFamily:m.source.movementFamily,
+        archived:!!src.archived, notes:String(src.notes || ''), url:safeUrl(src.url) };
+      state.exercises.push(local); addedEx++;
+    }
+    /* A planned load recorded under another load convention would be read as
+       this exercise's load, so it is left for the workout to fill in. */
+    resolved.set(m.src, { id:local.id, keepWeight:sameProgressionContract(local, m.source) });
+  });
+  plan.routines.forEach(r => {
+    const itemIds = new Set();
+    const items = r.items.map(it => {
+      if (!it) return null;
+      const src = plan.exIn.find(e => e.id === it.exerciseId);
+      const match = src && resolved.get(src);
+      const local = match ? exerciseById(match.id) : it.exerciseId ? exerciseById(it.exerciseId) : null;
+      if (!local) return null;
+      const sourceItemId = validId(it.id) && !itemIds.has(it.id) ? it.id : uid();
+      itemIds.add(sourceItemId);
+      return normalizeRoutineItem({ id:sourceItemId, exerciseId:local.id,
+        sets:it.sets == null ? 3 : it.sets,
+        repsMin:it.repsMin == null ? (it.reps == null ? 8 : it.reps) : it.repsMin,
+        repsMax:it.repsMax == null ? (it.reps == null ? (it.repsMin == null ? 8 : it.repsMin) : it.reps) : it.repsMax,
+        targetRir:it.targetRir, weight:!match || match.keepWeight ? it.weight : null,
+        eitherOf:it.eitherOf, supersetOf:it.supersetOf });
+    }).filter(Boolean);
+    cleanRoutinePairs(items);
+    keepRoutinePairsAdjacent(items);
+    if (!items.length){ skippedR++; return; }
+    const routineId = validId(r.id) && !state.routines.some(x => x.id === r.id) ? r.id : uid();
+    state.routines.push({ id:routineId, name:String(r.name).trim(), items });
+    addedR++;
+  });
+  /* A routine import may promote an ID that was previously known only from
+     history. It is now its own live Library identity, so any older review
+     decision for that source is obsolete. */
+  state.exerciseLinks = (state.exerciseLinks || []).filter(link => !exerciseById(link.sourceId));
+  state.historySeparateIds = (state.historySeparateIds || []).filter(id => !exerciseById(id));
+  save(); render();
+  toast('Imported ' + plural(addedR, 'routine') +
+    (skippedR ? ' · skipped ' + skippedR + ' duplicate or invalid' : '') +
+    (matchedEx ? ' · matched ' + plural(matchedEx, 'existing exercise', 's') : '') +
+    (addedEx ? ' · added ' + plural(addedEx, 'new exercise', 's') : ''));
+}
+function importMatchNote(m){
+  const best = m.candidates[0];
+  if (best.tier === 'name' && best.compatible) return 'Several exercises in your Library have this name.';
+  if (best.tier === 'name'){
+    const x = progressionContract(m.source), y = progressionContract(best.ex);
+    return 'You have an exercise with this name, recorded differently (' +
+      (x.loadMode !== y.loadMode ? LOAD_MODE_TEXT[x.loadMode] + ' here, ' + LOAD_MODE_TEXT[y.loadMode] + ' in your Library'
+        : 'equipment “' + (x.equipmentKey || 'none') + '” here, “' + (y.equipmentKey || 'none') + '” in your Library') + ').';
+  }
+  return best.tier === 'strong' ? 'A similarly named exercise is in your Library.' : 'Possibly related exercises are in your Library.';
+}
+function importMatchRowHTML(m, i){
+  const meta = ex => esc(exerciseLoadLabel(ex)) + (ex.equipmentKey ? ' · ' + esc(ex.equipmentKey) : '');
+  const options = m.candidates.map(c => '<option value="' + esc(c.ex.id) + '"' + (m.target === c.ex.id ? ' selected' : '') +
+      (c.compatible ? '' : ' data-drops-load="1"') + '>' +
+      esc(c.ex.name) + ' · ' + meta(c.ex) + (c.ex.archived ? ' · archived' : '') + '</option>').join('') +
+    '<option value=""' + (m.target ? '' : ' selected') + '>Create as a new exercise</option>';
+  const selected = m.candidates.find(c => c.ex.id === m.target);
+  return '<div class="history-link-row">' +
+    '<div><div class="history-link-name">' + esc(m.source.name) + '</div>' +
+      '<div class="history-link-meta">In the file: ' + meta(m.source) + '</div>' +
+      '<div class="history-link-suggestion">' + esc(importMatchNote(m)) + '</div></div>' +
+    '<div><label class="field"><span class="cap">In your Library</span>' +
+      '<select id="import-match-' + i + '">' + options + '</select></label>' +
+      '<p class="history-link-meta" id="import-match-' + i + '-load"' + (selected && !selected.compatible ? '' : ' hidden') +
+        '>The file\u2019s planned load is left out: it was recorded differently.</p></div></div>';
+}
+/* Resolves to the user's choices, or null when the import is cancelled
+   (the Cancel button, Esc or Android back). */
+function reviewRoutineImport(plan, review){
+  const dlg = $('#import-match-dlg');
+  const list = $('#import-match-list');
+  list.innerHTML = review.map(importMatchRowHTML).join('');
+  list.onchange = e => {
+    const hint = e.target.tagName === 'SELECT' && $('#' + e.target.id + '-load');
+    if (hint) hint.hidden = !e.target.selectedOptions[0].dataset.dropsLoad;
+  };
+  const auto = plan.matches.filter(m => m.status === 'exact').length;
+  const created = plan.matches.filter(m => m.status === 'new').length;
+  $('#import-match-auto').textContent = [auto ? plural(auto, 'other exercise') + ' matched exactly' : '',
+    created ? plural(created, 'exercise') + ' with no match will be created' : ''].filter(Boolean).join(' · ');
+  $('#import-match-auto').hidden = !auto && !created;
+  return new Promise(res => {
+    let choices = null;
+    $('#import-match-ok').onclick = () => {
+      choices = new Map(review.map((m, i) => [m.src, $('#import-match-' + i).value]));
+      dlg.close();
+    };
+    $('#import-match-cancel').onclick = () => dlg.close();
+    dlg.addEventListener('close', () => res(choices), { once:true });
+    dlg.showModal();
+    $('#import-match-0').focus();
+  });
+}
+function importRoutines(file){
+  readJSONFile(file, async obj => {
+    const plan = planRoutineImport(obj);
+    if (!plan){ toast('No routines found in that file'); return; }
+    const review = plan.matches.filter(m => m.status === 'review');
+    const choices = review.length ? await reviewRoutineImport(plan, review) : null;
+    if (review.length && !choices){ toast('Import cancelled — nothing was changed'); return; }
+    applyRoutineImport(plan, choices);
   });
 }
 
@@ -5181,12 +5342,14 @@ function schemaHelpHTML(){
     '<h3 class="sh-h">Routines file</h3>' +
     '<p class="desc">A routine references exercises by <code>exerciseId</code>. Each id is resolved against your ' +
       'exercises first, then by name, and finally created from the file\u2019s own <code>exercises</code> array \u2014 ' +
-      'which is why routines travel with the exercises they need. Routines whose name you already have are skipped.</p>' +
+      'which is why routines travel with the exercises they need. When a name is only similar, or matches an exercise ' +
+      'recorded differently, the import asks which of your exercises to use before changing anything. ' +
+      'Routines whose name you already have are skipped.</p>' +
     rows([
       ['routines[]', 'required', 'The list. A bare top-level array is accepted too.'],
       ['routines[].name', 'string, required', 'Skipped if missing, or if a routine of that name already exists.'],
       ['routines[].items[]', 'required', 'One entry per exercise; order is the order you train in.'],
-      ['items[].exerciseId', 'string, required', 'Resolved by id, then name, then created from <code>exercises[]</code>.'],
+      ['items[].exerciseId', 'string, required', 'Resolved by id, then name, then created from <code>exercises[]</code>. Uncertain matches are confirmed in a review before import.'],
       ['items[].sets', 'integer', 'Clamped to ' + L.sets[0] + '\u2013' + L.sets[1] + '. Default 3.'],
       ['items[].repsMin', 'integer', 'Lower rep target, clamped to ' + L.reps[0] + '\u2013' + L.reps[1] + '. Default 8. For a timed movement this is <em>seconds</em>. Legacy <code>reps</code> is accepted as both bounds.'],
       ['items[].repsMax', 'integer', 'Upper rep target, clamped to the same range. Values below <code>repsMin</code> are reordered.'],

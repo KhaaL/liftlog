@@ -7,7 +7,7 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
     const page = await browser.newPage({ viewport:{ width:390, height:844 } });
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
-    const html = appWithTestAPI(`{ sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, importHistory, normalizeImportedSet, normalizeImportedWorkout, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, workoutVolume, progressionStatus, loadCueFor, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, compatibleHistoryLink, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, setExerciseArchived, mergeExercises, sameProgressionContract, exerciseLoadLabel, setSummary, remoteStartupSync, autoRemoteBackup, flushSave, save, render, supersetRun, currentMemberIndex, isSettledRow, switchSupersetMember, navigate, currentExercise, settleSupersets, pauseTimer, finishWorkout, sampleExercises, sampleRoutines, get timer(){return timer}, get state(){return state}, get ui(){return ui} }`);
+    const html = appWithTestAPI(`{ sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, planRoutineImport, applyRoutineImport, exerciseNameKey, exerciseNameSimilarity, importHistory, normalizeImportedSet, normalizeImportedWorkout, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, workoutVolume, progressionStatus, loadCueFor, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, compatibleHistoryLink, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, setExerciseArchived, mergeExercises, sameProgressionContract, exerciseLoadLabel, setSummary, remoteStartupSync, autoRemoteBackup, flushSave, save, render, supersetRun, currentMemberIndex, isSettledRow, switchSupersetMember, navigate, currentExercise, settleSupersets, pauseTimer, finishWorkout, sampleExercises, sampleRoutines, get timer(){return timer}, get state(){return state}, get ui(){return ui} }`);
     await page.route('https://liftlog.test/**', route => route.fulfill({ contentType:'text/html', body:html }));
     await page.goto('https://liftlog.test/');
     const result = await page.evaluate(async () => {
@@ -813,6 +813,121 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
     assert.equal(await ss.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'superset editor fits phone width');
     await ss.close();
     console.log('PASS supersets: ' + supersetUnits.length + ' state checks and the editor, workout and sheet flows');
+
+    /* Routine import matching: the planner decides without writing, only
+       uncertain matches reach the review dialog, and cancel changes nothing. */
+    const im = await browser.newPage({ viewport:{ width:390, height:844 } });
+    im.on('pageerror', e => errors.push(e.message));
+    await im.route('https://liftlog.test/**', route => route.fulfill({ contentType:'text/html', body:html }));
+    await im.goto('https://liftlog.test/');
+    const matchChecks = await im.evaluate(() => {
+      const t = window.testAPI, checks = [];
+      const check = (condition, label) => { if (!condition) throw Error(label); checks.push(label); };
+      const sim = (a, b) => t.exerciseNameSimilarity(t.exerciseNameKey(a), t.exerciseNameKey(b));
+      check(sim('Pull-ups', 'Pullup') === 'strong' && sim('Back Squat', 'Barbell Back Squat') === 'strong' &&
+        sim('DB Curls', 'Dumbbell Curl') === 'strong' && sim('RDL', 'Romanian Deadlift') === 'strong',
+        'name keys fold punctuation, plurals, abbreviations and unstated equipment');
+      check(sim('Barbell Row', 'Dumbbell Row') === 'weak' && sim('Bench Press', 'Incline Bench Press') === 'weak',
+        'different equipment or an added qualifier is only a weak match');
+      check(sim('Leg Press', 'Leg Extension') === null && sim('Machine', 'Cable') === null,
+        'unrelated names and equipment-only names do not match');
+      const ex = (id, name, unit, loadMode, equipmentKey = '', archived = false) =>
+        ({ id, name, category:'Other', unit, loadMode, equipmentKey, movementFamily:'other', archived, notes:'', url:'' });
+      t.state.workouts = []; t.state.activeWorkout = null; t.state.routines = [];
+      t.state.exercises = [ex('lib-squat','Back Squat','kg','total'), ex('lib-press','Leg Press','kg','machine_stack','gym-a-press'),
+        ex('lib-bench','Bench Press','kg','total'), ex('lib-plank','Plank','time','duration'),
+        ex('lib-pullup','Pull-up','bw','bodyweight_added'), ex('lib-row-old','Cable Row','kg','total','',true),
+        ex('lib-row','Cable Row','kg','total')];
+      const file = { app:'liftlog', kind:'routines', exercises:[
+          ex('f-squat','Back Squat','kg','total','olympic-bar'), ex('f-press','Leg Press','kg','machine_stack','gym-b-press'),
+          ex('f-incline','Incline Bench Press','kg','total'), ex('f-plank','plank ','time','duration'),
+          ex('f-pullups','Pull-ups','bw','bodyweight_added'), ex('f-curl','Hammer Curl','kg','total'),
+          ex('lib-bench','Lat Pulldown','kg','total'), ex('f-row','Cable Row','kg','total'),
+          ex('f-timed-bench','Bench Press','time','duration')],
+        routines:[{ id:'rt-new', name:'Imported', items:['f-squat','f-press','f-incline','f-plank','f-pullups','f-curl','lib-bench','f-row','f-timed-bench']
+          .map((exerciseId, i) => ({ id:'it-' + i, exerciseId, sets:3, repsMin:5, repsMax:8, weight:40 })) }] };
+      const before = JSON.stringify(t.state);
+      const plan = t.planRoutineImport(structuredClone(file));
+      check(JSON.stringify(t.state) === before, 'planning writes nothing');
+      const by = id => plan.matches.find(m => m.src.id === id);
+      check(by('f-plank').status === 'exact' && by('f-plank').target === 'lib-plank', 'identical name and contract match without review');
+      check(by('f-row').status === 'exact' && by('f-row').target === 'lib-row', 'a live same-name exercise wins over an archived one');
+      check(by('f-squat').status === 'review' && by('f-squat').target === 'lib-squat',
+        'same name, different equipment is reviewed with the existing exercise pre-selected');
+      check(by('f-press').status === 'review' && by('f-press').target === null, 'another machine stack is reviewed with create pre-selected');
+      check(by('f-incline').status === 'review' && by('f-incline').target === null, 'a weak name match is offered but not pre-selected');
+      check(by('f-pullups').status === 'review' && by('f-pullups').target === 'lib-pullup', 'a strong name match is pre-selected');
+      check(by('f-curl').status === 'new' && by('lib-bench').status === 'new', 'no candidate, and an id reused for another name, create');
+      check(by('f-timed-bench').status === 'new', 'a candidate must have the same measurement kind');
+      const count = t.state.exercises.length;
+      t.applyRoutineImport(plan, null);
+      const items = t.state.routines.find(r => r.id === 'rt-new').items, at = i => items[i];
+      check(at(0).exerciseId === 'lib-squat' && at(0).weight === null, 'a match across load conventions drops the planned load');
+      check(at(4).exerciseId === 'lib-pullup' && at(4).weight === 40 && at(3).exerciseId === 'lib-plank', 'compatible matches keep the plan');
+      check(at(1).exerciseId === 'f-press' && at(2).exerciseId === 'f-incline' && at(5).exerciseId === 'f-curl',
+        'created exercises keep their free source ids');
+      check(at(6).exerciseId !== 'lib-bench' && t.state.exercises.find(e => e.id === at(6).exerciseId).name === 'Lat Pulldown',
+        'an id collision creates under a fresh id');
+      check(t.state.exercises.length === count + 5, 'only unmatched exercises are created');
+      t.state.routines = []; t.state.exercises.splice(count);
+      const again = t.planRoutineImport(structuredClone(file));
+      t.applyRoutineImport(again, new Map([[again.matches.find(m => m.src.id === 'f-incline').src, 'lib-bench'],
+        [again.matches.find(m => m.src.id === 'f-squat').src, '']]));
+      const chosen = t.state.routines[0].items;
+      check(chosen[2].exerciseId === 'lib-bench' && chosen[0].exerciseId !== 'lib-squat', 'review choices override the defaults');
+      t.state.routines = []; t.state.exercises.splice(count);
+      t.state.exercises.push(ex('lib-row-2','Cable Row','kg','total'));
+      const twice = t.planRoutineImport(structuredClone(file));
+      check(twice.matches.find(m => m.src.id === 'f-row').status === 'review' &&
+        twice.matches.find(m => m.src.id === 'f-row').target === null,
+        'several same-name exercises are reviewed without guessing between them');
+      t.state.exercises.pop();
+      t.state.exercises.push(ex('lib-bb-curl','Barbell Curl','kg','total'), ex('lib-db-curl','Dumbbell Curl','kg','total'));
+      const curl = t.planRoutineImport({ exercises:[ex('f-curl-plain','Curls','kg','total')],
+        routines:[{ name:'Arms', items:[{ exerciseId:'f-curl-plain' }] }] }).matches[0];
+      check(curl.status === 'review' && curl.target === null && curl.candidates.length === 2,
+        'two equally strong candidates are offered, neither pre-selected');
+      t.state.exercises.splice(-2);
+      window.__matchFile = file;
+      return checks;
+    });
+    const importFile = () => im.evaluate(() => window.testAPI.importRoutines(
+      new File([JSON.stringify(window.__matchFile)], 'routines.json', {type:'application/json'})));
+    const matchDialog = im.getByRole('dialog', {name:'Match imported exercises'});
+    await importFile();
+    await matchDialog.waitFor();
+    assert.equal(await matchDialog.locator('.history-link-row').count(), 4, 'only uncertain matches are listed for review');
+    assert.match(await im.locator('#import-match-auto').innerText(), /2 other exercises matched exactly · 3 exercises with no match will be created/,
+      'the review counts what was decided without asking');
+    assert.equal(await im.evaluate(() => document.activeElement && document.activeElement.id), 'import-match-0', 'focus starts on the first choice');
+    assert.equal(await im.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'the review fits phone width');
+    await im.screenshot({path:'/tmp/liftlog-import-match.png'});
+    const beforeCancel = await im.evaluate(() => JSON.stringify(window.testAPI.state));
+    await matchDialog.getByRole('button', {name:'Cancel import'}).click();
+    assert.equal(await im.evaluate(() => JSON.stringify(window.testAPI.state)), beforeCancel, 'cancelling the review changes nothing');
+    await importFile();
+    await matchDialog.waitFor();
+    await im.keyboard.press('Escape');
+    assert.equal(await im.evaluate(() => window.testAPI.state.routines.length), 0, 'Esc cancels the import too');
+    await importFile();
+    await matchDialog.waitFor();
+    const importSquatRow = matchDialog.locator('.history-link-row', {hasText:'Back Squat'});
+    assert.equal(await importSquatRow.getByText('planned load is left out').isVisible(), true,
+      'a pre-selected match across load conventions says its planned load is dropped');
+    await importSquatRow.locator('select').selectOption('');
+    assert.equal(await importSquatRow.getByText('planned load is left out').isVisible(), false, 'the note follows the choice');
+    await importSquatRow.locator('select').selectOption('lib-squat');
+    await matchDialog.locator('.history-link-row', {hasText:'Incline Bench Press'}).locator('select').selectOption('lib-bench');
+    await matchDialog.getByRole('button', {name:'Import routines'}).click();
+    await im.waitForFunction(() => window.testAPI.state.routines.length === 1);
+    assert.deepEqual(await im.evaluate(() => window.testAPI.state.routines[0].items.slice(0, 5).map(it => it.exerciseId)),
+      ['lib-squat', 'f-press', 'lib-bench', 'lib-plank', 'lib-pullup'], 'confirmed choices are applied');
+    await im.evaluate(() => { const t = window.testAPI; t.state.exercises = []; t.state.routines = [];
+      t.importRoutines(new File([JSON.stringify(t.sampleRoutinesFile())], 's.json', {type:'application/json'})); });
+    await im.waitForFunction(() => window.testAPI.state.routines.length === 1);
+    assert.equal(await im.locator('#import-match-dlg').evaluate(d => d.open), false, 'a clean import asks nothing');
+    await im.close();
+    console.log(matchChecks.map(s => 'PASS ' + s).join('\n') + '\nPASS routine import review: cancel, Esc, choose, confirm, clean import');
 
     /* Detail sheets: a routine, an exercise and a logged session all open in
        the same read-only sheet, and Edit hands over to the editor in the page. */
