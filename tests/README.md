@@ -21,8 +21,8 @@ also mocks remote storage to exercise the real restore/validation path.
 - `regression.cjs`: samples, routine pairing, supersets (pair rules, group
   cursor, rest per round, session-only lifetime), detail sheets (routine,
   exercise and session sheets, their edit hand-over, focus return and toasts
-  above a sheet), targets, historical exercise
-  reconciliation, measurement semantics, bodyweight/added-load analytics,
+  above a sheet), targets, routine-import exercise matching and its review
+  dialog, historical exercise reconciliation, measurement semantics, bodyweight/added-load analytics,
   archive/merge behavior, progression-series compatibility and movement-family
   metadata, progression stalls/load-increase cues, debounced persistence, automatic
   remote backup/startup restore, migration, restore, reload, and mobile layout.
