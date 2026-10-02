@@ -140,7 +140,7 @@ would be a different pipeline rather than a recogniser, and nothing here wants
 one.
 
 **Two lists sort**, and they share everything but those three facts: the
-session sheet's upcoming exercises and the routine editor's items. Both reorder
+session sheet's exercises and the routine editor's items. Both reorder
 under the finger rather than at the drop, both commit through the same
 `drop(from, to, focus)`, and the arrow buttons beside each handle are a drag of
 exactly one place through that same function — they differ only in where focus
@@ -198,7 +198,7 @@ phone in a gym is the case that matters:
   `showModal()` on an open dialog throws, and rebuilding the element would
   flash the backdrop on every reorder.
 
-  **Upcoming exercises reorder by dragging their grip** — the app's second
+  **Every exercise reorders by dragging its grip** — the app's second
   gesture, on pointer events because HTML5 drag and drop is not fired by any
   mobile browser. The grip and nothing else starts a drag, and it is the only
   element with `touch-action:none`, which is what leaves the rest of a
@@ -209,29 +209,42 @@ phone in a gym is the case that matters:
   stay beside it, because a grip does not announce what it can do to anyone who
   is not already holding it.
 
-  Both ways of reordering — and only these two — commit through
-  `reorderMovable()`, over the positions `movableIndices()` reports. Those are
-  the exercises the sheet draws with a grip: the current one, plus everything
-  still to come that has not been skipped or already finished. It is the
-  negation of `isSettledRow()`, which `overviewSheetHTML()` also branches on,
-  so the list that can be dragged and the list drawn with a grip cannot drift
-  apart. It is a list of positions rather than a range because they are not
-  always contiguous — jumping back to an earlier exercise leaves anything you
-  had already finished sitting among the ones still to come. Reordering deals
-  the exercises back into the same set of positions, so no settled row (nor
-  `ui.expandedDone`, which is keyed by index) can move however far a row
-  travels.
+  **One kind of row.** Finished and skipped exercises used to be a different
+  row — no grip, tap to expand, a *Reopen exercise* button inside the
+  expansion — and only the current exercise and the ones after it could move.
+  So once an exercise was done it was fixed in place, and jumping ahead froze
+  everything you had passed over. Now every exercise is the same row: grip,
+  name with a state chip (*Now*, *Done*, *Skipped*), a second line with its
+  progress (or, once finished, its logged sets), and one button — *Start now*,
+  or *Reopen* for an exercise that is finished with — before the two arrows,
+  which therefore sit at the same place on every row. "Finished with" is
+  `isSettledRow()`, and it is a matter of status, not position: skipped, or
+  every set logged and not the one on screen.
 
-  **The current exercise is in that set, and moving it hands "Now" over.**
-  `currentExerciseIndex` names a position, not an exercise, and a reorder
-  preserves the set of positions — so dragging the current exercise later
-  leaves its position occupied by whatever was dealt into it, and that becomes
-  the exercise being worked on. This is the point rather than a side effect:
-  "I'll come back to this one" is a decision made standing in front of an
-  occupied machine. It is also why the current exercise is always the lowest
-  movable position and so can only move later, and why the drop announces the
-  new `Now:` — the screen behind the sheet changes exercise, and that must not
-  be silent.
+  Both ways of reordering — and only these two — commit through
+  `moveSessionExercise()`, a plain move within `activeWorkout.exercises`; the
+  indices on screen are the indices in the array.
+
+  **"Now" follows the exercise, with one deliberate exception.** Moving any
+  other row leaves the current exercise current, wherever it ends up. Dragging
+  the current exercise *later* means "I'll come back to this one" — a decision
+  made standing in front of an occupied machine — so the first exercise with
+  work left that it was moved past takes over. Moved past only finished work it
+  stays current, and a move within its own superset never hands over. The drop
+  announces any new `Now:`, because the screen behind the sheet changes
+  exercise and that must not be silent.
+
+  **Finishing an exercise moves to the next one with work left**
+  (`nextOpenBlock()`), forward first and then wrapping back, since a rearranged
+  list can have finished exercises later and unfinished ones earlier. The
+  pager's `›` stays a plain step to the next exercise in the list.
+
+  **A superset can be made mid-session.** The sheet's **Superset…** opens the
+  routine editor's pair dialog (one dialog, two scopes: `PAIR_SCOPES`). It
+  offers exercises with sets still to do that are in no pair, moves the second
+  to just after the first, and lasts for this workout only — the routine keeps
+  its plan, exactly as when a reorder splits a superset. The same dialog lists
+  the session's supersets with **Split**.
 
   `syncOverviewSheet()` runs before
   `applyFocus()`, because `showModal()` takes the focus and whatever the render
@@ -505,11 +518,6 @@ permanent:
   asks before removing one, and does not ask otherwise (`addSet()` pre-fills a
   new row from the set above it, so "this row has a weight in it" says nothing
   about whether the user typed anything).
-- **`ui.expandedDone` is keyed by position in `activeWorkout.exercises`.**
-  Anything that inserts or removes an exercise invalidates every key after it,
-  so it is cleared — see `confirmExerciseRemoval()`. Reordering never does:
-  `isSettledRow()` keeps every done and skipped position out of the movable
-  set, so the rows that key is about cannot move.
 - **Execution and analytics are separate.** `completed` says the set was
   performed; `countForVolume` / `countForPR` (default true) say whether it counts
   toward totals and records. A warm-up is `completed: true` with both flags
@@ -1279,18 +1287,17 @@ Dragging a row is worth its own pass, by finger as well as by mouse. A drag
 that starts anywhere but the grip must scroll the sheet instead. A drag that
 ends where it began, one cancelled by the system, and one interrupted by Esc
 must all leave the order untouched and no row stuck mid-air. A flick past
-several rows at once must land where it looks like it landed. And the case the
-index arithmetic exists for: finish an exercise, jump ahead and finish another,
-jump back — the finished one now sits among the exercises still to come, and
-dragging a row past it must step over it without moving it.
+several rows at once must land where it looks like it landed. Reorder a finished
+exercise and a skipped one too: both must move like any other row and keep
+their logged sets.
 
-The current exercise drags like any other, and that needs its own pass. Its up
-arrow is always disabled (it is the lowest movable position) and it has no
-*Start now*. Moving it later must hand *Now* to whatever lands in its place,
-change the exercise on the screen behind the sheet, and announce it. Do it with
-sets already logged against the moved exercise and check they travel with it.
-The single-movable-exercise case is worth one look too: both arrows disabled, a
-drag that does nothing, and no error from pressing either.
+The current exercise drags like any other, and that needs its own pass. Moving
+it later past an exercise with sets left must hand *Now* to that exercise,
+change the exercise on the screen behind the sheet, and announce it; moving it
+later past only finished work must not. Do it with sets already logged against
+the moved exercise and check they travel with it. Then make a superset from
+the sheet's **Superset…** with the current exercise as one member: it must
+stay on screen, and logging a set must hand over to its partner.
 
 Session movement is worth walking end to end from the strip's pager: `‹` is
 disabled on the first exercise, steps back into a skipped one (un-skipping it),
@@ -1374,8 +1381,7 @@ reworded through `PAIR_KINDS`. The marker is the either-of bracket in green
 (`--superset`, derived from each theme's `--success`) with a **+** pill.
 
 **The group cursor.** `currentExerciseIndex` always names the first block of a
-superset, and `activeWorkout.supersetSide` selects the member on screen, so
-`isSettledRow`'s "before the cursor is settled" rule holds without change.
+superset, and `activeWorkout.supersetSide` selects the member on screen.
 `currentExercise()` resolves the member; `pointAt()` is the one way to move
 the cursor onto a block. A superset in a workout is a run of adjacent blocks
 (`supersetRun`); `settleSupersets` ends any superset whose members were

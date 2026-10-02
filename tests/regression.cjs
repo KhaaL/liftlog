@@ -7,7 +7,7 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
     const page = await browser.newPage({ viewport:{ width:390, height:844 } });
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
-    const html = appWithTestAPI(`{ sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, planRoutineImport, applyRoutineImport, exerciseNameKey, exerciseNameSimilarity, sameLoadNumbers, distinctExerciseName, linksBrokenBy, sortedPlans, planDay, defaultRoutineId, newPlanDraft, localDay, importHistory, normalizeImportedSet, normalizeImportedWorkout, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, workoutVolume, progressionStatus, loadCueFor, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, compatibleHistoryLink, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, setExerciseArchived, mergeExercises, sameProgressionContract, exerciseLoadLabel, setSummary, remoteStartupSync, autoRemoteBackup, flushSave, save, render, supersetRun, currentMemberIndex, isSettledRow, switchSupersetMember, navigate, currentExercise, settleSupersets, pauseTimer, finishWorkout, sampleExercises, sampleRoutines, get timer(){return timer}, get state(){return state}, get ui(){return ui} }`);
+    const html = appWithTestAPI(`{ sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, planRoutineImport, applyRoutineImport, exerciseNameKey, exerciseNameSimilarity, sameLoadNumbers, distinctExerciseName, linksBrokenBy, sortedPlans, planDay, defaultRoutineId, newPlanDraft, localDay, importHistory, normalizeImportedSet, normalizeImportedWorkout, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, workoutVolume, progressionStatus, loadCueFor, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, compatibleHistoryLink, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, setExerciseArchived, mergeExercises, sameProgressionContract, exerciseLoadLabel, setSummary, remoteStartupSync, autoRemoteBackup, flushSave, save, render, supersetRun, currentMemberIndex, isSettledRow, switchSupersetMember, moveSessionExercise, nextOpenBlock, pairSessionExercises, unpairSessionExercises, reopenExercise, navigate, currentExercise, settleSupersets, pauseTimer, finishWorkout, sampleExercises, sampleRoutines, get timer(){return timer}, get state(){return state}, get ui(){return ui} }`);
     await page.route('https://liftlog.test/**', route => route.fulfill({ contentType:'text/html', body:html }));
     await page.goto('https://liftlog.test/');
     const result = await page.evaluate(async () => {
@@ -816,6 +816,94 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
     await ss.close();
     console.log('PASS supersets: ' + supersetUnits.length + ' state checks and the editor, workout and sheet flows');
 
+    /* The session sheet: every exercise is one kind of row and reorders,
+       finished ones included; "Now" follows the exercise; finishing one moves to
+       the next with work left; and a superset can be made mid-session. */
+    const so = await browser.newPage({ viewport:{ width:390, height:844 } });
+    so.on('pageerror', e => errors.push(e.message));
+    await so.route('https://liftlog.test/**', route => route.fulfill({ contentType:'text/html', body:html }));
+    await so.goto('https://liftlog.test/');
+    const sheetUnits = await so.evaluate(() => {
+      const t = window.testAPI, checks = [];
+      const check = (ok, label) => { if (!ok) throw Error(label); checks.push(label); };
+      t.state.workouts = []; t.state.activeWorkout = null; t.state.settings.autoRest = false;
+      t.state.exercises = ['A','B','C','D'].map(n => ({id:'so-' + n, name:n, category:'Push', unit:'kg', notes:'', archived:false}));
+      t.state.routines = [{id:'rt-so', name:'Four', items:['A','B','C','D'].map(n =>
+        ({id:'so-i' + n, exerciseId:'so-' + n, sets:n === 'D' ? 1 : 2, repsMin:8, repsMax:8, weight:20}))}];
+      t.startRoutine('rt-so');
+      const w = t.state.activeWorkout;
+      const names = () => w.exercises.map(ex => ex.name).join('');
+      const finish = () => t.currentExercise().sets.filter(s => !s.completed).forEach(s => t.toggleSet(s.id));
+      finish();
+      check(t.currentExercise().name === 'B' && t.isSettledRow(w, w.exercises[0], 0), 'finishing A moves on to B');
+      t.moveSessionExercise(w, 0, 3);
+      check(names() === 'BCDA' && t.currentExercise().name === 'B', 'a finished exercise moves, and Now stays put');
+      t.moveSessionExercise(w, 0, 1);
+      check(names() === 'CBDA' && t.currentExercise().name === 'C', 'moving the current exercise past open work hands Now over');
+      t.moveSessionExercise(w, 2, 0);
+      check(names() === 'DCBA' && t.currentExercise().name === 'C', 'moving another exercise leaves Now with the current one');
+      t.moveSessionExercise(w, 3, 2);
+      t.moveSessionExercise(w, 1, 2);
+      check(names() === 'DACB' && t.currentExercise().name === 'C', 'moved past only finished work, the current exercise keeps Now');
+      t.reopenExercise(0);
+      t.moveSessionExercise(w, 0, 3);
+      check(names() === 'ACBD' && t.currentExercise().name === 'C', 'Now goes to the first exercise with work left it was moved past');
+      t.reopenExercise(3);
+      check(!t.isSettledRow(w, w.exercises[1], 1), 'an exercise passed over by jumping ahead is not settled');
+      finish();
+      check(t.currentExercise().name === 'C', 'finishing the last exercise wraps back to work passed over earlier');
+      t.moveSessionExercise(w, 0, 1);
+      finish();
+      check(names() === 'CABD' && t.currentExercise().name === 'B', 'finishing steps over finished work to the next exercise with sets left');
+      check(!t.pairSessionExercises(1, 2), 'a finished exercise cannot join a superset');
+      finish();
+      check(t.currentExercise() === null && t.nextOpenBlock(w) === -1, 'with nothing left the session is complete');
+      t.state.activeWorkout = null;
+      t.startRoutine('rt-so');
+      const w2 = t.state.activeWorkout;
+      t.reopenExercise(1);
+      check(t.pairSessionExercises(3, 1), 'two open exercises pair into a superset');
+      check(w2.exercises.map(ex => ex.name).join('') === 'ACDB' && w2.exercises[2].supersetOf &&
+        w2.exercises[2].supersetOf === w2.exercises[3].supersetOf, 'the second member moves to just after the first');
+      check(t.currentExercise().name === 'B' && w2.currentExerciseIndex === 2 && w2.supersetSide === 1,
+        'the exercise on screen stays on screen as a superset member');
+      check(!t.state.routines[0].items.some(it => it.supersetOf), 'a session superset leaves the routine alone');
+      check(!t.pairSessionExercises(0, 2), 'a superset member cannot pair again');
+      t.toggleSet(t.currentExercise().sets[0].id);
+      check(t.currentExercise().name === 'D', 'the new superset alternates');
+      check(t.unpairSessionExercises(w2.exercises[2].supersetOf) && !w2.exercises.some(ex => ex.supersetOf) &&
+        t.currentExercise().name === 'D' && w2.currentExerciseIndex === 2, 'splitting keeps the exercise on screen');
+      t.state.activeWorkout = null;
+      t.startRoutine('rt-so');
+      finish();
+      t.render();
+      return checks;
+    });
+    await so.locator('#overview-toggle-btn').click();
+    assert.equal(await so.evaluate(() => {
+      const rows = [...document.querySelectorAll('#overview-dlg-body .overview-row')];
+      return rows.length === 4 && rows.every(r => r.querySelector('.grip')) && rows[0].classList.contains('is-settled');
+    }), true, 'every exercise in the sheet is a row with a grip, finished ones included');
+    assert.equal(await so.locator('#ov-jump-0').innerText(), 'Reopen', 'a finished row offers Reopen where others offer Start now');
+    await so.getByRole('button', {name:'Move A later'}).click();
+    assert.deepEqual(await so.locator('#overview-dlg-body .ov-title').allTextContents().then(n => n.map(x => x.trim().replace(/^(Now|Done)\s*/, ''))),
+      ['B', 'A', 'C', 'D'], 'a finished exercise moves with its arrows');
+    assert.equal(await so.evaluate(() => document.activeElement && document.activeElement.id), 'ov-down-1', 'focus stays on the arrow');
+    await so.locator('#session-superset-open').click();
+    const soDialog = so.getByRole('dialog', {name:'Superset'});
+    await soDialog.getByLabel('First exercise').selectOption({label:'B · #1'});
+    await soDialog.getByLabel('Alternate with').selectOption({label:'D · #4'});
+    await soDialog.getByRole('button', {name:'Create superset'}).click();
+    assert.equal(await so.locator('#overview-dlg-body .superset-pair').count(), 2, 'a superset made in the sheet is bracketed');
+    assert.equal(await so.evaluate(() => document.getElementById('overview-dlg').open &&
+      document.activeElement && document.activeElement.id), 'session-superset-open', 'the sheet stays open, focus back on Superset…');
+    assert.equal(await so.evaluate(() => document.documentElement.scrollWidth <= innerWidth &&
+      [...document.querySelectorAll('#overview-dlg-body .overview-row')].every(r => r.scrollWidth <= r.clientWidth)), true,
+      'the session sheet fits phone width');
+    await so.locator('#overview-dlg').screenshot({path:'/tmp/liftlog-session-overview.png'});
+    await so.close();
+    console.log(sheetUnits.map(c => 'PASS ' + c).join('\n') + '\nPASS session sheet: rows, reordering finished work and mid-session supersets');
+
     /* Routine import matching: the planner decides without writing, only
        uncertain matches reach the review dialog, and cancel changes nothing. */
     const im = await browser.newPage({ viewport:{ width:390, height:844 } });
@@ -1331,7 +1419,7 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
       'duplicate-safe import can open exercise reconciliation');
     assert.equal(await touch.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true,
       'exercise reconciliation fits at 320px');
-    assert.match(await touch.locator('#routine-pair-dlg .desc').innerText(), /Completing either one removes the other/,
+    assert.match(await touch.locator('#pair-dlg .desc').innerText(), /Completing either one removes the other/,
       'either-of dialog describes in-session completion behavior');
     await touch.close();
     assert.deepEqual(errors, []);

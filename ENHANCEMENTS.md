@@ -207,7 +207,7 @@ clear workout data) is cheap. Currently every one of them is a confirm-and-hope.
   with `aria-pressed` toggle buttons. `role="radiogroup"` + `role="radio"` with
   roving tabindex and arrow-key navigation would match the actual behaviour.
 - **Reordering without buttons — done.** Both lists that sort do it by a grip:
-  the session sheet's upcoming exercises and the routine editor's items. Each
+  the session sheet's exercises and the routine editor's items. Each
   handle answers the arrow keys too, and the up/down buttons stay beside it.
 - **A drag does not scroll the list it is in.** Dragging a row to the edge of
   the session sheet or the routine editor stops there rather than scrolling the
