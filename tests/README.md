@@ -19,7 +19,8 @@ they do not touch your real workout data or a remote backup. The security suite
 also mocks remote storage to exercise the real restore/validation path.
 
 - `regression.cjs`: samples, routine pairing, supersets (pair rules, group
-  cursor, rest per round, session-only lifetime), detail sheets (routine,
+  cursor, rest per round, session-only lifetime), the session sheet (every
+  row reorders, "Now" hand-over, mid-session supersets), detail sheets (routine,
   exercise and session sheets, their edit hand-over, focus return and toasts
   above a sheet), targets, routine-import exercise matching and its review
   dialog, historical exercise reconciliation, measurement semantics, bodyweight/added-load analytics,

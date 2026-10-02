@@ -687,15 +687,6 @@ kbd{
   .sets{ max-width:600px; }
   .ab-time{ font-size:34px; min-width:92px; }
 }
-.done-ex-row{
-  width:100%; display:flex; align-items:center; gap:var(--sp-3); text-align:left;
-  background:none; border:0; border-bottom:1px solid var(--border); cursor:pointer;
-  padding:var(--sp-3) var(--sp-2); transition:background .12s ease;
-}
-.done-ex-row .chev{ margin-left:auto; transition:transform .15s ease; color:var(--muted); }
-.done-ex-row[aria-expanded="true"] .chev{ transform:rotate(90deg); }
-.done-ex-detail{ padding:var(--sp-2) var(--sp-4) var(--sp-4); border-bottom:1px solid var(--border); font-size:var(--fs-sm); }
-.done-ex-detail .dset{ display:flex; gap:var(--sp-3); padding:3px 0; font-variant-numeric:tabular-nums; }
 .status-chip{ font-size:var(--fs-xs); font-weight:650; padding:1px 8px; border-radius:99px; }
 .status-chip.ok{ background:var(--success-soft); color:var(--success); }
 .status-chip.skip{ background:var(--warning-soft); color:var(--warning); }
@@ -704,7 +695,6 @@ kbd{
 /* session overview drawer */
 .overview-toggle .chev{ transition:transform .15s ease; }
 .overview-toggle[aria-expanded="true"] .chev{ transform:rotate(90deg); }
-.done-ex-row.is-current-row{ cursor:default; }
 .overview-row{
   display:grid; grid-template-columns:44px 1fr auto; gap:var(--sp-2); align-items:center;
   padding:var(--sp-3) var(--sp-2); border-bottom:1px solid var(--border);
@@ -717,6 +707,18 @@ kbd{
 /* .item-name and .item-actions carry bottom padding for the routine editor's
    baseline-aligned grid; here it is 13px of nothing, once per row. */
 .overview-row .item-name,.overview-row .item-actions{ padding-bottom:0; }
+/* Name on one line, state on the next: the logged sets of a finished exercise
+   are as long as they are, and wrapping them beside the name squeezed it into
+   a column. The actions sit at the end with the arrows last, so they line up
+   on every row whether or not it has a jump button. */
+.overview-row .item-name{ display:flex; flex-direction:column; gap:2px; min-width:0; }
+.overview-row .ov-title{ min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.overview-row .ov-meta{ min-width:0; white-space:normal; color:var(--muted); font-size:var(--fs-xs); font-weight:400; font-variant-numeric:tabular-nums; }
+.overview-row .item-actions{ align-items:center; justify-content:flex-end; }
+.overview-row .item-actions .btn{ margin-right:var(--sp-1); }
+/* Finished with, but still a row like the others — dimmed, not different. */
+.overview-row.is-settled .ov-title{ color:var(--muted); }
+.session-pair{ display:flex; flex-wrap:wrap; align-items:center; gap:var(--sp-2) var(--sp-3); }
 .either-inline,.superset-inline{
   display:inline-block; margin-right:5px; padding:1px 5px;
   border:1px solid var(--either); border-radius:99px;
@@ -725,12 +727,19 @@ kbd{
 .superset-inline{ border-color:var(--superset); color:var(--superset); }
 @media (max-width:480px){
   /* Three controls and a name do not fit a 320px line without truncating the
-     name, which is the one thing the running order exists to show. The buttons
-     take a line of their own; the handle spans both, because it belongs to the
-     row rather than to either line. */
-  .overview-row{ grid-template-columns:44px 1fr; gap:4px var(--sp-2); }
-  .overview-row .grip{ grid-row:1 / span 2; align-self:center; }
-  .overview-row .item-actions{ grid-column:2; justify-content:flex-end; }
+     name, which is the one thing the running order exists to show. The name
+     takes the first line to itself and the buttons share the second with the
+     row's state; the handle spans both, because it belongs to the row rather
+     than to either line. */
+  .overview-row{
+    grid-template-columns:44px minmax(0,1fr) auto; gap:2px var(--sp-2);
+    grid-template-areas:"grip title title" "grip meta actions";
+  }
+  .overview-row .item-name{ display:contents; }
+  .overview-row .grip{ grid-area:grip; align-self:center; }
+  .overview-row .ov-title{ grid-area:title; }
+  .overview-row .ov-meta{ grid-area:meta; align-self:center; }
+  .overview-row .item-actions{ grid-area:actions; }
 }
 
 /* ============================================================
@@ -937,8 +946,8 @@ kbd{
 .routine-pair-existing h3{ font-size:var(--fs-sm); margin-bottom:var(--sp-2); }
 .routine-pair-existing-row{ display:flex; align-items:center; justify-content:space-between; gap:var(--sp-3); padding:var(--sp-2) 0; border-top:1px solid var(--border); font-size:var(--fs-sm); }
 .routine-pair-existing-row span{ min-width:0; }
-#routine-pair-picker[hidden]{ display:none; }
-#routine-pair-error{ color:var(--danger); }
+#pair-picker[hidden]{ display:none; }
+#pair-error{ color:var(--danger); }
 @media (max-width:540px){ .routine-pair-fields{ grid-template-columns:1fr; } }
 .item-actions{ display:flex; gap:2px; padding-bottom:4px; }
 .icon-btn{
@@ -947,7 +956,7 @@ kbd{
   color:var(--muted); cursor:pointer; transition:all .12s ease;
 }
 .icon-btn .ic{ width:15px; height:15px; }
-/* The drag handle, in both lists that sort: the session sheet's upcoming
+/* The drag handle, in both lists that sort: the session sheet's
    exercises and the routine editor's items. It is the only thing in a row that
    starts a drag, and `touch-action:none` is what makes the gesture possible at
    all on a phone — without it the browser claims the pointer for the list's
@@ -1133,9 +1142,6 @@ dialog::backdrop{ background:rgb(15 17 20 / .5); }
    than under the last row; on a desktop the dialog is content-height, so
    there is nothing to grow into and it stays as small as it deserves. */
 .sheet-body{ flex:1 1 auto; overflow-y:auto; overscroll-behavior:contain; min-height:0; }
-/* the rows bring their own padding and dividers, so the first one must not
-   also carry the panel's top border */
-.sheet-body > .done-ex-row:first-child{ border-top:0; }
 /* The detail sheet: one item, read-only. Sections are divided the way the
    session sheet's rows are; its actions are the footer, with the destructive
    one pushed to the far end from the primary. */
@@ -1357,8 +1363,6 @@ pre.code code{ background:none; border:0; padding:0; font-size:inherit; white-sp
   .set-num:hover{ background:var(--surface-2); }
   .set-del-btn:hover{ color:var(--danger); border-color:var(--danger); background:var(--danger-soft); }
   .hset-del:hover{ color:var(--danger); border-color:var(--danger); }
-  .done-ex-row:hover{ background:var(--surface-2); }
-  .done-ex-row.is-current-row:hover{ background:none; }
   .list-row:not(.is-editing):hover{ background:var(--surface-2); }
   .hist-row:hover{ background:var(--surface-2); }
   .icon-btn:hover{ background:var(--surface-2); color:var(--text); border-color:var(--border); }
@@ -1397,7 +1401,7 @@ pre.code code{ background:none; border:0; padding:0; font-size:inherit; white-sp
 /* The platform's own tap flash fights .btn:active, and double-tap-to-zoom puts
    a delay on every control that sits close to its neighbour by design. */
 button,input,select,textarea,label,a{ -webkit-tap-highlight-color:transparent; }
-button,.btn,.icon-btn,.nav-btn,.strip-step,.strip-num,.set-num,.done-ex-row,.hist-row,.list-open{
+button,.btn,.icon-btn,.nav-btn,.strip-step,.strip-num,.set-num,.hist-row,.list-open{
   touch-action:manipulation;
 }
 /* After the coarse-pointer block above, which grows the tabs: on a landscape
@@ -1512,21 +1516,21 @@ button,.btn,.icon-btn,.nav-btn,.strip-step,.strip-num,.set-num,.done-ex-row,.his
   </div>
 </dialog>
 
-<dialog id="routine-pair-dlg" class="dlg-wide" aria-labelledby="routine-pair-title">
+<dialog id="pair-dlg" class="dlg-wide" aria-labelledby="pair-title">
   <div class="dlg-body">
-    <h2 id="routine-pair-title">Either of</h2>
-    <p class="desc" id="routine-pair-desc">Choose two exercises already in this routine. Completing either one removes the other from that workout only.</p>
-    <div id="routine-pair-existing" class="routine-pair-existing"></div>
-    <div id="routine-pair-picker" class="routine-pair-fields">
-      <label class="field"><span class="cap">First exercise</span><select id="routine-pair-first" data-change="routine-pair-first"></select></label>
-      <label class="field"><span class="cap" id="routine-pair-second-cap">Or this exercise</span><select id="routine-pair-second"></select></label>
+    <h2 id="pair-title">Either of</h2>
+    <p class="desc" id="pair-desc">Choose two exercises already in this routine. Completing either one removes the other from that workout only.</p>
+    <div id="pair-existing" class="routine-pair-existing"></div>
+    <div id="pair-picker" class="routine-pair-fields">
+      <label class="field"><span class="cap">First exercise</span><select id="pair-first" data-change="pair-first"></select></label>
+      <label class="field"><span class="cap" id="pair-second-cap">Or this exercise</span><select id="pair-second"></select></label>
     </div>
-    <p id="routine-pair-empty" class="hint" hidden>Add two unpaired exercises to create another pair.</p>
-    <p id="routine-pair-error" class="error-text" role="alert" hidden></p>
+    <p id="pair-empty" class="hint" hidden>Add two unpaired exercises to create another pair.</p>
+    <p id="pair-error" class="error-text" role="alert" hidden></p>
   </div>
   <div class="dlg-actions">
-    <button type="button" class="btn" data-action="routine-pair-close">Close</button>
-    <button type="button" class="btn btn-primary" id="routine-pair-add" data-action="routine-pair-add">Pair exercises</button>
+    <button type="button" class="btn" data-action="pair-close">Close</button>
+    <button type="button" class="btn btn-primary" id="pair-add" data-action="pair-add">Pair exercises</button>
   </div>
 </dialog>
 
@@ -2774,13 +2778,12 @@ function freshUI(){
     view:'today',
     prevView:null,
     selectedRoutineId:null,
-    expandedDone:new Set(),     /* keyed by exercise index within the active workout */
     overviewOpen:false,         /* whether the session-overview drawer is expanded */
     detail:null,                /* {kind, id} of the item shown in the detail sheet */
     notesOpen:false,            /* session-notes field expanded (auto if a note exists) */
     routineDraft:null,          /* object while editing a routine */
     routineError:'',
-    pairKind:'eitherOf',
+    pairKind:'eitherOf', pairScope:'routine',
     exerciseDraft:null,         /* object while editing one exercise row */
     showArchivedExercises:false,
     mergeExerciseId:null,
@@ -3687,7 +3690,6 @@ function beginWorkout(workout){
   restoreTimer();
   ui.view = 'today';
   ui.selectedRoutineId = null;
-  ui.expandedDone.clear();   /* keys are indexes into the previous workout */
   /* nothing to log yet means the sheet is where the user needs to be — and the
      focus with it: everything outside an open modal is inert. */
   ui.overviewOpen = workout.exercises.length === 0;
@@ -3830,7 +3832,6 @@ function settleEitherOf(w, ex){
   if (partnerIndex < 0) return null;
   const [partner] = w.exercises.splice(partnerIndex, 1);
   if (partnerIndex < w.currentExerciseIndex) w.currentExerciseIndex--;
-  ui.expandedDone.clear();  /* these keys are exercise indexes */
   return partner;
 }
 
@@ -3883,7 +3884,7 @@ function toggleSet(setId){
   }
   /* checking the last open box leaves nothing to log here, so move on rather
      than sit on a fully-done set list */
-  if (finished) advanceExercise(false);
+  if (finished) advanceExercise(false, true);
   else if (handOver){ pointAt(w, turn.index); save(); ui.focus = 'ex-panel-top'; render(); }
   else { ui.focus = 'sd-' + setId; render(); }
 }
@@ -3992,8 +3993,6 @@ function confirmExerciseRemoval(w, ex){
     buttons
   }).then(v => {
     if (v !== 'session' && v !== 'routine') return;
-    /* ui.expandedDone is keyed by position in w.exercises, and every index
-       after this one is about to shift — so the expand state goes with it */
     const run = supersetRun(w, idx);
     const partners = run.filter(i => i !== idx).map(i => w.exercises[i]);
     w.exercises.splice(idx, 1);
@@ -4007,7 +4006,6 @@ function confirmExerciseRemoval(w, ex){
     const heir = partners.find(p => !p.skipped && !allSetsDone(p));
     if (heir) pointAt(w, w.exercises.indexOf(heir));
     else pointAt(w, Math.min(run[run.length - 1], w.exercises.length));
-    ui.expandedDone.clear();
     let msg = 'Removed ' + ex.name + ' from this session';
     if (v === 'routine'){
       /* the workout block does not record which routine item built it, so
@@ -4037,14 +4035,20 @@ function addSet(){
   render();
   toast('Set ' + ex.sets.length + ' added');
 }
-function advanceExercise(markSkipped){
+/* `toOpen` is the move a finished exercise makes: on to the next one with
+   work left (nextOpenBlock), rather than the next one in the list. */
+function advanceExercise(markSkipped, toOpen){
   const w = state.activeWorkout; const ex = currentExercise();
   if (!w || !ex) return;
   if (markSkipped){ ex.skipped = true; announce(ex.name + ' skipped.'); }
   /* a skipped superset member leaves its partner to finish as straight sets */
   const turn = markSkipped ? supersetTurn(w) : null;
+  const open = toOpen && !turn ? nextOpenBlock(w) : null;
   if (turn) pointAt(w, turn.index);
-  else {
+  else if (open != null){
+    if (open < 0){ w.currentExerciseIndex = w.exercises.length; w.supersetSide = 0; }
+    else enterAt(w, open);
+  } else {
     /* the cursor moves a superset at a time, so "next" is past its last member */
     const run = supersetRun(w, w.currentExerciseIndex);
     const next = run[run.length - 1] + 1;
@@ -4073,66 +4077,104 @@ function reopenExercise(idx){
   if (idx < 0 || idx >= w.exercises.length) return;
   w.exercises[idx].skipped = false;
   pointAt(w, idx);
-  ui.expandedDone.delete(String(idx));
   save();
   ui.focus = 'ex-panel-top';
   render();
 }
-/* An exercise the session has finished with: behind the current one, skipped,
-   or done and not the one being worked on. These are the rows the sheet draws
-   as a done row, and the positions a reorder must never disturb — ui.expandedDone
-   is keyed by index, so moving one would mis-key every row after it.
-
-   This is the single definition of that split. movableIndices() is its
-   negation and overviewSheetHTML() branches on it, so the list that can be
-   dragged and the list drawn with a grip cannot drift apart. */
+/* An exercise the session has finished with: skipped, or every set logged and
+   not the one on screen. It is a matter of status, not of position — an
+   exercise passed over by jumping ahead still has work in it, and a finished
+   one can sit anywhere once the list has been rearranged. The sheet draws
+   these with their logged sets and a Reopen button; automatic advancing steps
+   over them. */
 function isSettledRow(w, ex, i){
-  return i < w.currentExerciseIndex || ex.skipped || (allSetsDone(ex) && i !== currentMemberIndex(w));
+  return ex.skipped || (allSetsDone(ex) && i !== currentMemberIndex(w));
 }
-/* The exercises the sheet draws with a grip, by index: the current one and
-   everything still to come that has not been skipped or already finished.
+const hasWorkLeft = ex => !!ex && !ex.skipped && !allSetsDone(ex);
+/* Move one exercise to another position in the session. Every row moves —
+   finished, skipped, current and still to come alike — so the sheet is one
+   list with one set of rules, and ordering it never depends on how far the
+   session has got.
 
-   The current exercise is in the set. It is always the lowest position in it,
-   so it can only move later — and when it does, whatever is dealt into its
-   position becomes the exercise being worked on, since currentExerciseIndex
-   names a position and reorderMovable() preserves the set of positions. That
-   is the point: "I'll come back to this one" is a thing you decide mid-session,
-   standing in front of an occupied machine.
+   "Now" stays with the exercise being worked on, wherever it or anything else
+   moves, with one exception that is the point of moving it: dragging the
+   current exercise later means "I'll come back to this one", standing in front
+   of an occupied machine. Then the first exercise with work left that it was
+   moved past takes over. Moved past nothing but finished work, it stays. A move
+   within its own superset never hands over: that is reordering the round.
 
-   The positions are not always contiguous. Jumping back to an earlier exercise
-   leaves any exercise you had already finished sitting among the ones still to
-   come, as a done row the reorder must step over rather than through. Hence a
-   list of positions rather than a lo..hi range. */
-function movableIndices(w){
-  const out = [];
-  w.exercises.forEach((ex, i) => { if (!isSettledRow(w, ex, i)) out.push(i); });
-  return out;
+   A move that separates a superset ends it for this session (settleSupersets).
+   Returns { landed, ended }: where the exercise ended up and whether a
+   superset ended. */
+function moveSessionExercise(w, from, to){
+  const cur = w.exercises[currentMemberIndex(w)] || null;
+  const [moved] = w.exercises.splice(from, 1);
+  w.exercises.splice(to, 0, moved);
+  const ended = settleSupersets(w);
+  let next = cur;
+  if (cur && moved === cur && to > from){
+    const own = supersetRun(w, w.exercises.indexOf(cur)).map(i => w.exercises[i]);
+    for (let k = from; k < to; k++){
+      const ex = w.exercises[k];
+      if (hasWorkLeft(ex) && !own.includes(ex)){ next = ex; break; }
+    }
+  }
+  if (next) pointAt(w, w.exercises.indexOf(next));
+  else w.currentExerciseIndex = w.exercises.length;
+  return { landed:w.exercises.indexOf(moved), ended };
 }
-/* Move one movable exercise to another movable position. The set of positions
-   is preserved and the exercises are dealt back into it in the new order, so
-   nothing outside that set can be disturbed however far a row travels. Both
-   ways of reordering commit through here: the arrow buttons (one step) and a
-   drag (any distance). Returns the index the exercise ended up at. */
-function reorderMovable(w, from, to){
-  const slots = movableIndices(w);
-  const picked = slots.map(i => w.exercises[i]);
-  picked.splice(to, 0, picked.splice(from, 1)[0]);
-  slots.forEach((slot, k) => { w.exercises[slot] = picked[k]; });
-  return slots[to];
+/* After an exercise is finished: the next block that still has work, looking
+   forward first and then back to anything passed over earlier — rearranging
+   can leave finished exercises later in the list, and jumping ahead can leave
+   unfinished ones earlier. -1 when nothing is left. The pager's Next stays a
+   plain step to the following exercise; this is only the automatic move. */
+function nextOpenBlock(w){
+  const run = supersetRun(w, w.currentExerciseIndex);
+  const n = w.exercises.length, after = run[run.length - 1];
+  for (let k = 1; k <= n; k++){
+    const i = (after + k) % n;
+    if (!run.includes(i) && hasWorkLeft(w.exercises[i])) return i;
+  }
+  return -1;
 }
 /* The arrow buttons are a drag of exactly one place, and they commit the same
    way — through the list's own drop. All they add is where the focus goes
    afterwards: it stays on the button being held, unless the move disabled it,
-   in which case the other one takes over. A row always has one enabled, since
-   a single movable exercise fails the bounds check above it. */
+   in which case the other one takes over. */
 function overviewStep(idx, dir){
   const w = state.activeWorkout; if (!w) return;
-  const slots = movableIndices(w);
-  const from = slots.indexOf(idx), to = from + dir;
-  if (from === -1 || to < 0 || to >= slots.length) return;
-  const atBound = dir < 0 ? to === 0 : to === slots.length - 1;
+  const to = idx + dir, last = w.exercises.length - 1;
+  if (idx < 0 || idx > last || to < 0 || to > last) return;
+  const atBound = dir < 0 ? to === 0 : to === last;
   const keep = atBound ? (dir < 0 ? 'ov-down-' : 'ov-up-') : (dir < 0 ? 'ov-up-' : 'ov-down-');
-  SORTABLES['session-exercises'].drop(from, to, keep + slots[to]);
+  SORTABLES['session-exercises'].drop(idx, to, keep + to);
+}
+/* A superset made mid-session: the second exercise moves to just after the
+   first, and the pair lasts for this workout only — the routine keeps its plan,
+   the same as a superset a reorder ends. Both must still have work in them and
+   belong to no pair; the dialog offers nothing else. */
+function pairSessionExercises(a, b){
+  const w = state.activeWorkout; if (!w) return false;
+  const first = w.exercises[a], second = w.exercises[b];
+  const free = ex => hasWorkLeft(ex) && !ex.eitherOf && !ex.supersetOf;
+  if (!first || !second || first === second || !free(first) || !free(second)) return false;
+  const cur = w.exercises[currentMemberIndex(w)] || null;
+  w.exercises.splice(b, 1);
+  w.exercises.splice(w.exercises.indexOf(first) + 1, 0, second);
+  first.supersetOf = second.supersetOf = uid();
+  if (cur) pointAt(w, w.exercises.indexOf(cur));
+  save();
+  return true;
+}
+function unpairSessionExercises(key){
+  const w = state.activeWorkout; if (!w || !key) return false;
+  const cur = w.exercises[currentMemberIndex(w)] || null;
+  let removed = false;
+  w.exercises.forEach(ex => { if (ex.supersetOf === key){ delete ex.supersetOf; removed = true; } });
+  if (!removed) return false;
+  if (cur) pointAt(w, w.exercises.indexOf(cur));
+  save();
+  return true;
 }
 function finishWorkout(){
   const w = state.activeWorkout; if (!w) return;
@@ -4304,73 +4346,103 @@ function unpairRoutineItems(groupId){
   }));
   return removed;
 }
-function unpairedRoutineItems(){
-  return ui.routineDraft ? ui.routineDraft.items.filter(it => !pairKeyOf(it) && exerciseById(it.exerciseId)) : [];
-}
 /* One dialog serves both kinds of pair; only its words change. */
 const PAIR_KINDS = {
-  eitherOf:{ title:'Either of', opener:'routine-pair-open', second:'Or this exercise', add:'Pair exercises',
+  eitherOf:{ title:'Either of', second:'Or this exercise', add:'Pair exercises',
     desc:'Choose two exercises already in this routine. Completing either one removes the other from that workout only.',
     current:'Current pairs', join:' or ', unpair:'Unpair', empty:'Add two unpaired exercises to create another pair.' },
-  supersetOf:{ title:'Superset', opener:'routine-superset-open', second:'Alternate with', add:'Create superset',
+  supersetOf:{ title:'Superset', second:'Alternate with', add:'Create superset',
     desc:'Choose two exercises already in this routine. In a workout you alternate between them set by set, resting after each round.',
     current:'Current supersets', join:' + ', unpair:'Split', empty:'Add two unpaired exercises to create a superset.' }
 };
-function pairPickerOptions(items){
-  const all = ui.routineDraft.items;
-  return items.map(it => '<option value="' + esc(it.id) + '">' +
-    esc((exerciseById(it.exerciseId) || {}).name || '(removed exercise)') +
-    ' · #' + (all.indexOf(it) + 1) + '</option>').join('');
+/* …and both places that pair: the routine being edited, and the workout in
+   progress. A scope names its list, which entries in it may pair, how a pair
+   is made and undone, and the button focus returns to. The picker's values are
+   positions in the list, which nothing can move while the dialog is open. */
+const PAIR_SCOPES = {
+  routine:{
+    list:() => ui.routineDraft ? ui.routineDraft.items : [],
+    name:it => (exerciseById(it.exerciseId) || {}).name || '(removed exercise)',
+    free:it => !pairKeyOf(it) && !!exerciseById(it.exerciseId),
+    pair:(a, b, kind) => { const items = ui.routineDraft.items; return pairRoutineItems(items[a].id, items[b].id, kind); },
+    unpair:key => unpairRoutineItems(key),
+    opener:kind => kind === 'supersetOf' ? 'routine-superset-open' : 'routine-pair-open'
+  },
+  session:{
+    list:() => state.activeWorkout ? state.activeWorkout.exercises : [],
+    name:ex => ex.name,
+    free:ex => hasWorkLeft(ex) && !ex.eitherOf && !ex.supersetOf,
+    pair:(a, b) => pairSessionExercises(a, b),
+    unpair:key => unpairSessionExercises(key),
+    opener:() => 'session-superset-open',
+    copy:{ desc:'Choose two exercises with sets still to do. You alternate between them set by set, resting after each round. ' +
+      'This workout only: the routine keeps its plan.', empty:'A superset needs two unpaired exercises with sets still to do.' }
+  }
+};
+const pairScope = () => PAIR_SCOPES[ui.pairScope] || PAIR_SCOPES.routine;
+/* Positions of the entries that can pair with something, in list order. */
+function pairCandidates(scopeName, first){
+  const scope = PAIR_SCOPES[scopeName], list = scope.list();
+  const free = list.map((it, i) => i).filter(i => scope.free(list[i]));
+  const fits = (i, j) => i !== j && list[i].exerciseId !== list[j].exerciseId;
+  return first == null ? free.filter(i => free.some(j => fits(i, j))) : free.filter(j => fits(first, j));
+}
+function pairPickerOptions(positions){
+  const scope = pairScope(), list = scope.list();
+  return positions.map(i => '<option value="' + i + '">' + esc(scope.name(list[i])) + ' · #' + (i + 1) + '</option>').join('');
 }
 function refreshSecondPairPicker(){
-  const first = unpairedRoutineItems().find(it => it.id === $('#routine-pair-first').value);
-  const second = $('#routine-pair-second');
+  const first = $('#pair-first').value;
+  const second = $('#pair-second');
   const selected = second.value;
-  const choices = unpairedRoutineItems().filter(it => first && it !== first && it.exerciseId !== first.exerciseId);
+  const choices = first === '' ? [] : pairCandidates(ui.pairScope, Number(first));
   second.innerHTML = pairPickerOptions(choices);
-  if (choices.some(it => it.id === selected)) second.value = selected;
+  if (choices.includes(Number(selected))) second.value = selected;
 }
-function openRoutinePairDialog(kind){
-  const d = ui.routineDraft;
-  if (!d || d.items.length < 2) return;
+function openPairDialog(scopeName, kind){
+  ui.pairScope = PAIR_SCOPES[scopeName] ? scopeName : 'routine';
   ui.pairKind = PAIR_KINDS[kind] ? kind : 'eitherOf';
-  const copy = PAIR_KINDS[ui.pairKind];
-  $('#routine-pair-title').textContent = copy.title;
-  $('#routine-pair-desc').textContent = copy.desc;
-  $('#routine-pair-second-cap').textContent = copy.second;
-  $('#routine-pair-add').textContent = copy.add;
-  $('#routine-pair-empty').textContent = copy.empty;
-  const paired = routineGroups(d.items).filter(group => group.length === 2 && group[0][ui.pairKind]);
-  $('#routine-pair-existing').innerHTML = paired.length
-    ? '<h3>' + copy.current + '</h3>' + paired.map(group =>
-      '<div class="routine-pair-existing-row"><span>' +
-        group.map(it => esc((exerciseById(it.exerciseId) || {}).name || '(removed exercise)')).join(copy.join) +
-        '</span><button type="button" class="btn btn-sm" data-action="routine-pair-unpair" data-group="' +
-        esc(group[0][ui.pairKind]) + '">' + copy.unpair + '</button></div>').join('') : '';
-  const available = unpairedRoutineItems();
-  const firstChoices = available.filter(it => available.some(other => other !== it && other.exerciseId !== it.exerciseId));
+  const scope = pairScope(), list = scope.list();
+  if (list.length < 2) return;
+  const copy = { ...PAIR_KINDS[ui.pairKind], ...(scope.copy || {}) };
+  $('#pair-title').textContent = copy.title;
+  $('#pair-desc').textContent = copy.desc;
+  $('#pair-second-cap').textContent = copy.second;
+  $('#pair-add').textContent = copy.add;
+  $('#pair-empty').textContent = copy.empty;
+  const groups = new Map();
+  list.forEach(it => { const key = it[ui.pairKind]; if (key) groups.set(key, (groups.get(key) || []).concat([it])); });
+  const paired = [...groups].filter(([, group]) => group.length === 2);
+  $('#pair-existing').innerHTML = paired.length
+    ? '<h3>' + copy.current + '</h3>' + paired.map(([key, group]) =>
+      '<div class="routine-pair-existing-row"><span>' + group.map(it => esc(scope.name(it))).join(copy.join) +
+        '</span><button type="button" class="btn btn-sm" data-action="pair-unpair" data-group="' +
+        esc(key) + '">' + copy.unpair + '</button></div>').join('') : '';
+  const firstChoices = pairCandidates(ui.pairScope);
   const canPair = firstChoices.length > 0;
-  $('#routine-pair-picker').hidden = !canPair;
-  $('#routine-pair-empty').hidden = canPair;
-  $('#routine-pair-add').disabled = !canPair;
-  $('#routine-pair-error').hidden = true;
-  $('#routine-pair-first').innerHTML = pairPickerOptions(firstChoices);
+  $('#pair-picker').hidden = !canPair;
+  $('#pair-empty').hidden = canPair;
+  $('#pair-add').disabled = !canPair;
+  $('#pair-error').hidden = true;
+  $('#pair-first').innerHTML = pairPickerOptions(firstChoices);
   refreshSecondPairPicker();
-  $('#routine-pair-dlg').showModal();
-  (canPair ? $('#routine-pair-first') : $('#routine-pair-dlg [data-action="routine-pair-close"]')).focus();
+  $('#pair-dlg').showModal();
+  (canPair ? $('#pair-first') : $('#pair-dlg [data-action="pair-close"]')).focus();
 }
-function closeRoutinePairDialog(changed){
-  const opener = PAIR_KINDS[ui.pairKind].opener;
-  $('#routine-pair-dlg').close();
+function closePairDialog(changed){
+  const opener = pairScope().opener(ui.pairKind);
+  $('#pair-dlg').close();
   if (changed){ ui.focus = opener; render(); }
-  else $('#' + opener).focus();
+  else { const el = document.getElementById(opener); if (el) el.focus(); }
 }
-function addRoutinePair(){
-  if (pairRoutineItems($('#routine-pair-first').value, $('#routine-pair-second').value, ui.pairKind)){
-    closeRoutinePairDialog(true);
+function addPair(){
+  const a = $('#pair-first').value, b = $('#pair-second').value;
+  if (a !== '' && b !== '' && pairScope().pair(Number(a), Number(b), ui.pairKind)){
+    closePairDialog(true);
+    if (ui.pairScope === 'session') toast('Superset created for this workout');
     return;
   }
-  const error = $('#routine-pair-error');
+  const error = $('#pair-error');
   error.textContent = 'Choose two different, unpaired exercises.';
   error.hidden = false;
 }
@@ -6345,44 +6417,23 @@ function htmlSupersetNote(w, ex, run){
     '<span class="muted xs">Rest after each round</span></div>';
 }
 
-/* A completed/skipped exercise row, expandable via ui.expandedDone (keyed by
-   array index — safe because upcoming-only reordering never moves a done
-   exercise's index). Lives in the session-overview drawer. */
-function htmlDoneRow(ex, i, marker){
-  const open = ui.expandedDone.has(String(i));
-  const completed = ex.sets.filter(s => s.completed);
-  const status = ex.skipped ? '<span class="status-chip skip">Skipped</span>'
-    : '<span class="status-chip ok">' + (allSetsDone(ex) ? icon('check','ic-xs') + ' ' : '') +
-      completed.length + '/' + ex.sets.length + '</span>';
-  let html = '<button type="button" class="done-ex-row" data-action="toggle-done-ex" data-idx="' + i + '" aria-expanded="' + open + '">' +
-    status + marker + '<strong>' + esc(ex.name) + '</strong>' +
-    '<span class="muted small">' + completed.map(s => setSummary(s, ex)).join(', ') + '</span>' +
-    IC.chev + '</button>';
-  if (open){
-    html += '<div class="done-ex-detail">' +
-      (ex.sets.map((s, j) => '<div class="dset"><span class="muted">Set ' + (j+1) + '</span><span>' + setSummary(s, ex) +
-        (s.rpe != null ? ' <span class="muted">@ RPE ' + esc(s.rpe) + '</span>' : '') +
-        (s.rir != null ? ' <span class="muted">@ RIR ' + esc(s.rir) + '</span>' : '') +
-        (s.completed ? '' : ' <span class="status-chip skip">open</span>') + '</span></div>').join('')) +
-      '<div class="mt-2"><button type="button" class="btn btn-sm" data-action="overview-jump" data-idx="' + i + '">Reopen exercise</button></div>' +
-    '</div>';
-  }
-  return html;
-}
-/* What is inside the session-overview sheet: every exercise in the workout,
-   done first, then the one in progress, then what's left — with reorder/jump
-   controls on the upcoming ones. Reordering is scoped to indexes strictly after
-   currentExerciseIndex so done/current indexes (and ui.expandedDone, which
-   is keyed by index) never shift underneath the user.
+/* What is inside the session-overview sheet: every exercise in the workout, in
+   order, each as the same row — a grip, its name and state, and the same
+   controls in the same places. Finished and skipped exercises used to be a
+   different kind of row: no grip, tap to expand, a "Reopen exercise" button
+   inside the expansion. That made them look (and be) fixed in place, and put
+   the same jump behind two different interactions. Now a row's state is what
+   it says, not how it is built: a chip for what is done, its logged sets as
+   the second line, and one button — Start now, or Reopen for an exercise that
+   is finished with — before the two arrows, which are therefore at the same
+   place on every row.
 
    The frame (title, close, scroll container) is static markup in #overview-dlg;
    this is only the part that changes, so a reorder refills the body without
    the sheet itself blinking out and back. */
 function overviewSheetHTML(w){
-  /* Which row is at which end of the reorderable range — see movableIndices()
-     for why that is a list of positions rather than the tail of the array. */
-  const slots = movableIndices(w);
-  const lo = slots[0], hi = slots[slots.length - 1];
+  const last = w.exercises.length - 1;
+  const nowIdx = currentMemberIndex(w);
   let html = '';
 
   w.exercises.forEach((ex, i) => {
@@ -6390,47 +6441,48 @@ function overviewSheetHTML(w){
     const pairStyle = pairKey === 'supersetOf' ? 'superset' : 'either';
     const partnerIndex = pairKey
       ? w.exercises.findIndex((other, j) => j !== i && other[pairKey] === ex[pairKey]) : -1;
-    const joined = partnerIndex >= 0 && Math.abs(partnerIndex - i) === 1 &&
-      !isSettledRow(w, ex, i) && !isSettledRow(w, w.exercises[partnerIndex], partnerIndex);
+    const joined = partnerIndex >= 0 && Math.abs(partnerIndex - i) === 1;
     const pairClass = joined ? ' ' + pairStyle + '-pair ' + pairStyle + (i < partnerIndex ? '-first' : '-last') : '';
     const marker = partnerIndex >= 0 && !joined
       ? (pairKey === 'supersetOf' ? '<span class="superset-inline" aria-label="Superset">+</span>' : '<span class="either-inline">OR</span>') : '';
-    if (isSettledRow(w, ex, i)){
-      html += htmlDoneRow(ex, i, marker);
-      return;
-    }
+    const isNow = i === nowIdx;
+    const settled = isSettledRow(w, ex, i);
+    const logged = ex.sets.filter(s => s.completed);
+    const chip = isNow ? '<span class="status-chip current">Now</span>'
+      : ex.skipped ? '<span class="status-chip skip">Skipped</span>'
+      : allSetsDone(ex) ? '<span class="status-chip ok">' + icon('check','ic-xs') + ' Done</span>' : '';
+    const meta = settled && logged.length ? logged.map(s => setSummary(s, ex)).join(', ')
+      : isNow || logged.length ? logged.length + '/' + ex.sets.length + ' sets'
+      : plural(ex.sets.length, 'set') + ' planned';
     /* The grip is the drag handle and nothing else — a whole draggable row
        would have no way to tell a drag from the scroll it started with, on
        the one surface (a full-screen sheet) that has to scroll. It answers
        the arrow keys too, so the gesture is never the only way to move a
        row; the buttons beside it stay because a grip does not announce what
        it can do to anyone who is not already holding it. */
-    const isNow = i === currentMemberIndex(w);
-    const done = ex.sets.filter(s => s.completed).length;
-    html += '<div class="overview-row' + (isNow ? ' is-current-row' : '') + pairClass + '" data-idx="' + i + '"' +
+    html += '<div class="overview-row' + (isNow ? ' is-current-row' : '') + (settled ? ' is-settled' : '') + pairClass + '" data-idx="' + i + '"' +
         (isNow ? ' aria-current="step"' : '') + '>' +
       '<button type="button" class="grip" id="ov-grip-' + i + '" data-drag="session-exercises" ' +
         'aria-label="Reorder ' + esc(ex.name) + '. Drag it, or use the up and down arrow keys." ' +
         'title="Drag to reorder">' + IC.grip + '</button>' +
       '<span class="item-name">' +
-        (isNow ? '<span class="status-chip current">Now</span> ' : '') +
-        (marker ? marker + ' ' : '') +
-        esc(ex.name) +
-        (joined && i < partnerIndex ? '<span class="sr-only">' + (pairKey === 'supersetOf' ? ' in a superset with ' : ' or ') +
-          esc(w.exercises[partnerIndex].name) + '</span>' : '') +
-        ' <span class="muted xs">· ' + (isNow ? done + '/' + ex.sets.length + ' sets'
-                                              : plural(ex.sets.length, 'set') + ' planned') + '</span></span>' +
+        '<span class="ov-title">' + (chip ? chip + ' ' : '') + (marker ? marker + ' ' : '') + esc(ex.name) +
+          (joined && i < partnerIndex ? '<span class="sr-only">' + (pairKey === 'supersetOf' ? ' in a superset with ' : ' or ') +
+            esc(w.exercises[partnerIndex].name) + '</span>' : '') + '</span>' +
+        '<span class="ov-meta">' + meta + '</span></span>' +
       '<span class="item-actions">' +
-        '<button type="button" class="icon-btn" id="ov-up-' + i + '" data-action="overview-up" data-idx="' + i + '" ' +
-          'aria-label="Move ' + esc(ex.name) + ' earlier"' + (i === lo ? ' disabled' : '') + '>' + IC.up + '</button>' +
-        '<button type="button" class="icon-btn" id="ov-down-' + i + '" data-action="overview-down" data-idx="' + i + '" ' +
-          'aria-label="Move ' + esc(ex.name) + ' later"' + (i === hi ? ' disabled' : '') + '>' + IC.down + '</button>' +
         /* Nothing to jump to on the exercise you are already on. */
-        (isNow ? '' : '<button type="button" class="btn btn-sm" data-action="overview-jump" data-idx="' + i + '">Start now</button>') +
+        (isNow ? '' : '<button type="button" class="btn btn-sm" id="ov-jump-' + i + '" data-action="overview-jump" data-idx="' + i + '" ' +
+          'aria-label="' + (settled ? 'Reopen ' : 'Start ') + esc(ex.name) + ' now">' + (settled ? 'Reopen' : 'Start now') + '</button>') +
+        '<button type="button" class="icon-btn" id="ov-up-' + i + '" data-action="overview-up" data-idx="' + i + '" ' +
+          'aria-label="Move ' + esc(ex.name) + ' earlier"' + (i === 0 ? ' disabled' : '') + '>' + IC.up + '</button>' +
+        '<button type="button" class="icon-btn" id="ov-down-' + i + '" data-action="overview-down" data-idx="' + i + '" ' +
+          'aria-label="Move ' + esc(ex.name) + ' later"' + (i === last ? ' disabled' : '') + '>' + IC.down + '</button>' +
       '</span>' +
     '</div>';
   });
 
+  html += htmlSessionSuperset(w);
   html += htmlAddExercise();
   /* Discard lives here rather than beside "Finish workout": they had the same
      size and adjacency, and a mis-tap costs the whole session. */
@@ -6438,6 +6490,20 @@ function overviewSheetHTML(w){
     '<button type="button" class="btn btn-danger" data-action="discard-workout">' + IC.trash +
     '<span>Discard this workout</span></button></div>';
   return html;
+}
+/* Pairing two exercises into a superset mid-session, through the same dialog
+   the routine editor uses. Only offered once there are two exercises to pair. */
+function htmlSessionSuperset(w){
+  if (w.exercises.length < 2) return '';
+  const can = pairCandidates('session').length > 0;
+  const has = w.exercises.some(ex => ex.supersetOf);
+  return '<div class="pad divider-top session-pair">' +
+    '<button type="button" class="btn btn-sm" id="session-superset-open" data-action="pair-open" ' +
+      'data-scope="session" data-kind="supersetOf"' + (can || has ? '' : ' disabled') + '>' +
+      IC.plus + '<span>Superset…</span></button>' +
+    '<span class="hint">' + (can || has ? 'Alternate two exercises set by set, for this workout only.'
+                                        : 'A superset needs two exercises with sets still to do.') + '</span>' +
+  '</div>';
 }
 /* Where the session is, in the sheet's own words — the strip behind it is
    covered while the sheet is open. */
@@ -6734,9 +6800,9 @@ function htmlRoutineEditor(){
       '<div class="section-title mt-5"><h2>Exercises</h2><span class="rule"></span>' +
         '<span class="muted xs">sets × rep range · target RIR / weight</span></div>' +
       '<div class="routine-pair-toolbar">' +
-        '<button type="button" class="btn btn-sm" id="routine-pair-open" data-action="routine-pair-open" data-kind="eitherOf"' +
+        '<button type="button" class="btn btn-sm" id="routine-pair-open" data-action="pair-open" data-scope="routine" data-kind="eitherOf"' +
           (d.items.length < 2 ? ' disabled' : '') + '>Pair exercises…</button>' +
-        '<button type="button" class="btn btn-sm" id="routine-superset-open" data-action="routine-pair-open" data-kind="supersetOf"' +
+        '<button type="button" class="btn btn-sm" id="routine-superset-open" data-action="pair-open" data-scope="routine" data-kind="supersetOf"' +
           (d.items.length < 2 ? ' disabled' : '') + '>Superset…</button></div>';
 
   if (!d.items.length){
@@ -8097,11 +8163,6 @@ const actions = {
   'delete-set'(d){ deleteSet(d.id); },
   'next-exercise'(){ advanceExercise(false); },
   'prev-exercise'(){ goToPreviousExercise(); },
-  'toggle-done-ex'(d){
-    const k = String(d.idx);
-    ui.expandedDone.has(k) ? ui.expandedDone.delete(k) : ui.expandedDone.add(k);
-    render();
-  },
   'toggle-overview'(){
     if (ui.overviewOpen){ closeOverview(); return; }
     ui.overviewOpen = true;
@@ -8142,7 +8203,7 @@ const actions = {
   },
   'overview-up'(d){ overviewStep(Number(d.idx), -1); },
   'overview-down'(d){ overviewStep(Number(d.idx), 1); },
-  /* same underlying jump as "Reopen exercise" — the drawer just also closes,
+  /* Start now and Reopen, one jump — the sheet also closes,
      since the point of jumping is to get back to the main logging flow */
   'overview-jump'(d){ ui.overviewOpen = false; reopenExercise(Number(d.idx)); },
   'superset-switch'(d){ switchSupersetMember(Number(d.idx)); },
@@ -8168,10 +8229,14 @@ const actions = {
   'routine-dup'(d){ duplicateRoutine(d.id); },
   'routine-del'(d){ deleteRoutine(d.id); },
   'routine-cancel'(){ ui.routineDraft = null; ui.routineError=''; render(); },
-  'routine-pair-open'(d){ openRoutinePairDialog(d.kind); },
-  'routine-pair-close'(){ closeRoutinePairDialog(false); },
-  'routine-pair-add'(){ addRoutinePair(); },
-  'routine-pair-unpair'(d){ if (unpairRoutineItems(d.group)) closeRoutinePairDialog(true); },
+  'pair-open'(d){ openPairDialog(d.scope, d.kind); },
+  'pair-close'(){ closePairDialog(false); },
+  'pair-add'(){ addPair(); },
+  'pair-unpair'(d){
+    if (!pairScope().unpair(d.group)) return;
+    closePairDialog(true);
+    if (ui.pairScope === 'session') toast('Superset split for this workout');
+  },
   'ritem-up'(d){ routineStep(Number(d.idx), -1); },
   'ritem-down'(d){ routineStep(Number(d.idx), 1); },
   'ritem-rm'(d){ removeRoutineItem(Number(d.idx)); },
@@ -8510,37 +8575,25 @@ document.addEventListener('contextmenu', e => {
    screen, which is what both models want and what the drop already has to
    compute. */
 const SORTABLES = {
-  /* The upcoming exercises in the session sheet. Their positions in
-     w.exercises are not contiguous (see movableIndices), which is exactly why
-     the drop goes through reorderMovable rather than touching the array. */
+  /* Every exercise in the session sheet. Indices are positions in
+     w.exercises, which is exactly the list on screen. */
   'session-exercises':{
     in:'#overview-dlg-body', row:'.overview-row',
     drop(from, to, focus){
       const w = state.activeWorkout; if (!w) return;
-      const slots = movableIndices(w);
-      if (from >= slots.length || to >= slots.length) return;
-      /* Which exercise the session is on is a position, and the reorder can
-         change what sits at it — moving the current exercise later hands
-         "Now" to whatever is dealt into its place. Captured before the move so
-         the announcement can tell the difference, because the screen behind
-         the sheet changes exercise and that must not be silent. */
+      const n = w.exercises.length;
+      if (from >= n || to >= n) return;
+      /* Captured before the move so the announcement can tell whether "Now"
+         changed hands — the screen behind the sheet changes exercise, and
+         that must not be silent. */
       const wasCurrent = currentExercise();
-      const position = currentMemberIndex(w);
-      let landed = reorderMovable(w, from, to);
-      const moved = w.exercises[landed];
-      /* A move within a superset keeps the same member on screen; a move that
-         separates one ends it for this session. Otherwise "Now" is a position,
-         as for any exercise. */
-      const ended = settleSupersets(w);
-      const kept = wasCurrent && supersetRun(w, position).includes(w.exercises.indexOf(wasCurrent));
-      pointAt(w, kept ? w.exercises.indexOf(wasCurrent) : position);
-      landed = w.exercises.indexOf(moved);
+      const { landed, ended } = moveSessionExercise(w, from, to);
       save();
       if (ended) toast('Superset split for this workout');
       ui.focus = focus || ('ov-grip-' + landed);
       render();
       const nowCurrent = currentExercise();
-      announce(w.exercises[landed].name + ' moved to position ' + (to+1) + ' of ' + slots.length + '.' +
+      announce(w.exercises[landed].name + ' moved to position ' + (landed+1) + ' of ' + n + '.' +
         (nowCurrent && nowCurrent !== wasCurrent ? ' Now: ' + nowCurrent.name + '.' : ''));
     }
   },
@@ -8678,7 +8731,7 @@ document.addEventListener('input', e => {
 
 /* Controls that commit on change rather than per keystroke. Keyed by data-change. */
 const changeHandlers = {
-  'routine-pair-first'(){ refreshSecondPairPicker(); },
+  'pair-first'(){ refreshSecondPairPicker(); },
   'routine-plan'(t){
     const d = ui.routineDraft; if (!d) return;
     d.plan = t.checked;
