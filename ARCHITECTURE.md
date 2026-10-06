@@ -667,10 +667,11 @@ through those builders, which means:
   on each type individually — each one decides a different field — so a new
   type needs teaching there too.)
 
-The fixture deliberately covers the three cases a reader would otherwise get
+The fixture deliberately covers the cases a reader would otherwise get
 wrong: a warm-up set (`countForVolume: false`, still `completed`), timed work
-(seconds in `durationSeconds`, `reps: null`), and a routine item referencing an
-exercise the importing browser may not have.
+(seconds in `durationSeconds`, `reps: null`), a routine item referencing an
+exercise the importing browser may not have, and both routine pairings (an
+`eitherOf` pair and a `supersetOf` pair in the same routine).
 
 There is no "load sample data" button. It would silently replace the user's
 own library and routines, which is not a thing an app should offer to do;
@@ -1360,10 +1361,10 @@ range if targets differ.
 
 `cleanRoutinePairs` removes singleton, oversized, and same-exercise pair keys
 on load, import, and save. Routine export and backup retain keys. The sample
-routines JSON demonstrates Back Squat or Leg Press followed by Plank, and the
-seeded first-run library pairs Leg Press Machine or Leg Extension Machine in
-its Lower Body routine, so a fresh install shows the feature without a trip to
-the editor. Old state migrates through the shared `migrateState` chain; v6 to
+routines JSON demonstrates Back Squat or Leg Press, then a Leg Curl and Calf
+Raise superset, then Plank, and the seeded first-run library pairs Leg Press
+Machine or Leg Extension Machine in its Lower Body routine, so a fresh install
+shows the feature without a trip to the editor. Old state migrates through the shared `migrateState` chain; v6 to
 v7 only advances the version because the new field is optional.
 
 ### Supersets (state v13, transfer schema 1.11.0)
@@ -1390,7 +1391,8 @@ toast.
 
 The seeded first-run library demonstrates a superset too: Bicep Curl Machine
 and Triceps Extension Machine in the Upper Body routine, the standard
-antagonist-pair combination.
+antagonist-pair combination. The sample routines file pairs Leg Curl and Calf
+Raise, next to its either-of pair, so the format reference shows both keys.
 
 Logging a set asks `supersetTurn` for the next member with work left. A
 hand-over to a later member does not rest; wrapping back to the first member

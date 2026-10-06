@@ -5522,21 +5522,27 @@ function importFixture(){
     { id:'ex-squat', name:'Back Squat', category:'Legs', movementFamily:'squat', unit:'kg', loadMode:'total', equipmentKey:'olympic-bar', archived:false, notes:'Belt above 100kg',
       url:'https://en.wikipedia.org/wiki/Squat_(exercise)' },
     { id:'ex-leg-press', name:'Leg Press', category:'Legs', movementFamily:'squat', unit:'kg', loadMode:'machine_stack', equipmentKey:'gym-a-leg-press', archived:false, notes:'', url:'' },
+    { id:'ex-leg-curl', name:'Leg Curl', category:'Hinge', movementFamily:'hinge', unit:'kg', loadMode:'machine_stack', equipmentKey:'gym-a-leg-curl', archived:false, notes:'', url:'' },
+    { id:'ex-calf-raise', name:'Calf Raise', category:'Legs', movementFamily:'squat', unit:'kg', loadMode:'machine_stack', equipmentKey:'gym-a-calf-raise', archived:false, notes:'', url:'' },
     { id:'ex-plank', name:'Plank', category:'Core', movementFamily:'core', unit:'time', loadMode:'duration', equipmentKey:'', archived:false, notes:'', url:'' }
   ];
+  /* both pairings, so the reference shows each key in use: an either-of pair
+     (do one of the two) and a superset (alternate the two, set by set) */
   const routines = [{
     id:'rt-lower', name:'Lower body',
     items:[
       { id:'it-1', exerciseId:'ex-squat', sets:3, repsMin:5, repsMax:8, targetRir:2, weight:100, eitherOf:'pair-legs' },
-      { id:'it-3', exerciseId:'ex-leg-press', sets:3, repsMin:10, repsMax:15, targetRir:2, weight:120, eitherOf:'pair-legs' },
-      { id:'it-2', exerciseId:'ex-plank', sets:2, repsMin:45, repsMax:60, targetRir:null, weight:null }
+      { id:'it-2', exerciseId:'ex-leg-press', sets:3, repsMin:10, repsMax:15, targetRir:2, weight:120, eitherOf:'pair-legs' },
+      { id:'it-3', exerciseId:'ex-leg-curl', sets:3, repsMin:10, repsMax:12, targetRir:2, weight:40, supersetOf:'superset-accessories' },
+      { id:'it-4', exerciseId:'ex-calf-raise', sets:3, repsMin:12, repsMax:15, targetRir:2, weight:60, supersetOf:'superset-accessories' },
+      { id:'it-5', exerciseId:'ex-plank', sets:2, repsMin:45, repsMax:60, targetRir:null, weight:null }
     ]
   }, {
     /* a one-off plan two days ahead: the same shape plus plan and plannedFor */
     id:'plan-lighter-legs', name:'Lighter legs', plan:true, plannedFor:localDay(Date.now() + 2 * 86400000),
     items:[
-      { id:'it-4', exerciseId:'ex-squat', sets:3, repsMin:5, repsMax:5, targetRir:3, weight:90 },
-      { id:'it-5', exerciseId:'ex-plank', sets:2, repsMin:45, repsMax:45, targetRir:null, weight:null }
+      { id:'it-6', exerciseId:'ex-squat', sets:3, repsMin:5, repsMax:5, targetRir:3, weight:90 },
+      { id:'it-7', exerciseId:'ex-plank', sets:2, repsMin:45, repsMax:45, targetRir:null, weight:null }
     ]
   }];
   /* two days back, so relative-date displays have something sensible to show */

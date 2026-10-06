@@ -19,17 +19,24 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
       const sample = t.sampleRoutinesFile();
       check(sample.version === 14 && sample.schemaVersion === '1.12.0', 'sample version markers');
       t.importRoutines(file(sample)); await wait();
-      check(t.state.routines.length === 2 && t.state.exercises.length === 3, 'routine sample imports all definitions');
+      check(t.state.routines.length === 2 && t.state.exercises.length === 5, 'routine sample imports all definitions');
       check(t.state.routines[1].plan === true && /^\d{4}-\d{2}-\d{2}$/.test(t.state.routines[1].plannedFor) && !('plan' in t.state.routines[0]),
         'the sample plan imports as a plan and the routine stays stable');
       const r = t.state.routines[0];
       check(r.id === 'rt-lower' && t.state.exercises.some(ex => ex.id === 'ex-squat'),
         'routine import preserves safe source identities');
-      check(t.routineGroups(r.items).length === 2, 'sample pair survives import');
+      const groups = t.routineGroups(r.items);
+      check(groups.length === 3 && groups[0].length === 2 && groups[0].every(it => it.eitherOf) &&
+        groups[1].length === 2 && groups[1].every(it => it.supersetOf), 'sample either-of pair and superset survive import');
       check(r.items[0].repsMin === 5 && r.items[0].repsMax === 8 && r.items[0].targetRir === 2,
         'routine sample preserves rep range and target RIR');
       t.importRoutines(file(sample)); await wait();
       check(t.state.routines.length === 2, 'routine import deduplicates');
+      /* The pair checks below were written against the either-of routine alone;
+         supersets have their own section. Dropping the sample's superset keeps
+         their counts about the pair. */
+      r.items = r.items.filter(it => !it.supersetOf);
+      t.state.exercises = t.state.exercises.filter(ex => ex.id !== 'ex-leg-curl' && ex.id !== 'ex-calf-raise');
       const history = t.sampleHistoryFile();
       t.importHistory(file(history)); await wait();
       const sets = t.state.workouts[0].exercises.flatMap(e => e.sets);
