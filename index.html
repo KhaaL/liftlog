@@ -589,6 +589,10 @@ kbd{
    rather than as an ordinary set. */
 .set-row.is-warmup .n{ color:var(--muted); }
 .set-row.is-warmup input{ opacity:.7; }
+/* Where a typed count sits against the target range: short of it, or past the
+   top (the double-progression signal). Inside the range needs no mark. */
+.set-row input.reps-under{ border-color:var(--warning); color:var(--warning); }
+.set-row input.reps-over{ border-color:var(--success); color:var(--success); }
 .hset-warm{ min-height:44px; min-width:34px; padding-inline:8px; justify-content:center; font-weight:700; color:var(--muted); }
 .hset-warm[aria-pressed="true"]{ background:var(--warning-soft); border-color:var(--warning); color:var(--warning); }
 .set-num .n{ font-weight:700; font-variant-numeric:tabular-nums; font-size:var(--fs-md); line-height:1; }
@@ -915,7 +919,7 @@ kbd{
 .mg-best{ font-size:var(--fs-sm); font-variant-numeric:tabular-nums; white-space:nowrap; }
 
 /* routine editor */
-.item-row{ display:grid; grid-template-columns:44px minmax(120px,1fr) repeat(5,minmax(58px,82px)) 84px; gap:var(--sp-2); align-items:end; padding:var(--sp-3) 0; border-top:1px solid var(--border); }
+.item-row{ display:grid; grid-template-columns:44px minmax(120px,1fr) repeat(4,minmax(58px,82px)) 84px; gap:var(--sp-2); align-items:end; padding:var(--sp-3) 0; border-top:1px solid var(--border); }
 .item-row:first-child{ border-top:0; }
 .item-row .item-actions{ grid-column:-2 / -1; }
 /* Shape and label carry the meaning: a violet OR bracket for either-of, a
@@ -982,7 +986,7 @@ html.is-reordering{ user-select:none; -webkit-user-select:none; }
   .item-row{ grid-template-columns:44px 1fr 1fr; }
   .item-row .item-name{ grid-column:2 / -1; padding-bottom:2px; }
   .item-row .grip{ grid-row:1 / span 5; align-self:center; }
-  .item-row .field:last-of-type{ grid-column:2 / -1; }
+  .item-row .field:last-of-type:nth-of-type(odd){ grid-column:2 / -1; }
   .item-row .item-actions{ grid-column:2 / -1; justify-content:flex-end; }
 }
 
@@ -3630,10 +3634,13 @@ function workoutDuration(w){
 /* ============================================================
    ACTIONS — active workout
    ============================================================ */
+/* A planned set leaves its count blank: the input shows the target range as
+   its placeholder, and logging an untouched set records the lower bound
+   (fillSetDefaults). Pre-filling the lower bound hid the range and made every
+   row look already decided, which also stopped a typed count cascading. */
 function newSetFrom(ex, copyFrom){
   const timed = ex.unit === 'time';
   const bodyweight = ex.unit === 'bw';
-  const lower = ex.targetRepsMin != null ? ex.targetRepsMin : 0;
   return {
     id:uid(),
     weight: copyFrom ? copyFrom.weight : null,
@@ -3642,8 +3649,8 @@ function newSetFrom(ex, copyFrom){
       addedWeightUnit:copyFrom ? (copyFrom.addedWeightUnit || unitLabel()) : unitLabel()
     } : {}),
     /* reps stays a pure count; timed work lives in durationSeconds */
-    reps:   copyFrom ? (timed ? null : copyFrom.reps) : (!timed ? lower : null),
-    durationSeconds: copyFrom ? (timed ? copyFrom.durationSeconds : null) : (timed ? lower : null),
+    reps:   copyFrom && !timed ? copyFrom.reps : null,
+    durationSeconds: copyFrom && timed ? copyFrom.durationSeconds : null,
     rpe:null, rir:null, completed:false, completedAt:null,
     unit: ex.unit === 'bw' ? 'bw' : (timed ? 'time' : state.settings.unit)
   };
@@ -3868,16 +3875,19 @@ function toggleSet(setId){
   let finished = s.completed && allSetsDone(ex);
   const removed = finished ? settleEitherOf(w, ex) : null;
   /* In a superset a logged set hands over to the partner, and rest waits for
-     the end of the round. The superset is finished only when every member is. */
+     the end of the round. The superset is finished only when every member is.
+     A warm-up is not part of the round: it stays on this exercise and rests
+     as a straight set would — unless it was this member's last open set. */
   const inSuperset = s.completed && supersetRun(w, w.currentExerciseIndex).length > 1;
   const turn = inSuperset ? supersetTurn(w) : null;
   if (inSuperset) finished = !turn;
-  const handOver = turn && turn.index !== currentMemberIndex(w) ? w.exercises[turn.index] : null;
+  const holdForWarmup = isWarmup(s) && !allSetsDone(ex);
+  const handOver = turn && !holdForWarmup && turn.index !== currentMemberIndex(w) ? w.exercises[turn.index] : null;
   save();
   if (removed) toast('Either of: removed ' + removed.name + ' from this workout');
   if (s.completed){
     announce('Set ' + (i+1) + ' of ' + ex.sets.length + ' complete.' + (handOver ? ' Now: ' + handOver.name + '.' : ''));
-    if (state.settings.autoRest && (!turn || turn.wrapped)){
+    if (state.settings.autoRest && (!turn || turn.wrapped || holdForWarmup)){
       loadTimer(currentRestSeconds());
       startTimer();
     }
@@ -3902,8 +3912,11 @@ function switchSupersetMember(idx){
 }
 /* Setting a weight or a rep/duration target is nearly always a decision about
    the rest of the exercise rather than about one row, so it flows down to
-   every later set that has not been logged yet. Completed sets are left
-   alone — they record what was actually done, not what is planned.
+   later sets — but only into rows that are still blank. A row that already
+   holds a number (typed, pre-filled from the plan or last session, or a
+   deliberately different warm-up or back-off load) is a decision of its own
+   and is never overwritten. Completed sets are left alone too — they record
+   what was actually done, not what is planned.
 
    Two deliberate choices. It runs on commit rather than per keystroke, so
    typing "100" does not walk the rows below through 1 and 10. And it writes
@@ -3920,7 +3933,7 @@ function cascadeSetField(setId, field, value, elPrefix, unitSuffix){
   let changed = 0;
   for (let j = i + 1; j < ex.sets.length; j++){
     const s = ex.sets[j];
-    if (s.completed || s[field] === value) continue;
+    if (s.completed || s[field] != null) continue;
     s[field] = value;
     const el = document.getElementById(elPrefix + s.id);
     if (el) el.value = value;
@@ -4319,6 +4332,34 @@ function normalizeWorkoutTargets(ex){
   delete ex.targetReps;
   delete ex.restSeconds;
   return ex;
+}
+/* Where a logged count sits against the target range. Warm-ups are not held
+   to the working target. */
+function repRangeState(ex, s){
+  const v = toNum(ex.unit === 'time' ? s.durationSeconds : s.reps);
+  const low = toNum(ex.targetRepsMin), high = toNum(ex.targetRepsMax);
+  if (v == null || low == null || isWarmup(s)) return null;
+  const target = targetRangeLabel(ex);
+  if (v < low) return { cls:'reps-under', title:'Below the ' + target + ' target' };
+  if (high != null && v > high) return { cls:'reps-over', title:'Above the ' + target + ' target — time for more load?' };
+  return null;
+}
+/* The count inputs commit without a re-render, so the mark is repainted here. */
+function paintRepRange(ex){
+  ex.sets.forEach(s => {
+    const el = document.getElementById('sr-' + s.id); if (!el) return;
+    const st = repRangeState(ex, s);
+    el.classList.remove('reps-under', 'reps-over');
+    if (st){ el.classList.add(st.cls); el.title = st.title; } else el.removeAttribute('title');
+  });
+}
+/* The routine editor takes a range as one field: "8", "8-12", "8–12",
+   "8 to 12". Null when the text is not a count or a range. */
+function parseRepRange(text){
+  const m = String(text == null ? '' : text).trim().match(/^(\d+)(?:\s*(?:-|–|—|to)\s*(\d+))?$/i);
+  if (!m) return null;
+  const a = Number(m[1]), b = m[2] != null ? Number(m[2]) : a;
+  return { min:Math.min(a, b), max:Math.max(a, b) };
 }
 function targetRangeLabel(ex){
   const low = toNum(ex.targetRepsMin), high = toNum(ex.targetRepsMax);
@@ -6354,11 +6395,14 @@ function htmlCurrentExercise(w, ex){
     }
     const timedField = ex.unit === 'time';
     const midVal = timedField ? setDuration(s) : s.reps;
+    const hasTarget = ex.targetRepsMin != null;
+    const range = repRangeState(ex, s);
     setsHTML += '<label class="field"><span class="cap">' + esc(repsLabel) + '</span>' +
       '<input id="sr-' + esc(s.id) + '" type="number" inputmode="numeric" min="0" step="1" ' +
-      'aria-label="Set ' + n + ' ' + esc(repsLabel) + '" ' +
+      (range ? 'class="' + range.cls + '" title="' + esc(range.title) + '" ' : '') +
+      'aria-label="Set ' + n + ' ' + esc(repsLabel) + (hasTarget ? ', target ' + esc(targetRangeLabel(ex)) : '') + '" ' +
       'data-bind="set" data-change="set-reps" data-id="' + esc(s.id) + '" data-field="' + (timedField ? 'durationSeconds' : 'reps') + '" ' +
-      'value="' + esc(midVal != null ? midVal : '') + '" placeholder="' + esc(ex.targetRepsMin != null ? ex.targetRepsMin : '0') + '"></label>';
+      'value="' + esc(midVal != null ? midVal : '') + '" placeholder="' + esc(hasTarget ? targetRangeLabel(ex) : '0') + '"></label>';
     if (showMetric){
       const mv = s[metricField];
       setsHTML += '<label class="field"><span class="cap">' + metricLabel + '</span>' +
@@ -6834,8 +6878,13 @@ function htmlRoutineEditor(){
       'value="' + esc(value != null ? value : '') + '" placeholder="–"></label>';
     const targetFields =
       numberField('Sets', 'sets', it.sets, 'max="12" step="1" inputmode="numeric"') +
-      numberField(countLabel + ' min', 'repsMin', it.repsMin, 'max="999" step="1" inputmode="numeric"') +
-      numberField(countLabel + ' max', 'repsMax', it.repsMax, 'max="999" step="1" inputmode="numeric"') +
+      '<label class="field"><span class="cap">' + countLabel + '</span>' +
+        '<input type="text" inputmode="text" autocomplete="off" spellcheck="false" ' +
+        'pattern="\\s*\\d+\\s*((-|–|—|[Tt][Oo])\\s*\\d+\\s*)?" ' +
+        'title="A count such as 8, or a range such as 8-12" ' +
+        'aria-label="' + esc(name) + ' ' + (timed ? 'seconds' : 'reps') + ': a count, or a range such as 8-12" ' +
+        'data-bind="ritem" data-idx="' + i + '" data-field="repRange" ' +
+        'value="' + esc(targetRangeLabel({ targetRepsMin:it.repsMin, targetRepsMax:it.repsMax }).replace(/^–$/, '')) + '" placeholder="8–12"></label>' +
       numberField('Target RIR', 'targetRir', it.targetRir, 'max="10" step="1" inputmode="numeric"') +
       (loaded ? numberField((bodyweight ? 'Added ' : '') + exerciseLoadLabel(e), 'weight', it.weight, 'step="0.5" inputmode="decimal"') : '');
     const pairClass = partner ? ' ' + pairStyle + '-pair ' + pairStyle + (groups[groupIndex][0] === it ? '-first' : '-last') : '';
@@ -8717,6 +8766,13 @@ const binders = {
     const it = ui.routineDraft.items[Number(t.dataset.idx)]; if (!it) return;
     /* Weight and target RIR are optional; blank count fields remain zero until
        save normalization orders and clamps the range. */
+    if (t.dataset.field === 'repRange'){
+      /* text that is not (yet) a range leaves the last good one in place;
+         the field's pattern stops it being saved */
+      const r = parseRepRange(t.value);
+      if (r){ it.repsMin = r.min; it.repsMax = r.max; }
+      return;
+    }
     const optional = t.dataset.field === 'weight' || t.dataset.field === 'targetRir';
     it[t.dataset.field] = optional ? toNum(t.value) : (toNum(t.value) || 0);
   },
@@ -8814,6 +8870,7 @@ const changeHandlers = {
   'set-reps'(t){
     const ex = currentExercise();
     cascadeReps(t.dataset.id, normalizeSetNumber(ex && ex.unit === 'time' ? 'durationSeconds' : 'reps', t.value));
+    if (ex) paintRepRange(ex);
   },
   'import-all'(t){ withPickedFile(t, importData); },
   'import-routines'(t){ withPickedFile(t, importRoutines); },

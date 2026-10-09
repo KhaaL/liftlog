@@ -7,7 +7,7 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
     const page = await browser.newPage({ viewport:{ width:390, height:844 } });
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
-    const html = appWithTestAPI(`{ sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, planRoutineImport, applyRoutineImport, exerciseNameKey, exerciseNameSimilarity, sameLoadNumbers, distinctExerciseName, linksBrokenBy, sortedPlans, planDay, defaultRoutineId, newPlanDraft, localDay, importHistory, normalizeImportedSet, normalizeImportedWorkout, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, workoutVolume, progressionStatus, loadCueFor, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, compatibleHistoryLink, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, setExerciseArchived, mergeExercises, sameProgressionContract, exerciseLoadLabel, setSummary, remoteStartupSync, autoRemoteBackup, flushSave, save, render, supersetRun, currentMemberIndex, isSettledRow, switchSupersetMember, moveSessionExercise, nextOpenBlock, pairSessionExercises, unpairSessionExercises, reopenExercise, navigate, currentExercise, settleSupersets, pauseTimer, finishWorkout, sampleExercises, sampleRoutines, get timer(){return timer}, get state(){return state}, get ui(){return ui} }`);
+    const html = appWithTestAPI(`{ sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, planRoutineImport, applyRoutineImport, exerciseNameKey, exerciseNameSimilarity, sameLoadNumbers, distinctExerciseName, linksBrokenBy, sortedPlans, planDay, defaultRoutineId, newPlanDraft, localDay, importHistory, normalizeImportedSet, normalizeImportedWorkout, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, workoutVolume, progressionStatus, loadCueFor, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, toggleWarmup, cascadeWeight, cascadeReps, parseRepRange, repRangeState, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, compatibleHistoryLink, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, setExerciseArchived, mergeExercises, sameProgressionContract, exerciseLoadLabel, setSummary, remoteStartupSync, autoRemoteBackup, flushSave, save, render, supersetRun, currentMemberIndex, isSettledRow, switchSupersetMember, moveSessionExercise, nextOpenBlock, pairSessionExercises, unpairSessionExercises, reopenExercise, navigate, currentExercise, settleSupersets, pauseTimer, finishWorkout, sampleExercises, sampleRoutines, get timer(){return timer}, get state(){return state}, get ui(){return ui} }`);
     await page.route('https://liftlog.test/**', route => route.fulfill({ contentType:'text/html', body:html }));
     await page.goto('https://liftlog.test/');
     const result = await page.evaluate(async () => {
@@ -235,8 +235,14 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
     await page.getByRole('button', { name:'Edit Lower body', exact:true }).click();
     assert.equal(await page.locator('#routine-add-select option', {hasText:'Leg Press'}).count(), 0,
       'routine picker only offers active exercises');
-    assert.equal(await page.getByLabel('Reps min').count(), 2, 'routine editor exposes lower rep targets');
-    assert.equal(await page.getByLabel('Reps max').count(), 2, 'routine editor exposes upper rep targets');
+    const rangeFields = page.locator('#routine-form [data-field="repRange"]');
+    assert.equal(await rangeFields.count(), 3, 'routine editor takes each rep target as one range field');
+    assert.match(await rangeFields.first().inputValue(), /^\d+(–\d+)?$/, 'the range field shows the saved target');
+    await rangeFields.first().fill('12 to 8');
+    assert.equal(await rangeFields.first().evaluate(el => el.checkValidity()), true, 'a written-out range is accepted');
+    await rangeFields.first().fill('8-');
+    assert.equal(await rangeFields.first().evaluate(el => el.checkValidity()), false, 'a half-typed range does not save');
+    await rangeFields.first().fill('8 – 5');   // reordered on save; the workout below expects 5–8
     assert.equal(await page.getByLabel('Target RIR').count(), 3, 'routine editor exposes optional target RIR');
     assert.equal(await page.locator('.item-name select').count(), 0, 'editor has no per-row partner selectors');
     await page.getByRole('button', {name:'Pair exercises…'}).click();
@@ -359,7 +365,8 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
     assert.equal(await page.locator('#overview-dlg-body .either-pair').count(), 0, 'pair marker clears after choosing an alternative');
     await page.getByRole('button', {name:'Back to workout'}).click();
     assert.equal(workout.currentExerciseIndex, 1, 'advances to next exercise after first alternative');
-    assert.equal(workout.exercises[1].sets[0].durationSeconds, 45);
+    assert.equal(workout.exercises[1].sets[0].durationSeconds, null, 'a planned timed set starts blank');
+    assert.equal(workout.exercises[1].targetRepsMin, 45, 'its target stays on the exercise as the hint');
     assert.equal(await page.evaluate(() => window.testAPI.state.routines[0].items.length), 3, 'saved routine retains both alternatives');
     await page.evaluate(() => {
       const t = window.testAPI;
@@ -773,6 +780,34 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
       const restored = t.prepareBackup(t.backupPayload());
       check(!restored.workouts[0].exercises.some(ex => 'supersetOf' in ex) && !('supersetSide' in restored.workouts[0]),
         'finished workouts do not keep superset data');
+      t.state.activeWorkout = null;
+      t.startRoutine('rt-ss');
+      const bench = t.currentExercise();
+      t.toggleWarmup(bench.sets[0].id);
+      t.toggleSet(bench.sets[0].id);
+      check(t.currentExercise() === bench && resting(), 'a superset warm-up stays on its exercise and rests like a straight set');
+      t.toggleSet(bench.sets[1].id);
+      check(t.currentExercise().name === 'Row' && !resting(), 'the first working set after a warm-up hands over as usual');
+      t.state.activeWorkout = null;
+      t.startRoutine('rt-ss');
+      const fresh = t.currentExercise();
+      check(fresh.sets.every(s => s.reps == null), 'planned sets start with a blank count');
+      fresh.sets[2].weight = null; fresh.sets[1].reps = 7;
+      t.cascadeWeight(fresh.sets[0].id, 40);
+      check(fresh.sets.map(s => s.weight).join() === '40,60,40', 'a weight cascades only into blank later rows');
+      t.cascadeReps(fresh.sets[0].id, 5);
+      check(fresh.sets.map(s => s.reps).join() === '5,7,5', 'reps cascade only into blank later rows');
+      fresh.sets[2].reps = null;
+      t.toggleSet(fresh.sets[2].id);
+      check(fresh.sets[2].reps === 8, 'logging an untouched set records the lower target');
+      const ranged = { unit:'kg', targetRepsMin:8, targetRepsMax:12 };
+      check(t.repRangeState(ranged, {reps:7}).cls === 'reps-under' && t.repRangeState(ranged, {reps:13}).cls === 'reps-over' &&
+        t.repRangeState(ranged, {reps:10}) === null && t.repRangeState(ranged, {reps:null}) === null &&
+        t.repRangeState(ranged, {reps:3, countForVolume:false, countForPR:false}) === null,
+        'logged counts are marked against the range, warm-ups excepted');
+      check(JSON.stringify(['8', '8-12', '12–8', '8 to 12', ' 6 — 10 ', '8-', 'x', ''].map(t.parseRepRange)) ===
+        JSON.stringify([{min:8,max:8}, {min:8,max:12}, {min:8,max:12}, {min:8,max:12}, {min:6,max:10}, null, null, null]),
+        'the editor parses a count or a range in any common spelling');
       const seedExs = t.sampleExercises();
       const seedRoutines = t.sampleRoutines(seedExs);
       const [seedUpper, seedLower] = seedRoutines;
