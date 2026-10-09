@@ -513,8 +513,9 @@ permanent:
   transfer import and full-backup restore. A workout end before its start is
   pulled up to the start on edit, import and restore.
 - **A completed set is a record, not a plan.** Nothing that propagates a
-  planned value may touch one. `cascadeWeight()` writes a committed weight down
-  to every later set in the exercise, skipping completed ones; `deleteSet()`
+  planned value may touch one. `cascadeWeight()` / `cascadeReps()` write a committed
+  value down only into later sets whose field is still blank, skipping
+  completed ones — a row that already holds a number keeps it; `deleteSet()`
   asks before removing one, and does not ask otherwise (`addSet()` pre-fills a
   new row from the set above it, so "this row has a weight in it" says nothing
   about whether the user typed anything).
@@ -1397,7 +1398,9 @@ Raise, next to its either-of pair, so the format reference shows both keys.
 Logging a set asks `supersetTurn` for the next member with work left. A
 hand-over to a later member does not rest; wrapping back to the first member
 (or staying because the partner is finished) ends the round and starts the
-auto-rest. Unequal set counts therefore finish as straight sets. Once every
+auto-rest. Unequal set counts therefore finish as straight sets. A warm-up
+is outside the round: logging one keeps the cursor on that member and rests
+as a straight set would, unless it closed the member's last open set. Once every
 member is finished the cursor moves past the whole run, and the pager's `›`
 and **Next** also step a superset at a time. The panel's **Superset with**
 button switches member by hand. Skipping a member hands over to its partner.

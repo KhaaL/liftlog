@@ -3868,16 +3868,19 @@ function toggleSet(setId){
   let finished = s.completed && allSetsDone(ex);
   const removed = finished ? settleEitherOf(w, ex) : null;
   /* In a superset a logged set hands over to the partner, and rest waits for
-     the end of the round. The superset is finished only when every member is. */
+     the end of the round. The superset is finished only when every member is.
+     A warm-up is not part of the round: it stays on this exercise and rests
+     as a straight set would — unless it was this member's last open set. */
   const inSuperset = s.completed && supersetRun(w, w.currentExerciseIndex).length > 1;
   const turn = inSuperset ? supersetTurn(w) : null;
   if (inSuperset) finished = !turn;
-  const handOver = turn && turn.index !== currentMemberIndex(w) ? w.exercises[turn.index] : null;
+  const holdForWarmup = isWarmup(s) && !allSetsDone(ex);
+  const handOver = turn && !holdForWarmup && turn.index !== currentMemberIndex(w) ? w.exercises[turn.index] : null;
   save();
   if (removed) toast('Either of: removed ' + removed.name + ' from this workout');
   if (s.completed){
     announce('Set ' + (i+1) + ' of ' + ex.sets.length + ' complete.' + (handOver ? ' Now: ' + handOver.name + '.' : ''));
-    if (state.settings.autoRest && (!turn || turn.wrapped)){
+    if (state.settings.autoRest && (!turn || turn.wrapped || holdForWarmup)){
       loadTimer(currentRestSeconds());
       startTimer();
     }
@@ -3902,8 +3905,11 @@ function switchSupersetMember(idx){
 }
 /* Setting a weight or a rep/duration target is nearly always a decision about
    the rest of the exercise rather than about one row, so it flows down to
-   every later set that has not been logged yet. Completed sets are left
-   alone — they record what was actually done, not what is planned.
+   later sets — but only into rows that are still blank. A row that already
+   holds a number (typed, pre-filled from the plan or last session, or a
+   deliberately different warm-up or back-off load) is a decision of its own
+   and is never overwritten. Completed sets are left alone too — they record
+   what was actually done, not what is planned.
 
    Two deliberate choices. It runs on commit rather than per keystroke, so
    typing "100" does not walk the rows below through 1 and 10. And it writes
@@ -3920,7 +3926,7 @@ function cascadeSetField(setId, field, value, elPrefix, unitSuffix){
   let changed = 0;
   for (let j = i + 1; j < ex.sets.length; j++){
     const s = ex.sets[j];
-    if (s.completed || s[field] === value) continue;
+    if (s.completed || s[field] != null) continue;
     s[field] = value;
     const el = document.getElementById(elPrefix + s.id);
     if (el) el.value = value;
