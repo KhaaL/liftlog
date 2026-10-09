@@ -1452,9 +1452,15 @@ and how they end.
 
 Routine items store `repsMin`, `repsMax`, and an optional `targetRir`. Starting
 a workout copies those values to `targetRepsMin`, `targetRepsMax`, and
-`targetRir` on the workout-local exercise block. Set inputs start at the lower
-bound; Today displays the full range, and a prescribed RIR makes the RIR input
-visible for that exercise even when global effort tracking is off.
+`targetRir` on the workout-local exercise block. A planned set's count starts
+blank with the range ("8–12") as its placeholder, and logging an untouched set
+records the lower bound (`fillSetDefaults()`). A typed count is marked against
+the range by `repRangeState()` — `reps-under` short of it, `reps-over` past the
+top, the cue to add load; warm-ups are exempt. The routine editor takes the
+range as one text field ("8", "8-12", "8–12", "8 to 12", parsed by
+`parseRepRange()`) and still stores the two numbers. Today displays the full
+range, and a prescribed RIR makes the RIR input visible for that exercise even
+when global effort tracking is off.
 
 The v7 to v8 migration maps the former `reps` and `targetReps` values to equal
 lower and upper bounds, preserving old prescriptions exactly. Routine and
