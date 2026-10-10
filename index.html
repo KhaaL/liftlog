@@ -1989,6 +1989,8 @@ const SHORTCUTS = [
 /* ============================================================
    STORAGE
    ============================================================ */
+const BACKUP_MAX_BYTES = 8 * 1024 * 1024;
+const BACKUP_MAX_NODES = 200000;
 const LS_KEY = 'liftlog.v1';
 const LS_RESCUE_KEY = 'liftlog.v1.unreadable';  /* holds data we could not load, so nothing is lost silently */
 const LS_REMOTE_RESTORE_KEY = 'liftlog.v1.before-remote-restore';
@@ -2055,12 +2057,12 @@ function flushSave(){
 }
 function save(options){
   const opts = options || {};
-  if (opts.touch !== false) state.settings.lastModifiedAt = Date.now();
+  if (opts.touch !== false) state.settings.lastModifiedAt = Math.max(Date.now(), (toNum(state.settings.lastModifiedAt) || 0) + 1);
   savePending = true;
   clearTimeout(saveTimer);
-  if (opts.immediate) flushSave();
-  else saveTimer = setTimeout(flushSave, LOCAL_SAVE_DELAY);
   if (opts.remote !== false) scheduleRemoteBackup();
+  if (opts.immediate) return flushSave();
+  saveTimer = setTimeout(flushSave, LOCAL_SAVE_DELAY);
 }
 /* The banner lives in the static body, not in #main, because render() replaces
    that wholesale — a warning about losing data must not depend on the render
@@ -2206,7 +2208,7 @@ function load(){
   try{ raw = localStorage.getItem(LS_KEY); }catch(e){ return seedState(); }
   if (!raw) return seedState();
   try{
-    const candidate = prepareBackup(JSON.parse(raw));
+    const candidate = prepareBackup(JSON.parse(raw), {local:true});
     loadedExistingState = true;
     return candidate;
   }
@@ -2263,6 +2265,8 @@ function validateBackup(s){
     fields(s.settings, 'settings', ['theme', 'unit', 'effortMetric', 'historyLinksDismissedKey'], text);
     fields(s.settings, 'settings', ['defaultRest', 'loadStep', 'lastFileBackupAt', 'lastModifiedAt', 'seededAt'], number);
     fields(s.settings, 'settings', ['autoRest', 'sound', 'vibrate'], bool);
+    if (s.settings.lastModifiedAt != null && (!Number.isSafeInteger(s.settings.lastModifiedAt) || s.settings.lastModifiedAt < 0 || s.settings.lastModifiedAt > 8640000000000000))
+      fail('settings.lastModifiedAt', 'a nonnegative integer epoch revision');
   }
   const exercises = new Set(), routines = new Set(), workouts = new Set(), bodyweights = new Set();
   (s.bodyweights || []).forEach((entry, i) => {
@@ -2352,7 +2356,8 @@ function validateBackup(s){
   s.workouts.forEach((w, i) => workout(w, 'workouts[' + i + ']'));
   if (s.activeWorkout != null) workout(s.activeWorkout, 'activeWorkout', true);
 }
-function prepareBackup(obj){
+function prepareBackup(obj, options){
+  if (!options || !options.local) enforceBackupLimits(obj);
   validateBackup(obj);
   const candidate = deepCopy(obj); // migration/normalization must not mutate the caller
   migrateState(candidate);
@@ -2362,6 +2367,7 @@ function prepareBackup(obj){
      the fresh values on the next export. */
   ['app','kind','schemaVersion','source','exportedAt'].forEach(key => { delete candidate[key]; });
   validateBackup(candidate);
+  if (!options || !options.local) enforceBackupLimits(candidate);
   return candidate;
 }
 /* Startup and both restore paths must run the same migration chain. */
@@ -4853,6 +4859,7 @@ function downloadBlob(blob, filename){
   setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 function readJSONFile(file, cb){
+  if (file.size > BACKUP_MAX_BYTES){ toast('File exceeds 8 MiB mobile import limit — existing data retained'); return; }
   const reader = new FileReader();
   reader.onload = () => {
     let obj;
@@ -4882,7 +4889,7 @@ function exportData(){
      restoring it then reports its real age rather than "never backed up". */
   state.settings.lastFileBackupAt = Date.now();
   downloadJSON(backupPayload(), dateStamp('liftlog-backup'));
-  save();
+  save({ touch:false, remote:false });
   render();   /* the "last backup" line is on the page holding this button */
   toast('Backup exported');
 }
@@ -4937,22 +4944,19 @@ function applyFullBackup(obj){
   if (obj && (obj.kind === 'routines' || obj.kind === 'history')){
     toast('That is a ' + obj.kind + ' file — import it under Transfer routines & history'); return;
   }
+  const expected = localRevisionKey();
   let candidate;
   try{ candidate = prepareBackup(obj); }
   catch(e){ toast('Invalid backup — ' + e.message); return; }
-  return confirmDlg('Import data?','This replaces everything currently stored (exercises, routines, history, settings) with the imported file.','Import & replace',true)
-    .then(ok => {
+  return coordinateRemote(async ctx => {
+    const ok = await confirmDlg('Import data?','This replaces everything currently stored (exercises, routines, history, settings) with the imported file.','Import & replace',true);
+      assertRemote(ctx);
       if (!ok) return;
-      state = candidate;
-      storageRecoveryBlocked = false;
-      applyTheme();
-      cancelRestBeep();
-      if (state.activeWorkout) restoreTimer();
-      else loadTimer(state.settings.defaultRest);
-      save({ immediate:true });
-      resetUI();
-      render(); toast('Import complete');
-    });
+      if (expected !== localRevisionKey()){ toast('Import cancelled — local data changed during confirmation'); return false; }
+      if (!commitSnapshot(candidate)) { toast('Import failed — local storage unavailable; previous data retained'); return false; }
+      scheduleRemoteBackup();
+      toast('Import complete'); return true;
+    }, loadRemoteConfig() || {}).catch(e => { toast(e.message); return false; });
 }
 
 /* ============================================================
@@ -4969,7 +4973,61 @@ function applyFullBackup(obj){
 const LS_REMOTE_KEY = 'liftlog.v1.remote';
 const REMOTE_OBJECT_KEY_DEFAULT = 'liftlog-backup.json';
 const REMOTE_BACKUP_DELAY = 3000;
-let remoteBackupTimer = 0, remoteBackupInFlight = false, remoteStartupInFlight = false;
+let remoteBackupTimer = 0;
+const REMOTE_WORK_KEY = 'liftlog.v1.remote-work';
+const REMOTE_TIMEOUT = 20000;
+let remoteGeneration = 0, remoteQueue = Promise.resolve(), remoteControllers = new Set();
+function enforceBackupLimits(obj){
+  let nodes = 0;
+  const visit = (v, depth) => {
+    if (++nodes > BACKUP_MAX_NODES || depth > 40) throw new Error('Backup exceeds mobile object/depth limits');
+    if (v && typeof v === 'object') Object.values(v).forEach(x => visit(x, depth + 1));
+  };
+  visit(obj, 0);
+  for (const [key,max] of [['workouts',10000],['exercises',5000],['routines',2000],['bodyweights',20000]])
+    if (obj && Array.isArray(obj[key]) && obj[key].length > max) throw new Error('Backup exceeds ' + key + ' count limit (' + max + ')');
+  if (new TextEncoder().encode(JSON.stringify(obj)).length > BACKUP_MAX_BYTES) throw new Error('Backup exceeds 8 MiB limit');
+}
+function remoteIdentity(cfg){
+  return JSON.stringify([cfg.endpoint,cfg.region,cfg.bucket,cfg.objectKey || REMOTE_OBJECT_KEY_DEFAULT,!!cfg.pathStyle,cfg.accessKeyId,cfg.secretAccessKey]);
+}
+function invalidateRemote(){
+  remoteGeneration++;
+  remoteControllers.forEach(c => c.abort()); remoteControllers.clear();
+  clearTimeout(remoteBackupTimer); remoteBackupTimer = 0;
+}
+function assertRemote(ctx){
+  if (ctx.generation !== remoteGeneration || (!ctx.candidate && remoteIdentity(loadRemoteConfig() || {}) !== ctx.identity))
+    throw new Error('Remote configuration changed; request cancelled');
+}
+function coordinateRemote(fn, cfg, candidate){
+  const ctx = { generation:remoteGeneration, identity:remoteIdentity(cfg), candidate:!!candidate };
+  const job = remoteQueue.then(async () => { assertRemote(ctx); return fn(ctx); });
+  remoteQueue = job.catch(() => {}); return job;
+}
+function readRemoteWork(){
+  try { const w = JSON.parse(localStorage.getItem(REMOTE_WORK_KEY));
+    return w && w.identity === remoteIdentity(loadRemoteConfig() || {}) ? w : null;
+  } catch(e){ return null; }
+}
+function writeRemoteWork(work){
+  localStorage.setItem(REMOTE_WORK_KEY, JSON.stringify({ ...work, identity:remoteIdentity(loadRemoteConfig() || {}) }));
+}
+function validateRemoteConfig(cfg){
+  const raw = cfg.endpoint;
+  if (typeof raw !== 'string' || /[?#\\\s]/.test(raw) || raw.split('/').some(x => /^(\.|%2e)(\.|%2e)?$/i.test(x))) throw new Error('Endpoint must not contain query, fragment or dot segments');
+  const u = new URL(raw);
+  if (!['https:','http:'].includes(u.protocol) || u.username || u.password || !u.hostname || (u.pathname !== '/' && u.pathname !== '')) throw new Error('Endpoint must be an origin without credentials or a path');
+  const localPage = location.protocol === 'file:' || ['localhost','127.0.0.1','[::1]'].includes(location.hostname);
+  if (u.protocol !== 'https:' && !localPage) throw new Error('HTTPS is required for hosted use');
+  if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(cfg.bucket) || /\.\.|\.-|-\./.test(cfg.bucket) || /^\d+\.\d+\.\d+\.\d+$/.test(cfg.bucket)) throw new Error('Invalid bucket name');
+  if (!cfg.pathStyle && (cfg.bucket.includes('.') || u.port || u.hostname.includes(':') || /^\d+\.\d+\.\d+\.\d+$/.test(u.hostname))) throw new Error('Use path-style for dotted buckets, IP addresses or custom ports');
+  if (typeof cfg.pathStyle !== 'boolean' || !/^[a-z0-9-]+$/.test(cfg.region || '')) throw new Error('Addressing style and region are required');
+  const key = cfg.objectKey || REMOTE_OBJECT_KEY_DEFAULT;
+  if (new TextEncoder().encode(key).length > 1024 || /[\u0000-\u001f\u007f\\]/.test(key) || key.split('/').some(x => !x || ['.','..'].includes(x) || /^(\.|%2e){1,2}$/i.test(x))) throw new Error('Invalid object path (empty or dot segments)');
+  if (/\.r2\.cloudflarestorage\.com$/.test(u.hostname) && (!cfg.pathStyle || cfg.region !== 'auto' || !/^[a-f0-9]{32}\.r2\.cloudflarestorage\.com$/.test(u.hostname))) throw new Error('R2 requires the account endpoint, path-style and region auto');
+  return cfg;
+}
 
 function loadRemoteConfig(){
   try{
@@ -4978,13 +5036,19 @@ function loadRemoteConfig(){
     return (cfg && cfg.endpoint && cfg.bucket && cfg.accessKeyId && cfg.secretAccessKey) ? cfg : null;
   }catch(e){ return null; }
 }
-function saveRemoteConfig(cfg){
-  try{ localStorage.setItem(LS_REMOTE_KEY, JSON.stringify(cfg)); }
-  catch(e){ toast('Could not save remote configuration — storage unavailable'); }
+function saveRemoteConfig(cfg, ctx){
+  if (ctx) assertRemote(ctx);
+  const previous = loadRemoteConfig();
+  const changed = !previous || remoteIdentity(previous) !== remoteIdentity(cfg);
+  if (changed) invalidateRemote();
+  localStorage.setItem(LS_REMOTE_KEY, JSON.stringify(cfg));
+  if (changed) localStorage.removeItem(REMOTE_WORK_KEY);
 }
 function clearRemoteConfig(){
-  clearTimeout(remoteBackupTimer); remoteBackupTimer = 0;
-  try{ localStorage.removeItem(LS_REMOTE_KEY); }catch(e){ /* nothing more we can do */ }
+  invalidateRemote();
+  try{ localStorage.removeItem(LS_REMOTE_KEY); localStorage.removeItem(REMOTE_WORK_KEY); }
+  catch(e){ toast('Could not forget configuration — storage unavailable'); }
+  setRemoteStatus('', '');
 }
 /* The secret is never pre-filled (its input just carries a "leave blank to
    keep" placeholder when one is already stored), so a freshly opened draft
@@ -5037,13 +5101,17 @@ function remoteUrl(cfg){
   if (cfg.pathStyle) return ep + '/' + cfg.bucket + '/' + key;
   return ep.replace('://', '://' + cfg.bucket + '.') + '/' + key;
 }
-async function s3Request(cfg, method, bodyText){
+async function s3Request(cfg, method, bodyText, options = {}, ctx){
+  validateRemoteConfig(cfg);
+  if (method === 'PUT' && (!options.headers || !(options.headers['if-match'] || options.headers['if-none-match'] === '*'))) throw new Error('Unconditional cloud writes are disabled');
+  if (ctx) assertRemote(ctx);
   const url = new URL(remoteUrl(cfg));
   const payloadHash = await sha256Hex(bodyText || '');
   const { amz, stamp } = amzNow();
   /* signed only, never sent as-is: the browser sets the real Host header itself */
   const headers = { host:url.host, 'x-amz-content-sha256':payloadHash, 'x-amz-date':amz };
   if (method === 'PUT') headers['content-type'] = 'application/json';
+  Object.assign(headers, options.headers || {});
   const names = Object.keys(headers).sort();
   const canonicalHeaders = names.map(h => h + ':' + headers[h] + '\n').join('');
   const signedHeaders = names.join(';');
@@ -5053,12 +5121,33 @@ async function s3Request(cfg, method, bodyText){
   const signature = toHex(await hmacRaw(await signingKey(cfg.secretAccessKey, stamp, cfg.region, 's3'), stringToSign));
   const authorization = 'AWS4-HMAC-SHA256 Credential=' + cfg.accessKeyId + '/' + scope +
     ', SignedHeaders=' + signedHeaders + ', Signature=' + signature;
-  return fetch(url.toString(), {
-    method,
-    headers:{ 'x-amz-content-sha256':payloadHash, 'x-amz-date':amz, 'content-type':headers['content-type'] || '', Authorization:authorization },
-    body: method === 'PUT' ? bodyText : undefined
-  });
+  if (ctx) assertRemote(ctx);
+  const controller = new AbortController(); remoteControllers.add(controller);
+  const deadline = setTimeout(() => controller.abort(), REMOTE_TIMEOUT);
+  try {
+    const sentHeaders = { ...headers, Authorization:authorization }; delete sentHeaders.host;
+    const res = await fetch(url.toString(), { method, headers:sentHeaders,
+      body:method === 'PUT' ? bodyText : undefined, signal:controller.signal, cache:'no-store', redirect:'error' });
+    const maxBytes = res.ok ? BACKUP_MAX_BYTES : 65536;
+    if (Number(res.headers.get('content-length')) > maxBytes){ if (res.body) await res.body.cancel(); throw new Error('Remote response exceeds size limit'); }
+    const reader = res.body && res.body.getReader();
+    let size = 0, text = ''; const decoder = new TextDecoder();
+    if (reader) while (true){
+      const part = await reader.read(); if (part.done) break;
+      size += part.value.byteLength;
+      if (size > maxBytes){ await reader.cancel(); throw new Error('Remote response exceeds size limit'); }
+      text += decoder.decode(part.value, {stream:true});
+    }
+    text += decoder.decode();
+    if (ctx) assertRemote(ctx);
+    return { ok:res.ok, status:res.status, headers:res.headers, text:async () => text };
+  } catch(e){
+    if (ctx) assertRemote(ctx);
+    if (controller.signal.aborted) throw new Error('Remote request/body timed out');
+    throw e;
+  } finally { clearTimeout(deadline); remoteControllers.delete(controller); }
 }
+
 async function remoteRunAction(fn){
   ui.remoteBusy = true; render();
   try{ await fn(); }
@@ -5067,143 +5156,200 @@ async function remoteRunAction(fn){
 }
 function setRemoteStatus(status, text){
   ui.remoteStatus = status; ui.remoteStatusText = text || '';
-}
-function remoteSnapshotTime(obj){
-  const changed = toNum(obj && obj.settings && obj.settings.lastModifiedAt);
-  if (changed) return changed;
-  const exported = obj && obj.exportedAt ? new Date(obj.exportedAt).getTime() : 0;
-  return Number.isFinite(exported) ? exported : 0;
-}
-/* save() calls this for every meaningful state mutation. A single timer
-   coalesces input bursts, and an upload already in flight simply causes one
-   more pass afterwards if the state changed while it was being sent. */
-function scheduleRemoteBackup(delay){
-  const cfg = loadRemoteConfig();
-  if (!cfg || !remoteCryptoAvailable()) return;
-  clearTimeout(remoteBackupTimer);
-  setRemoteStatus('pending', navigator.onLine === false ? 'Waiting for a connection' : 'Changes waiting to back up');
-  remoteBackupTimer = setTimeout(() => autoRemoteBackup(), delay == null ? REMOTE_BACKUP_DELAY : delay);
-}
-async function putRemoteBackup(cfg){
-  if (!toNum(state.settings.lastModifiedAt)){
-    state.settings.lastModifiedAt = toNum(state.settings.seededAt) || Date.now();
-    save({ touch:false, remote:false, immediate:true });
+  const el = $('#remote-status');
+  if (el){
+    const cfg = loadRemoteConfig(), work = readRemoteWork();
+    el.textContent = cfg ? 'Status: Configured — ' + cfg.bucket + (text ? ' · ' + text : '') +
+      (cfg.lastBackupAt ? ' · last backup ' + new Date(cfg.lastBackupAt).toLocaleString() : ' · never backed up yet') +
+      ' · backed-up data revision: ' + (cfg.lastUploadedModifiedAt || 'none') + (work && work.pending ? ' · pending work' : '')
+      : 'Status: Not configured';
   }
-  flushSave();
-  const uploadedModifiedAt = toNum(state.settings.lastModifiedAt) || 0;
-  const res = await s3Request(cfg, 'PUT', JSON.stringify(backupPayload()));
-  if (!res.ok) throw new Error('Backup failed: HTTP ' + res.status);
-  cfg.lastBackupAt = Date.now();
-  cfg.lastUploadedModifiedAt = uploadedModifiedAt;
-  saveRemoteConfig(cfg);
-  setRemoteStatus('synced', 'Up to date');
-  if ((toNum(state.settings.lastModifiedAt) || 0) > uploadedModifiedAt) scheduleRemoteBackup();
+}
+
+function remoteSnapshotTime(obj){
+  const n = toNum(obj && obj.settings && obj.settings.lastModifiedAt);
+  return Number.isSafeInteger(n) && n > 0 ? n : 0;
+}
+/* Compare migrated data, not export envelopes, backup dates or recovery cursors. */
+function backupDataKey(obj){
+  const c = prepareBackup(obj);
+  delete c.version;
+  ['lastModifiedAt','lastFileBackupAt','seededAt'].forEach(k => delete c.settings[k]);
+  const stable = v => Array.isArray(v) ? v.map(stable) : v && typeof v === 'object'
+    ? Object.fromEntries(Object.keys(v).sort().map(k => [k,stable(v[k])])) : v;
+  return JSON.stringify(stable(c));
+}
+function localRevisionKey(){ return JSON.stringify(state); }
+function scheduleRemoteBackup(delay){
+  if (!loadRemoteConfig() || !remoteCryptoAvailable()) return;
+  try { const old = readRemoteWork() || {}; writeRemoteWork({ ...old, pending:true, revision:remoteSnapshotTime(state), nextAt:Date.now() + (delay == null ? REMOTE_BACKUP_DELAY : delay) }); }
+  catch(e){ setRemoteStatus('error','Cannot persist pending backup; keep this page open'); return; }
+  armRemoteRetry();
+  setRemoteStatus('pending', navigator.onLine === false ? 'Waiting for a connection' : 'Changes waiting to back up');
+}
+function armRemoteRetry(){
+  clearTimeout(remoteBackupTimer); remoteBackupTimer = 0;
+  const work = readRemoteWork();
+  if (work && work.pending && navigator.onLine !== false)
+    remoteBackupTimer = setTimeout(autoRemoteBackup, Math.max(0, (work.nextAt || 0) - Date.now()));
+}
+function retryRemoteError(e, ctx){
+  assertRemote(ctx);
+  setRemoteStatus('error',e.message + ' — retry pending');
+  const old = readRemoteWork() || {}, attempts = Math.min((old.attempts || 0) + 1, 10);
+  try { writeRemoteWork({ pending:true, revision:remoteSnapshotTime(state), attempts,
+    nextAt:Date.now() + Math.min(300000, 3000 * 2 ** (attempts - 1)), error:e.message }); }
+  catch(storageError){ setRemoteStatus('error', e.message + ' — retry could not be saved; retry manually'); return; }
+  setRemoteStatus('error',e.message + ' — retry pending'); armRemoteRetry();
+}
+async function readRemoteBackup(cfg, ctx){
+  const res = await s3Request(cfg, 'GET', '', {}, ctx);
+  const raw = await res.text();
+  if (!res.ok){
+    const code = (raw.match(/<Code>([^<]+)<\/Code>/) || [])[1] || (() => { try { return JSON.parse(raw).Code; } catch(e){ return ''; } })();
+    if (res.status === 404 && code === 'NoSuchKey') return null;
+    throw new Error('Remote read failed: HTTP ' + res.status + (code ? ' ' + code : ' (missing-object status is ambiguous)'));
+  }
+  let obj; try { obj = JSON.parse(raw); } catch(e){ throw new Error('Remote file is not valid JSON'); }
+  let candidate;
+  try { candidate = prepareBackup(obj); } catch(e){ throw new Error('Invalid backup — ' + e.message); }
+  const etag = res.headers.get('etag');
+  if (!etag || !/^"[^"\r\n]+"$/.test(etag)) throw new Error('Remote ETag missing or invalid; expose ETag in CORS');
+  return { obj, candidate, etag, raw, at:remoteSnapshotTime(obj) };
+}
+function preserveBeforeRemoteRestore(){
+  try{ localStorage.setItem(LS_REMOTE_RESTORE_KEY, JSON.stringify(backupPayload())); return true; }
+  catch(e){ setRemoteStatus('error','Could not preserve local data before restore'); return false; }
+}
+/* localStorage setItem is atomic: persist the candidate before activating it.
+   Failure leaves the old durable key and in-memory state intact. */
+function commitSnapshot(candidate){
+  enforceBackupLimits(candidate); validateBackup(candidate);
+  if (!preserveBeforeRemoteRestore()) return false;
+  try { localStorage.setItem(LS_KEY, JSON.stringify(candidate)); }
+  catch(e){ saveFailed = true; updateSaveBanner(); setRemoteStatus('error','Restore not saved — previous data retained'); return false; }
+  clearTimeout(saveTimer); saveTimer = 0; savePending = false;
+  state = candidate; storageRecoveryBlocked = false; saveFailed = false; updateSaveBanner();
+  applyTheme(); cancelRestBeep();
+  if (state.activeWorkout) restoreTimer(); else loadTimer(state.settings.defaultRest);
+  resetUI(); render(); return true;
+}
+function installRemoteSnapshot(candidate, remoteAt, expected, ctx){
+  if (ctx) assertRemote(ctx);
+  if (state.activeWorkout || (expected != null && expected !== localRevisionKey())){
+    writeRemoteWork({ ...(readRemoteWork() || {}), pending:true, deferred:true, revision:remoteSnapshotTime(state) });
+    setRemoteStatus('pending','Remote replacement deferred — workout or local edits; recheck after workout'); return false;
+  }
+  if (!commitSnapshot(candidate)) return false;
+  toast('Restored newer remote backup'); return true;
+}
+function markRemoteSuccess(cfg, revision, ctx, message){
+  assertRemote(ctx);
+  cfg.lastBackupAt = Date.now(); cfg.lastUploadedModifiedAt = revision;
+  saveRemoteConfig(cfg, ctx);
+  const pending = remoteSnapshotTime(state) !== revision;
+  writeRemoteWork({ pending, revision:remoteSnapshotTime(state), attempts:0, nextAt:Date.now() + REMOTE_BACKUP_DELAY });
+  setRemoteStatus(pending ? 'pending' : 'synced', pending ? 'Newer changes waiting to back up' : message || 'Up to date');
+  armRemoteRetry();
+}
+function reconcileRemote(remote, expected, ctx){
+  if (!remote) return 'upload';
+  const same = backupDataKey(remote.candidate) === backupDataKey(state);
+  const localAt = remoteSnapshotTime(state);
+  if (same) return 'same';
+  if (!remote.at || (!localAt && loadedExistingState) || remote.at === localAt){
+    setRemoteStatus('conflict','Conflicting or undated backups — download local data and explicitly restore to choose');
+    return 'conflict';
+  }
+  if (remote.at > localAt){
+    if (installRemoteSnapshot(remote.candidate, remote.at, expected, ctx)) return 'restored';
+    return 'deferred';
+  }
+  return 'upload';
+}
+async function putRemoteBackup(cfg, ctx){
+  const localSaved = flushSave();
+  if (!localSaved) setRemoteStatus('warning','Local saving failed — checking cloud backup');
+  for (let attempt = 0; attempt < 3; attempt++){
+    assertRemote(ctx);
+    const expected = localRevisionKey();
+    const remote = await readRemoteBackup(cfg, ctx);
+    const result = reconcileRemote(remote, expected, ctx);
+    if (['conflict','deferred'].includes(result)) return result;
+    if (result === 'restored' || result === 'same'){
+      markRemoteSuccess(cfg, remoteSnapshotTime(state), ctx, result === 'restored' ? 'Restored from remote' : 'Up to date'); return result;
+    }
+    // Any edits during GET require another comparison against that same remote.
+    if (expected !== localRevisionKey()) continue;
+    const payload = backupPayload(); enforceBackupLimits(payload);
+    const revision = remoteSnapshotTime(payload);
+    if (remote){
+      const key = (cfg.objectKey || REMOTE_OBJECT_KEY_DEFAULT) + '.snapshots/' + new Date().toISOString().replace(/[:.]/g,'-') + '-' + uid() + '.json';
+      const snapshot = await s3Request({...cfg, objectKey:key}, 'PUT', remote.raw, {headers:{'if-none-match':'*'}}, ctx);
+      if (!snapshot.ok) throw new Error('Snapshot preservation failed: HTTP ' + snapshot.status);
+    }
+    const res = await s3Request(cfg, 'PUT', JSON.stringify(payload),
+      {headers:remote ? {'if-match':remote.etag} : {'if-none-match':'*'}}, ctx);
+    if ([409,412].includes(res.status)) continue; // reread and reconcile; never unconditional
+    if (!res.ok) throw new Error('Backup failed: HTTP ' + res.status);
+    markRemoteSuccess(cfg, revision, ctx);
+    if (!localSaved || saveFailed) setRemoteStatus('warning','Cloud backup succeeded; local saving failed' + (readRemoteWork().pending ? ' — newer edits pending' : ''));
+    return 'uploaded';
+  }
+  throw new Error('Cloud changed during backup; retry pending');
 }
 async function autoRemoteBackup(){
   remoteBackupTimer = 0;
   const cfg = loadRemoteConfig();
-  if (!cfg || !remoteCryptoAvailable() || remoteBackupInFlight) return;
-  if (navigator.onLine === false){ setRemoteStatus('pending', 'Waiting for a connection'); return; }
-  remoteBackupInFlight = true;
-  try{ await putRemoteBackup(cfg); }
-  catch(e){ setRemoteStatus('error', e && e.message ? e.message : 'Automatic backup failed'); }
-  finally{ remoteBackupInFlight = false; }
+  if (!cfg || !remoteCryptoAvailable() || navigator.onLine === false) return;
+  return coordinateRemote(async ctx => {
+    try { await putRemoteBackup(cfg, ctx); }
+    catch(e){ retryRemoteError(e, ctx); }
+  }, cfg).catch(() => {});
 }
 function remoteBackup(){
-  const cfg = loadRemoteConfig();
-  if (!cfg) return;
-  return remoteRunAction(async () => {
-    clearTimeout(remoteBackupTimer); remoteBackupTimer = 0;
-    if (remoteBackupInFlight) throw new Error('A remote backup is already in progress');
-    remoteBackupInFlight = true;
-    try{ await putRemoteBackup(cfg); }
-    finally{ remoteBackupInFlight = false; }
-    toast('Backed up to remote storage');
-  });
+  const cfg = loadRemoteConfig(); if (!cfg) return;
+  clearTimeout(remoteBackupTimer); remoteBackupTimer = 0;
+  return remoteRunAction(() => coordinateRemote(async ctx => {
+    try { const result = await putRemoteBackup(cfg, ctx); assertRemote(ctx);
+      if (result === 'uploaded') toast('Cloud backup complete' + (saveFailed ? ' — local save failed' : ''));
+    } catch(e){ retryRemoteError(e, ctx); throw e; }
+  },cfg));
 }
 function remoteRestore(){
-  const cfg = loadRemoteConfig();
-  if (!cfg) return;
-  return remoteRunAction(async () => {
-    clearTimeout(remoteBackupTimer); remoteBackupTimer = 0;
-    if (remoteBackupInFlight) throw new Error('Wait for the current remote backup before restoring');
-    const res = await s3Request(cfg, 'GET', '');
-    if (res.status === 404) throw new Error('No backup found at that location yet');
-    if (!res.ok) throw new Error('Restore failed: HTTP ' + res.status);
-    let obj;
-    try{ obj = JSON.parse(await res.text()); }
-    catch(e){ throw new Error('Remote file is not valid JSON'); }
-    return applyFullBackup(obj);
-  });
+  const cfg = loadRemoteConfig(); if (!cfg) return;
+  return remoteRunAction(() => coordinateRemote(async ctx => {
+    const expected = localRevisionKey();
+    const remote = await readRemoteBackup(cfg, ctx);
+    if (!remote) throw new Error('No backup found at that location yet');
+    const ok = await confirmDlg('Restore remote data?', 'Replace local data with the remote backup? A local recovery copy will be retained.', 'Restore & replace', true);
+    assertRemote(ctx);
+    if (!ok) return;
+    if (state.activeWorkout || expected !== localRevisionKey()) throw new Error('Restore cancelled — workout or local edits changed during check');
+    if (!commitSnapshot(remote.candidate)) throw new Error('Restore failed — previous data retained');
+    markRemoteSuccess(cfg, remote.at, ctx, 'Restored from remote'); toast('Remote restore complete');
+  }, cfg));
 }
-function preserveBeforeRemoteRestore(){
-  try{
-    localStorage.setItem(LS_REMOTE_RESTORE_KEY, JSON.stringify(backupPayload()));
-    return true;
-  }catch(e){
-    setRemoteStatus('error', 'Could not preserve local data before remote restore');
-    return false;
-  }
-}
-function installRemoteSnapshot(candidate, remoteAt){
-  if (!preserveBeforeRemoteRestore()) return false;
-  clearTimeout(saveTimer); saveTimer = 0; savePending = false;
-  state = candidate;
-  storageRecoveryBlocked = false;
-  applyTheme(); cancelRestBeep();
-  if (state.activeWorkout) restoreTimer();
-  else loadTimer(state.settings.defaultRest);
-  save({ touch:false, remote:false, immediate:true });
-  const cfg = loadRemoteConfig();
-  if (cfg){ cfg.lastBackupAt = remoteAt || Date.now(); cfg.lastUploadedModifiedAt = toNum(state.settings.lastModifiedAt); saveRemoteConfig(cfg); }
-  resetUI(); render();
-  toast('Restored newer remote backup');
-  return true;
-}
-/* On launch, remote wins only when its data timestamp is newer. A fresh device
-   has no local timestamp, so it restores; a device with newer offline edits
-   keeps them and schedules their upload. This is intentionally single-writer
-   whole-state behavior, not a record merge. */
 async function remoteStartupSync(){
-  const cfg = loadRemoteConfig();
-  if (!cfg || !remoteCryptoAvailable() || remoteStartupInFlight) return;
-  remoteStartupInFlight = true;
-  setRemoteStatus('checking', 'Checking remote backup…');
-  try{
-    const res = await s3Request(cfg, 'GET', '');
-    if (res.status === 404){ scheduleRemoteBackup(0); return; }
-    if (!res.ok) throw new Error('Remote check failed: HTTP ' + res.status);
-    let obj;
-    try{ obj = JSON.parse(await res.text()); }
-    catch(e){ throw new Error('Remote file is not valid JSON'); }
-    const candidate = prepareBackup(obj);
-    const remoteAt = remoteSnapshotTime(obj);
-    const localAt = toNum(state.settings.lastModifiedAt) || 0;
-    if (remoteAt > localAt){
-      if (!toNum(candidate.settings.lastModifiedAt)) candidate.settings.lastModifiedAt = remoteAt;
-      if (!installRemoteSnapshot(candidate, remoteAt)) return;
-      setRemoteStatus('synced', 'Restored from remote');
-    } else if (localAt > remoteAt){
-      scheduleRemoteBackup(0);
-    } else {
-      cfg.lastBackupAt = remoteAt || cfg.lastBackupAt;
-      cfg.lastUploadedModifiedAt = localAt;
-      saveRemoteConfig(cfg);
-      setRemoteStatus('synced', 'Up to date');
-    }
-  }catch(e){
-    setRemoteStatus('error', e && e.message ? e.message : 'Remote check failed');
-  }finally{ remoteStartupInFlight = false; }
+  const cfg = loadRemoteConfig(); if (!cfg || !remoteCryptoAvailable()) return;
+  if (navigator.onLine === false){ setRemoteStatus('pending','Waiting for a connection'); return; }
+  return coordinateRemote(async ctx => {
+    setRemoteStatus('checking','Checking remote backup…');
+    try {
+      const expected = localRevisionKey();
+      const remote = await readRemoteBackup(cfg,ctx);
+      const result = reconcileRemote(remote,expected,ctx);
+      if (result === 'upload') scheduleRemoteBackup(0);
+      else if (['same','restored'].includes(result)) markRemoteSuccess(cfg,remoteSnapshotTime(state),ctx,result === 'restored' ? 'Restored from remote' : 'Up to date');
+    } catch(e){ retryRemoteError(e,ctx); }
+  },cfg).catch(() => {});
 }
 function remoteTestConnection(){
-  const cfg = loadRemoteConfig();
-  if (!cfg) return;
-  return remoteRunAction(async () => {
-    const res = await s3Request(cfg, 'GET', '');
-    if (res.ok) toast('Connected — remote backup found');
-    else if (res.status === 404) toast('Connected — no backup there yet');
-    else throw new Error('Connection failed: HTTP ' + res.status);
-  });
+  const cfg = loadRemoteConfig(); if (!cfg) return;
+  return remoteRunAction(() => coordinateRemote(async ctx => {
+    const remote = await readRemoteBackup(cfg, ctx); assertRemote(ctx);
+    toast(remote ? 'Backup readable — write permission unverified' : 'Object missing — write permission unverified');
+  },cfg));
 }
 /* Save is gated on a live connection test: bad credentials or a typo'd
    endpoint should never get silently persisted only to fail on the next
@@ -5231,26 +5377,24 @@ function saveRemoteConfigForm(form){
     lastUploadedModifiedAt: existing ? existing.lastUploadedModifiedAt : null
   });
 }
-/* Tries the connection with the candidate config before writing anything to
-   storage. A 404 still counts as a success here (same rule as "Test
-   connection" below) — it means the bucket answered, there's just nothing
-   backed up there yet. On failure the form stays open with the draft intact
-   so the user can fix a field and retry, rather than losing what they typed. */
+/* Check only readability/missing-object semantics. Write capability is verified
+   exclusively by an actual conditional backup, never by a GET. */
 async function testAndSaveRemoteConfig(candidate){
+  invalidateRemote();
   ui.remoteError = ''; ui.remoteBusy = true; render();
-  try{
-    const res = await s3Request(candidate, 'GET', '');
-    if (!res.ok && res.status !== 404) throw new Error('Connection failed: HTTP ' + res.status + ' — configuration was not saved.');
-    saveRemoteConfig(candidate);
-    ui.remoteFormOpen = false; ui.remoteDraft = null;
-    toast(res.status === 404 ? 'Connected — configuration saved (no backup there yet)' : 'Connected — configuration saved');
-    if (res.status === 404) scheduleRemoteBackup(0);
-    else remoteStartupSync();
-  }catch(e){
-    ui.remoteError = (e && e.message ? e.message : 'Connection failed — configuration was not saved.');
-  }finally{
-    ui.remoteBusy = false; render();
-  }
+  const generation = remoteGeneration;
+  try {
+    validateRemoteConfig(candidate);
+    await coordinateRemote(async ctx => {
+      await readRemoteBackup(candidate,ctx); assertRemote(ctx);
+      candidate.lastBackupAt = null; candidate.lastUploadedModifiedAt = null;
+      saveRemoteConfig(candidate,ctx);
+      ui.remoteFormOpen = false; ui.remoteDraft = null;
+      toast('Read check passed — configuration saved; write permission unverified');
+    }, candidate, true);
+    remoteStartupSync();
+  } catch(e){ if (generation === remoteGeneration) ui.remoteError = e.message; }
+  finally { ui.remoteBusy = false; render(); }
 }
 /* The config file this app reads, so it is also the config file it writes —
    otherwise "Load config file" only ever accepts hand-written JSON. The secret
@@ -8009,16 +8153,16 @@ function remoteStorageHTML(){
   let html = '<div class="setting-block">' +
     '<h3>Remote storage <span class="hint">(optional, S3-compatible)</span></h3>' +
     '<p class="desc">The same complete backup is uploaded automatically after changes. On opening Liftlog, a newer remote copy is restored automatically. ' +
-    'Requests go straight from this device to your storage provider using your own credentials — ' +
+    'Active workouts and edits during remote checks defer replacement. Requests go straight from this device to your storage provider using your own credentials — ' +
     'this app has no server to relay them through. Credentials are stored in this browser’s local storage in plain text.</p>';
   if (!cryptoOk){
     html += '<p class="error-text">Remote storage needs the Web Crypto API, only available in a secure context (https:// or localhost). It is unavailable here.</p></div>';
     return html;
   }
   const live = ui.remoteStatusText ? ' · ' + esc(ui.remoteStatusText) : '';
-  html += '<p class="desc">Status: ' + (cfg
+  html += '<p id="remote-status" class="desc" role="status">Status: ' + (cfg
       ? 'Configured — <strong>' + esc(cfg.bucket) + '</strong>' + live + (cfg.lastBackupAt ? ' · last backup ' + esc(new Date(cfg.lastBackupAt).toLocaleString()) : ' · never backed up yet')
-      : 'Not configured') + '</p>';
+      : 'Not configured') + (cfg ? ' · backed-up data revision: ' + esc(cfg.lastUploadedModifiedAt || 'none') + (readRemoteWork() && readRemoteWork().pending ? ' · pending work' : '') : '') + '</p>';
   if (cfg){
     html += '<div class="form-actions">' +
       '<button type="button" class="btn" data-action="remote-test"' + (ui.remoteBusy ? ' disabled' : '') + '>Test connection</button>' +
@@ -8041,17 +8185,14 @@ function remoteStorageHTML(){
         '<label class="field"><span class="cap">Region</span><input type="text" data-bind="remote" data-field="region" required placeholder="us-east-1" value="' + esc(d.region) + '"></label>' +
         '<label class="field"><span class="cap">Bucket</span><input type="text" data-bind="remote" data-field="bucket" required value="' + esc(d.bucket) + '"></label>' +
       '</div>' +
-      '<p class="hint mt-1">Plain <code>http://</code> is accepted for a LAN or self-hosted endpoint (e.g. ' +
-        '<code>http://srv-usio:3902</code>) — it only works if this app itself was opened over ' +
-        '<code>http://</code>, <code>file://</code>, or localhost, since a page loaded over ' +
-        '<code>https://</code> is blocked from calling an insecure endpoint.</p>' +
+      '<p class="hint mt-1">Use an HTTPS endpoint without credentials, paths, query strings or fragments. HTTP is only allowed when Liftlog runs from a local file or localhost.</p>' +
       '<div class="form-row mt-2">' +
         '<label class="field flex-2"><span class="cap">Object key / path</span><input type="text" data-bind="remote" data-field="objectKey" placeholder="' + REMOTE_OBJECT_KEY_DEFAULT + '" value="' + esc(d.objectKey) + '"></label>' +
         '<label class="field"><span class="cap">Access key ID</span><input type="text" data-bind="remote" data-field="accessKeyId" required value="' + esc(d.accessKeyId) + '"></label>' +
         '<label class="field"><span class="cap">Secret access key</span><input type="password" data-bind="remote" data-field="secretAccessKey" placeholder="' + (cfg ? '•••••••• (leave blank to keep)' : '') + '" value="' + esc(d.secretAccessKey) + '"' + (!cfg ? ' required' : '') + '></label>' +
       '</div>' +
       '<div class="switch-row mt-2">' +
-        '<label for="sw-pathstyle"><strong>Path-style addressing</strong><br><span class="hint">Turn on for MinIO or other self-hosted endpoints; leave off for AWS S3, R2, B2, Spaces</span></label>' +
+        '<label for="sw-pathstyle"><strong>Path-style addressing</strong><br><span class="hint">Turn on for MinIO and R2 (R2 region: auto); consult provider guidance for other endpoints</span></label>' +
         '<span class="switch"><input type="checkbox" id="sw-pathstyle" data-change="remote-pathstyle"' + (d.pathStyle ? ' checked' : '') + '><span class="track" aria-hidden="true"></span></span>' +
       '</div>' +
       (ui.remoteError ? '<p class="error-text mt-2" role="alert">' + esc(ui.remoteError) + '</p>' : '') +
@@ -9048,13 +9189,9 @@ document.addEventListener('keydown', e => {
    INIT
    ============================================================ */
 function init(){
-  /* Older local states predate the modification timestamp used to choose
-     between local and remote. Treat an existing, readable local log as a new
-     local revision once, rather than silently replacing data whose age cannot
-     be established. A genuinely fresh install still has no timestamp, so its
-     configured remote snapshot restores on first launch. */
-  if (loadedExistingState && !toNum(state.settings.lastModifiedAt))
-    state.settings.lastModifiedAt = Date.now();
+  /* Existing undated backups cannot safely be ordered; reconciliation asks
+     the user to choose. A fresh install can adopt a dated remote snapshot. */
+  /* Undated existing data requires explicit conflict resolution, never invented age. */
   applyTheme();
   /* restoreTimer() reads activeWorkout.timer, and loadTimer() overwrites it —
      so a running rest timer must be restored instead of, not after, a reset. */
@@ -9078,12 +9215,13 @@ function init(){
       if (remoteBackupTimer){ clearTimeout(remoteBackupTimer); remoteBackupTimer = 0; autoRemoteBackup(); }
       return;
     }
+    remoteStartupSync();
     wakeLockDenied = false;
     syncWakeLock();
     if (timer.running && (timer.endsAt - Date.now()) / 1000 <= 0) completeRest();
     else drawTimer();
   });
-  window.addEventListener('pagehide', flushSave);
+  window.addEventListener('pagehide', () => { flushSave(); if (readRemoteWork()) autoRemoteBackup(); });
   window.addEventListener('online', remoteStartupSync);
 
   updateSaveBanner();   /* init()'s own save() above may already have failed */

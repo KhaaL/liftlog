@@ -664,7 +664,7 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
       window.fetch=async (_url,options={})=>{
         requests.push(options.method || 'GET');
         return options.method === 'PUT' ? new Response('',{status:200}) :
-          new Response(JSON.stringify(remote),{status:200,headers:{'content-type':'application/json'}});
+          new Response(JSON.stringify(remote),{status:200,headers:{'content-type':'application/json',etag:'\"synthetic-etag\"'}});
       };
       await t.remoteStartupSync();
       check(t.state.routines[0].name==='Remote newest' && t.state.settings.lastModifiedAt===2000,
