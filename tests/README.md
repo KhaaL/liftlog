@@ -7,14 +7,14 @@ or later and Playwright, which `package.json` pins as the repository's only
 ```sh
 npm ci                                     # installs the pinned playwright
 npx playwright install --only-shell chromium   # or set BROWSER_PATH instead
-npm test                                   # both suites
+npm test                                   # remote, regression and security suites
 ```
 
 `npm run test:regression` and `npm run test:security` run one suite each, and
 `node tests/<suite>.cjs` works from any directory. Set `BROWSER_PATH` to an
 installed Chromium to use it instead of Playwright's own download.
 
-Both scripts launch an isolated browser profile and intercept HTTP requests;
+The browser scripts launch an isolated browser profile and intercept HTTP requests;
 they do not touch your real workout data or a remote backup. The security suite
 also mocks remote storage to exercise the real restore/validation path.
 
@@ -33,6 +33,17 @@ also mocks remote storage to exercise the real restore/validation path.
   cancellation, hostile IDs through imports and UI actions, remote validation,
   startup recovery download/discard, and failure to save a recovery copy.
 
+`npm run test:remote` runs 21 deterministic data-management scenarios with Node's
+Web Crypto, native Response/streams, fake S3 responses and isolated in-memory
+localStorage. `remote-harness.cjs` executes the shipped script closure, skips init
+and substitutes presentation only; validation, migrations, coordinator, signer,
+stream limits and storage logic remain real. It needs no browser or network.
+Timers are controlled to trigger timeout/backoff tests without waiting in real
+time. Coverage includes CAS races/409/412, stale writers, active workouts and GET
+races, equal revisions, clock rollback, upload-time edits, persistent retry,
+config invalidation, malformed/oversized responses, ETag/bucket errors, quota
+failure, legacy roundtrips, recovery download and destination validation.
+
 ## The test seam
 
 The suites reach the app's internals through `window.testAPI`, which exists
@@ -50,7 +61,7 @@ the page loads.
 
 ## Continuous integration
 
-`.github/workflows/tests.yml` runs both suites on every pull request and on
+`.github/workflows/tests.yml` runs all three suites on every pull request and on
 pushes to `main`, inside `mcr.microsoft.com/playwright`. The workflow's first
 job reads the exact Playwright version from `package.json` and picks the image
 tag from it, so bumping `package.json` is the whole upgrade — Dependabot
