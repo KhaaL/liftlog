@@ -772,12 +772,15 @@ In Settings → Remote storage, fill in:
 
 | Field | Meaning |
 | --- | --- |
-| Endpoint URL | Your provider's S3 endpoint, e.g. `https://s3.us-east-1.amazonaws.com`, `https://<account id>.r2.cloudflarestorage.com`, or your own MinIO URL. `http://` is accepted too, for a LAN or self-hosted server (e.g. `http://srv-usio:3902`) — but only works if this app itself was opened over `http://`, `file://`, or localhost, since browsers block a page loaded over `https://` from calling an insecure endpoint. |
-| Region | e.g. `us-east-1`. Cloudflare R2 uses `auto`. |
-| Bucket | The bucket to back up into. |
-| Object key / path | Where the backup is stored inside the bucket. Defaults to `liftlog-backup.json`. |
-| Access key ID / Secret access key | Credentials for that bucket. Scope them to just this bucket, and to just `GetObject`/`PutObject`, if your provider supports it. |
-| Path-style addressing | Turn on for MinIO and most self-hosted endpoints; leave off for AWS S3, R2, B2 and Spaces. |
+| Endpoint URL | HTTPS origin without user info, path, query or fragment, e.g. `https://s3.us-east-1.amazonaws.com`. HTTP is accepted only when Liftlog itself runs from localhost or a local file; browser secure-context restrictions still apply. |
+| Region | The bucket's signing region. R2: `auto`. |
+| Bucket | DNS-compatible lowercase name, 3–63 characters. Dotted buckets require path-style to avoid wildcard TLS mismatches. |
+| Object key / path | Defaults to `liftlog-backup.json`. No empty or dot segments, backslashes or control characters; maximum 1024 UTF-8 bytes including the dated snapshot suffix. Keep configured paths comfortably below this limit (900 bytes or less). |
+| Access key ID / Secret access key | Deliberately stored in plaintext localStorage, separately from workout backups. See permissions below. |
+| Path-style addressing | On for MinIO and R2. R2 uses `https://<32-character account id>.r2.cloudflarestorage.com`, region `auto`, and URLs containing `/bucket/key`. For AWS general-purpose buckets either style is supported; verify other providers' conditional-write support. |
+
+R2 setup follows [Cloudflare's S3 compatibility reference](https://developers.cloudflare.com/r2/api/s3/api/) and [S3 setup guide](https://developers.cloudflare.com/r2/get-started/s3/).
+This app currently accepts the standard R2 account endpoint, not jurisdiction-specific endpoint variants.
 
 ### The config file
 
@@ -801,23 +804,126 @@ edits — so it is reviewable before it is anything else, and it reaches storage
 only through the connection test below. A file is no more trustworthy than a
 typed form.
 
-**Save configuration** tests the connection before writing anything to
-storage: it sends a signed `GET` against the config you just typed and only
-persists it once that request comes back ok (a 404 still counts — it just
-means nothing has been backed up there yet). A failing request reports why
-and leaves the form open with what you typed untouched, rather than saving
-credentials that don't work. Typed-but-unsaved fields are also kept in memory
-across re-renders, so switching another setting (theme, unit, …) while the
-form is open no longer clears it.
+**Save configuration** checks the destination and performs a signed GET. A successful
+response must contain a valid backup and expose its strong ETag. Only an explicit
+`404 NoSuchKey` is considered an absent backup; `NoSuchBucket`, ambiguous 404s,
+403s and malformed responses are errors. This verifies readability, **not write
+permission**. The connection UI says write permission is unverified until an
+actual conditional backup succeeds. A GET does not create a test object.
 
-Once configured, state changes are backed up automatically after a short
-debounce. On launch the app reads the remote object and compares
-`settings.lastModifiedAt`; a newer remote snapshot is restored, while a newer
-local state is uploaded. The local state replaced by an automatic restore is
-kept under `liftlog.v1.before-remote-restore` until the user downloads,
-restores, or discards it. **Backup now** and the confirming **Restore from
-remote** remain available as explicit controls. This is single-writer,
-whole-state synchronization: it deliberately does not merge concurrent edits.
+### Reconciliation and durability
+
+One FIFO coordinator covers startup/online/foreground checks, uploads, manual
+remote and file restores, and configuration tests. Changing or forgetting
+configuration invalidates a generation, aborts applicable fetches, and prevents
+old completions from changing local data, credentials or success bookkeeping.
+There are no cloud requests when configuration is absent.
+
+Every upload reads and validates the current object first. If data differs,
+`settings.lastModifiedAt` selects the complete state with the newer device
+revision. The remote wins only after rechecking that there is **no local active
+workout** and that the local state is unchanged since GET began. Recoverable
+workouts loaded after a restart are active too. Replacement is deferred until a
+workout ends; the finishing/discarding save schedules another check. Edits made
+while GET is pending also defer replacement. Manual remote restore checks the
+same conditions after its confirmation. File imports check for intervening edits
+and are explicit whole-state replacements, including an active workout if chosen.
+
+Updating an existing object uses signed `If-Match: <ETag>`; creation uses signed
+`If-None-Match: *`. HTTP 409/412 causes another GET and reconciliation, with at
+most three conditional attempts per operation. **There is no unconditional PUT
+fallback**, including on providers without conditional-write support. GET is
+uncached and redirects are rejected. This follows
+[AWS's conditional-write guidance](https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html).
+
+Before each attempted replacement of the current cloud object, its exact validated
+body is PUT to `<objectKey>.snapshots/<UTC date-time>-<unique id>.json` using
+`If-None-Match: *`. Failure to preserve that snapshot stops the replacement.
+Snapshots are retained indefinitely by the app, including snapshots from lost
+CAS races. **Configure a bucket lifecycle rule to expire this snapshot prefix
+(e.g. after 90 days)** according to your recovery needs. The app never deletes
+snapshots or the current object; keep the current key outside that expiry rule.
+Provider versioning can be an additional safeguard.
+
+For every local whole-state replacement, a complete copy of the previous
+in-memory state is first saved to `liftlog.v1.before-remote-restore`. The incoming
+state is then persisted to `liftlog.v1` with a single atomic localStorage
+`setItem`, **before** activating it in memory or reporting success. If either
+write fails, previous usable state stays active; if the second write fails, the
+new recovery copy also remains available. Pending local saves are cancelled only
+after successful replacement. The recovery copy is the most recent replacement,
+not an unlimited local archive; download it before another restore if needed.
+
+Meaningful saves advance the data revision using
+`max(Date.now(), previousRevision + 1)`. Exporting a backup, local restoration,
+and remote success bookkeeping do not manufacture a new data revision. Equal
+revisions compare migrated/normalized data with sorted object keys, excluding the
+export envelope, schema version and backup/seed/modification timestamps. Equal
+contents are verified; different contents are a conflict and neither copy is
+replaced. This retains whole-state timestamp selection, without record merging.
+
+### Durable pending work and resource limits
+
+`liftlog.v1.remote-work` stores pending revision, attempts, next retry time and
+last error, bound to the configuration identity. Upload-time edits stay pending;
+last successfully verified/backed-up revision is stored separately in remote
+configuration and shown separately from live pending/error status. Auto failures
+retry with 3-second exponential backoff capped at 5 minutes. Manual **Backup now**
+retries immediately; reload/foreground/online recovery rereads and reconciles the
+cloud before scheduling pending work. Offline timers are not relied upon.
+Conflicts and workout deferrals wait for an explicit choice or a later edit/
+foreground check rather than repeatedly replacing state.
+
+Each fetch, including its complete streamed body read, has a 20-second deadline.
+Remote responses/import files/uploads are limited to **8 MiB**; error responses
+to 64 KiB. Content-Length is checked when exposed, and actual stream bytes are
+always counted before parsing. Before and after migration, backups are limited
+to 200,000 JSON values/containers, nesting depth 40, 10,000 workouts, 5,000
+library exercises, 2,000 routines and 20,000 bodyweight entries. These limits bound
+mobile validation/copying costs as well as transfer size. Exceeding them leaves
+current local and cloud data intact. Already-saved local state is loaded without
+these new transfer limits, so existing large logs remain usable/exportable;
+transferring them requires reducing the log or deliberately revising the limits.
+
+Pagehide/background requests are **best effort**. Pending work is stored before
+starting requests; the next foreground/reload can recover even if a browser kills
+the upload. A successful cloud upload can coexist with a failed local save: the
+save-failure banner remains visible and the remote status distinguishes these
+outcomes. If even pending-work storage fails, the status says retries could not
+be saved; download a local backup and retry manually.
+
+### Compatibility and migration
+
+The workout state remains version 14 and the transfer contract remains 1.12.0.
+Existing backups still go through `prepareBackup()` and the same migration chain;
+normalization is applied to both sides when comparing. Existing remote config
+is not silently rewritten to new destinations: invalid/old R2 settings fail with
+an actionable error; set path-style on and region `auto` explicitly.
+
+Legacy backups without a positive safe-integer `lastModifiedAt` are **undated**.
+Their `exportedAt` is never used as a data revision. Identical normalized content
+can be verified, but different undated content requires an explicit restore
+choice after downloading the local backup. Existing undated local state does not
+receive a fabricated current timestamp on launch. A real later edit gets a new
+revision normally. A fresh install can adopt a dated remote snapshot, except
+while an active local workout exists.
+
+The first foreground reconciliation also detects unbacked local data predating
+the new pending-work key. Credentials continue to be plaintext in localStorage;
+workout exports, remote backups and dated snapshots do not include the separate
+remote configuration. Configuration-file export remains deliberately separate.
+
+### Bucket permissions
+
+For AWS S3, grant `s3:GetObject` on the current object and `s3:PutObject` on both
+the current object **and** `<objectKey>.snapshots/*`. To get distinguishable
+`NoSuchKey` errors for absent objects, also grant `s3:ListBucket` on the bucket
+([GetObject error semantics](https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html)).
+The app does not list or delete objects and needs no `DeleteObject` permission.
+On R2 use a bucket-scoped Object Read & Write token. Configure snapshot retention
+with an administrative account, not the app credential. Consider enforcing
+conditional-write headers in AWS bucket policy to protect against older clients.
+Old Liftlog clients still perform unconditional writes: update **all devices**.
 
 ### Bucket CORS policy
 
@@ -829,7 +935,8 @@ S3 CORS configuration):
   {
     "AllowedOrigins": ["https://your-liftlog-host.example"],
     "AllowedMethods": ["GET", "PUT"],
-    "AllowedHeaders": ["*"],
+    "AllowedHeaders": ["authorization", "content-type", "x-amz-date", "x-amz-content-sha256", "if-match", "if-none-match"],
+    "ExposeHeaders": ["ETag", "Content-Length"],
     "MaxAgeSeconds": 3000
   }
 ]
@@ -851,8 +958,19 @@ you can.
   only available under `https://` or `localhost`. Remote storage disables
   itself with an explanatory message otherwise (e.g. plain `file://` in some
   browsers).
-- **Single writer.** Automatic backup and startup restore compare whole-state
-  timestamps. They do not merge concurrent edits from multiple devices.
+- **Whole-state selection.** Conditional writes prevent stale blind overwrites,
+  but data is not merged. Device clocks are not globally synchronized; a badly
+  skewed clock can select the wrong whole state. Dated snapshots and local rescue
+  copies allow recovery.
+- **One page per local log is recommended.** The coordinator serializes one
+  document; localStorage cannot provide a cross-tab transaction. Concurrent tabs
+  can still race on local state, though cloud writes remain conditional.
+- **Aborting cannot undo a dispatched PUT.** Configuration invalidation prevents
+  follow-up requests and local completion effects; the provider may already have
+  accepted the conditional write. A later check reconciles its outcome.
+- **Providers must implement atomic conditional PUTs.** Compatible API syntax is
+  not proof of CAS correctness; integration-test your provider in a disposable
+  bucket before relying on it. No production credentials are used by the tests.
 
 ### Links out
 

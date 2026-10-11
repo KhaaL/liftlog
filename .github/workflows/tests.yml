@@ -50,6 +50,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Remote data-management suite
+        run: npm run test:remote
       - name: Regression suite
         run: npm run test:regression
       # runs even when the regression suite failed, so one red run reports both
