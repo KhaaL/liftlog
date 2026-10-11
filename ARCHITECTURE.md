@@ -811,6 +811,61 @@ response must contain a valid backup and expose its strong ETag. Only an explici
 permission**. The connection UI says write permission is unverified until an
 actual conditional backup succeeds. A GET does not create a test object.
 
+### Local recovery and pause
+
+**Pause cloud sync** keeps credentials configured but persists a device-local
+hold in `liftlog.v1.remote-paused`, outside both workout backups and configuration
+exports. It survives reload, foreground/online events, file restore and destination
+changes. Pausing invalidates the coordinator generation, aborts applicable
+requests and cancels retry timers. Pending edits stay recorded; automatic checks,
+uploads and restores are blocked while paused. Read-only connection tests and
+explicit recovery reviews are still available. An already accepted PUT cannot be
+undone by abort, but its completion cannot restore local state or report stale
+success after pause.
+
+A valid local file restore pauses sync **before** opening the replacement
+confirmation, so a queued or in-flight cloud read cannot undo recovery. Cancelling
+or failing the restore deliberately leaves sync paused; the confirmation and toast
+explain this. If pause cannot be stored, the restore is blocked, and automatic
+operations remain blocked in this page. The prior workout state stays usable.
+After success Settings shows **Restored locally — cloud sync paused**. The
+latest pre-replacement copy can be downloaded; another replacement updates that
+single recovery slot.
+
+The paused controls offer three reviewed choices:
+
+| Control | Effect after confirmation |
+| --- | --- |
+| Keep local copy & update cloud | Publish this device's selected whole state, preserving the current cloud as a dated snapshot, then resume automatic sync. |
+| Use cloud copy | Restore the reviewed cloud snapshot with a local recovery copy, then resume. An active local workout blocks replacement. |
+| Resume automatic sync | Explain which copy will win timestamp selection, then perform that reviewed choice before resuming. Equal/undated conflicts require an explicit local/cloud choice. |
+
+Each choice reads and validates the remote before showing its consequence, then
+reads it again after confirmation. Any local changes, changed ETag/body, changed
+configuration or new pause cancels the decision; sync remains paused. Publication
+uses one `If-Match` update or `If-None-Match: *` creation. On 409/412 it rereads and
+asks for a **fresh choice**; it never automatically restores the cloud or silently
+retries the reviewed publication. Snapshot, network, local-save and bookkeeping
+failures also keep sync paused. A successful reviewed action must persist success
+bookkeeping before releasing the hold. Upload-time edits remain pending after
+resuming.
+
+Restoring different normalized data from a local file is an explicit data change:
+its revision advances above the previous local revision, incoming file revision
+and current device time. Restoring identical data does not manufacture a new
+revision. Explicit publication of different local data rebases its revision above
+the observed cloud and local revisions and device time, persisting it locally
+before PUT. This lets the deliberately selected local state become current even
+when the old cloud timestamp is ahead. Download/export bookkeeping and automatic
+cloud restores continue to preserve meaningful revisions.
+
+**Sync now** is the former Backup now control in automatic mode. Its label and
+hint now explain that normal reconciliation may replace local data with a newer
+cloud copy. To preserve local data, pause first and use the reviewed publication
+control. The new pause key is absent on existing installations, so normal sync
+remains enabled until the user pauses or begins local recovery. Backup versions,
+credentials, CORS and bucket permissions are unchanged.
+
 ### Reconciliation and durability
 
 One FIFO coordinator covers startup/online/foreground checks, uploads, manual
@@ -831,7 +886,8 @@ and are explicit whole-state replacements, including an active workout if chosen
 
 Updating an existing object uses signed `If-Match: <ETag>`; creation uses signed
 `If-None-Match: *`. HTTP 409/412 causes another GET and reconciliation, with at
-most three conditional attempts per operation. **There is no unconditional PUT
+most three conditional attempts per automatic operation. Explicit reviewed publication
+performs one attempt and keeps sync paused on a conflict. **There is no unconditional PUT
 fallback**, including on providers without conditional-write support. GET is
 uncached and redirects are rejected. This follows
 [AWS's conditional-write guidance](https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html).
@@ -855,8 +911,9 @@ after successful replacement. The recovery copy is the most recent replacement,
 not an unlimited local archive; download it before another restore if needed.
 
 Meaningful saves advance the data revision using
-`max(Date.now(), previousRevision + 1)`. Exporting a backup, local restoration,
-and remote success bookkeeping do not manufacture a new data revision. Equal
+`max(Date.now(), previousRevision + 1)`. Exporting a backup, automatic cloud
+restoration and remote success bookkeeping do not manufacture a new data revision.
+Explicit file recovery/publication follows the reviewed rules above. Equal
 revisions compare migrated/normalized data with sorted object keys, excluding the
 export envelope, schema version and backup/seed/modification timestamps. Equal
 contents are verified; different contents are a conflict and neither copy is
@@ -868,8 +925,8 @@ replaced. This retains whole-state timestamp selection, without record merging.
 last error, bound to the configuration identity. Upload-time edits stay pending;
 last successfully verified/backed-up revision is stored separately in remote
 configuration and shown separately from live pending/error status. Auto failures
-retry with 3-second exponential backoff capped at 5 minutes. Manual **Backup now**
-retries immediately; reload/foreground/online recovery rereads and reconciles the
+retry with 3-second exponential backoff capped at 5 minutes. Manual **Sync now**
+retries immediately while automatic mode is enabled; reload/foreground/online recovery rereads and reconciles the
 cloud before scheduling pending work. Offline timers are not relied upon.
 Conflicts and workout deferrals wait for an explicit choice or a later edit/
 foreground check rather than repeatedly replacing state.
@@ -908,7 +965,7 @@ receive a fabricated current timestamp on launch. A real later edit gets a new
 revision normally. A fresh install can adopt a dated remote snapshot, except
 while an active local workout exists.
 
-The first foreground reconciliation also detects unbacked local data predating
+When sync is enabled, the first foreground reconciliation also detects unbacked local data predating
 the new pending-work key. Credentials continue to be plaintext in localStorage;
 workout exports, remote backups and dated snapshots do not include the separate
 remote configuration. Configuration-file export remains deliberately separate.

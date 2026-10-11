@@ -18,7 +18,7 @@ function device(storage = new Map()) {
     render=()=>{}; applyTheme=()=>{}; drawTimer=()=>{}; cancelRestBeep=()=>{}; restoreTimer=()=>{};
     toast=(text)=>messages.push(text); announce=()=>{}; updateSaveBanner=()=>{};
     confirmDlg=async()=>true;
-    window.api={save,flushSave,prepareBackup,backupPayload,backupDataKey,remoteStartupSync,autoRemoteBackup,remoteBackup,remoteRestore,
+    window.api={save,flushSave,prepareBackup,backupPayload,backupDataKey,remoteStartupSync,autoRemoteBackup,remoteBackup,remoteRestore,remotePublishLocal,remoteResumeSync,pauseRemoteSync,remoteSyncPaused,remoteStorageHTML,
       putRemoteBackup,installRemoteSnapshot,commitSnapshot,applyFullBackup,readRemoteBackup,s3Request,validateRemoteConfig,
       testAndSaveRemoteConfig,saveRemoteConfig,clearRemoteConfig,readRemoteWork,scheduleRemoteBackup,remoteTestConnection,
       get state(){return state},set state(v){state=v},get ui(){return ui},get saveFailed(){return saveFailed},

@@ -145,5 +145,98 @@ await test('GET connection check never claims write permission, and PUT requires
  const d=setup(),s=new S3(fixture());s.attach(d);await d.api.remoteTestConnection();assert.match(d.messages.at(-1),/write permission unverified/);assert.equal(s.calls.length,1);
  await assert.rejects(d.api.s3Request(cfg,'PUT','{}'),/Unconditional/);
 });
+await test('older local recovery survives auto backup/startup/online/reload with credentials retained',async()=>{
+ const d=setup(300,'before import'),s=new S3(fixture(Date.now()+100000,'cloud'));s.attach(d);
+ await d.api.applyFullBackup(fixture(100,'chosen file'));
+ assert.equal(d.api.remoteSyncPaused(),true);assert.equal(d.api.state.workouts[0].notes,'chosen file');
+ assert.ok(d.api.state.settings.lastModifiedAt>=300+1);assert.equal(d.api.readRemoteWork().pending,true);
+ await d.api.autoRemoteBackup();await d.api.remoteStartupSync();await d.api.remoteBackup();assert.equal(s.calls.length,0);
+ const re=device(d.storage);s.attach(re);await re.api.remoteStartupSync();await re.api.autoRemoteBackup();assert.equal(s.calls.length,0);
+ assert.equal(re.api.state.workouts[0].notes,'chosen file');assert.equal(JSON.parse(re.storage.get('liftlog.v1.remote')).secretAccessKey,cfg.secretAccessKey);
+ assert.match(re.api.remoteStorageHTML(),/Keep local copy &amp; update cloud|Keep local copy & update cloud/);
+});
+await test('pause aborts pending GET and invalidates queued operations; local restore wins',async()=>{
+ const d=setup(300,'before'),s=new S3(fixture(500,'cloud'));s.attach(d);const g=gate();s.afterGet=()=>g.promise;
+ const first=d.api.remoteStartupSync();await until(()=>s.calls.length);const queued=d.api.autoRemoteBackup();const controllers=[...d.api.controllers];
+ const restore=d.api.applyFullBackup(fixture(100,'recovered'));assert.equal(d.api.remoteSyncPaused(),true);assert.ok(controllers.every(c=>c.signal.aborted));
+ g.resolve();await Promise.all([first,queued,restore]);assert.equal(d.api.state.workouts[0].notes,'recovered');assert.equal(s.calls.length,1);
+});
+await test('pause stops upload follow-ups and obsolete success after a dispatched PUT',async()=>{
+ const d=setup(300,'local'),s=new S3(fixture(100,'cloud'));s.attach(d);const g=gate();s.beforePut=()=>g.promise;
+ const job=d.api.remoteBackup();await until(()=>s.calls.some(x=>x.method==='PUT'&&!x.url.includes('.snapshots/')));
+ d.api.pauseRemoteSync('Paused by user');g.resolve();await job;
+ assert.equal(d.api.remoteSyncPaused(),true);assert.equal(d.api.state.workouts[0].notes,'local');assert.equal(JSON.parse(d.storage.get('liftlog.v1.remote')).lastUploadedModifiedAt,undefined);
+ assert.equal(d.api.ui.remoteStatus,'paused');assert.equal(d.api.controllers.size,0);
+});
+await test('cancelled and failed local restores stay paused; inability to persist pause blocks replacement',async()=>{
+ const d=setup();d.api.confirm=async()=>false;await d.api.applyFullBackup(fixture(500,'file'));assert.equal(d.api.state.workouts[0].notes,'base');assert.equal(d.api.remoteSyncPaused(),true);
+ const fail=setup();const original=fail.ctx.localStorage.setItem;fail.ctx.localStorage.setItem=(k,v)=>{if(k==='liftlog.v1.remote-paused')throw Error('quota');return original(k,v);};
+ await fail.api.applyFullBackup(fixture(500,'file'));assert.equal(fail.api.state.workouts[0].notes,'base');assert.equal(fail.api.remoteSyncPaused(),true);assert.match(fail.messages.at(-1),/persist cloud sync pause/);
+ const s=new S3(fixture(500,'cloud'));s.attach(fail);await fail.api.remoteStartupSync();assert.equal(s.calls.length,0);
+});
+await test('restoring identical normalized data does not manufacture a revision',async()=>{
+ const d=setup(300),payload=d.api.backupPayload();payload.exportedAt='2020-01-01';payload.settings.lastFileBackupAt=123;
+ await d.api.applyFullBackup(payload);assert.equal(d.api.state.settings.lastModifiedAt,300);assert.equal(d.api.remoteSyncPaused(),true);
+});
+await test('explicit publication supersedes a newer cloud revision and preserves its snapshot',async()=>{
+ const future=Date.now()+100000,d=setup(100,'chosen local'),s=new S3(fixture(future,'cloud'));s.attach(d);d.api.pauseRemoteSync();
+ await d.api.remotePublishLocal();assert.equal(s.obj.workouts[0].notes,'chosen local');assert.equal(s.obj.settings.lastModifiedAt,future+1);assert.equal(d.api.state.settings.lastModifiedAt,future+1);
+ assert.equal(s.snapshots.length,1);assert.equal(s.snapshots[0].workouts[0].notes,'cloud');assert.equal(d.api.remoteSyncPaused(),false);assert.equal(d.api.readRemoteWork().pending,false);
+ assert.equal(s.calls.filter(x=>x.method==='GET').length,2);assert.equal(s.calls.find(x=>x.method==='PUT'&&!x.url.includes('.snapshots/')).headers['if-match'],'"1"');
+});
+await test('explicit publication creates missing object conditionally; identical copies need no PUT',async()=>{
+ const d=setup(100,'local'),s=new S3();s.attach(d);d.api.pauseRemoteSync();await d.api.remotePublishLocal();
+ assert.equal(s.obj.workouts[0].notes,'local');assert.equal(s.calls.find(x=>x.method==='PUT').headers['if-none-match'],'*');assert.equal(d.api.remoteSyncPaused(),false);
+ const same=setup(100),server=new S3(fixture(200));server.attach(same);same.api.pauseRemoteSync();await same.api.remotePublishLocal();assert.equal(server.calls.filter(x=>x.method==='PUT').length,0);assert.equal(same.api.state.settings.lastModifiedAt,100);assert.equal(same.api.remoteSyncPaused(),false);
+});
+await test('cloud changed after review stays paused and requires a fresh choice',async()=>{
+ for(const mode of ['local','cloud','automatic']){const d=setup(100,'local'),s=new S3(fixture(200,'cloud'));s.attach(d);d.api.pauseRemoteSync();
+ d.api.confirm=async()=>{s.obj=fixture(300,'new cloud');s.etag='"2"';return true;};
+ await (mode==='local'?d.api.remotePublishLocal():mode==='cloud'?d.api.remoteRestore():d.api.remoteResumeSync());
+ assert.equal(d.api.remoteSyncPaused(),true);assert.equal(d.api.state.workouts[0].notes,'local');assert.equal(s.calls.filter(x=>x.method==='PUT').length,0);assert.match(d.api.ui.remoteStatusText,/Cloud changed since review/);}
+});
+await test('409/412 publication conflicts reread without restoring or retrying PUT automatically',async()=>{
+ for(const status of [409,412]){const d=setup(100,'chosen'),s=new S3(fixture(200,'cloud'));s.attach(d);const real=d.ctx.fetch;let puts=0;
+ d.ctx.fetch=async(u,o)=>{if(o.method==='PUT'&&!u.includes('.snapshots/')){puts++;s.obj=fixture(Date.now()+200000,'concurrent cloud');s.etag='"2"';return new Response('',{status});}return real(u,o);};
+ await d.api.remotePublishLocal();assert.equal(puts,1);assert.equal(s.calls.filter(x=>x.method==='GET').length,3);assert.equal(d.api.remoteSyncPaused(),true);assert.equal(d.api.state.workouts[0].notes,'chosen');assert.equal(s.obj.workouts[0].notes,'concurrent cloud');
+ await d.api.remoteStartupSync();await d.api.autoRemoteBackup();assert.equal(puts,1);assert.match(d.api.ui.remoteStatusText,/paused/);}
+});
+await test('review cancellation and local edits during either GET/confirmation preserve pause',async()=>{
+ for(const stage of ['cancel','review GET','confirm','second GET']){const d=setup(100,'local'),s=new S3(fixture(200,'cloud'));s.attach(d);let reads=0;
+ s.afterGet=async()=>{reads++;if(stage==='review GET'&&reads===1||stage==='second GET'&&reads===2){d.api.state.workouts[0].notes='edited';d.api.save();}};
+ d.api.confirm=async()=>{if(stage==='confirm'){d.api.state.workouts[0].notes='edited';d.api.save();}return stage!=='cancel';};
+ await d.api.remotePublishLocal();assert.equal(d.api.remoteSyncPaused(),true);assert.equal(s.calls.filter(x=>x.method==='PUT').length,0);assert.equal(d.api.state.workouts[0].notes,stage==='cancel'?'local':'edited');}
+});
+await test('active workout blocks cloud choice/reviewed resume; it remains intact on explicit local publication',async()=>{
+ const d=setup(100,'local'),s=new S3(fixture(200,'cloud'));s.attach(d);d.api.state.activeWorkout={...copy(d.api.state.workouts[0]),id:'active',finishedAt:null};
+ await d.api.remoteRestore();await d.api.remoteResumeSync();assert.equal(d.api.remoteSyncPaused(),true);assert.equal(d.api.state.activeWorkout.id,'active');assert.equal(s.calls.filter(x=>x.method==='PUT').length,0);
+ await d.api.remotePublishLocal();assert.equal(d.api.remoteSyncPaused(),false);assert.equal(s.obj.activeWorkout.id,'active');assert.equal(d.api.state.activeWorkout.id,'active');
+ const fresh=setup(100,'local'),server=new S3(fixture(200,'cloud'));server.attach(fresh);fresh.api.confirm=async()=>{fresh.api.state.activeWorkout={...copy(fresh.api.state.workouts[0]),id:'active',finishedAt:null};fresh.api.save();return true;};await fresh.api.remoteRestore();assert.equal(fresh.api.remoteSyncPaused(),true);assert.equal(fresh.api.state.activeWorkout.id,'active');
+});
+await test('reviewed resume explains replacement, adopts cloud durably and retains rescue',async()=>{
+ const d=setup(100,'local'),s=new S3(fixture(200,'cloud'));s.attach(d);let body;
+ d.api.confirm=async(title,text)=>{body=text;assert.match(title,/Resume automatic/);return true;};
+ await d.api.remoteResumeSync();assert.match(body,/cloud copy will replace/i);assert.equal(d.api.state.workouts[0].notes,'cloud');assert.equal(JSON.parse(d.api.rescue).workouts[0].notes,'local');assert.equal(d.api.state.settings.lastModifiedAt,200);assert.equal(d.api.remoteSyncPaused(),false);
+});
+await test('equal/undated conflicting copies require explicit choice before resuming',async()=>{
+ for(const revision of [null,100]){const d=setup(100,'local'),s=new S3(fixture(revision,'cloud'));s.attach(d);let confirmed=false;d.api.confirm=async()=>{confirmed=true;return true;};await d.api.remoteResumeSync();assert.equal(confirmed,false);assert.equal(d.api.remoteSyncPaused(),true);assert.equal(d.api.state.workouts[0].notes,'local');}
+});
+await test('publication snapshot/quota/network/bookkeeping failures never clear pause',async()=>{
+ for(const failure of ['snapshot','quota','network','bookkeeping','unpause']){const d=setup(100,'local'),s=new S3(fixture(200,'cloud'));s.attach(d);const fetch=d.ctx.fetch,set=d.ctx.localStorage.setItem,remove=d.ctx.localStorage.removeItem;
+ d.ctx.fetch=async(u,o)=>{if(failure==='snapshot'&&u.includes('.snapshots/'))return new Response('',{status:403});if(failure==='network'&&o.method==='PUT'&&!u.includes('.snapshots/'))throw Error('network failure');return fetch(u,o);};
+ d.ctx.localStorage.setItem=(k,v)=>{if(failure==='quota'&&k==='liftlog.v1'||failure==='bookkeeping'&&k==='liftlog.v1.remote-work')throw Error('quota');return set(k,v);};
+ d.ctx.localStorage.removeItem=k=>{if(failure==='unpause'&&k==='liftlog.v1.remote-paused')throw Error('remove denied');return remove(k);};
+ await d.api.remotePublishLocal();assert.equal(d.api.remoteSyncPaused(),true);assert.equal(d.api.state.workouts[0].notes,'local');if(['snapshot','quota','network'].includes(failure))assert.equal(s.obj.workouts[0].notes,'cloud');}
+});
+await test('pause survives config changes; changing/forgetting during reviewed publication cancels completion',async()=>{
+ const d=setup();d.api.pauseRemoteSync();d.api.saveRemoteConfig({...cfg,bucket:'changed'});assert.equal(d.api.remoteSyncPaused(),true);const re=device(d.storage);assert.equal(re.api.remoteSyncPaused(),true);
+ for(const change of ['change','forget','pause']){const d=setup(100,'local'),s=new S3(fixture(200,'cloud'));s.attach(d);const g=gate();let waiting=false;d.api.confirm=()=>{waiting=true;return g.promise;};const p=d.api.remotePublishLocal();await until(()=>waiting);
+ if(change==='change')d.api.saveRemoteConfig({...cfg,bucket:'changed'});else if(change==='forget')d.api.clearRemoteConfig();else d.api.pauseRemoteSync();g.resolve(true);await p;assert.equal(s.calls.filter(x=>x.method==='PUT').length,0);assert.equal(d.api.state.workouts[0].notes,'local');assert.equal(d.api.remoteSyncPaused(),true);}
+});
+await test('edits during explicit PUT stay pending after successful reviewed resume',async()=>{
+ const d=setup(100,'local'),s=new S3(fixture(200,'cloud'));s.attach(d);const g=gate();s.beforePut=()=>g.promise;const p=d.api.remotePublishLocal();
+ await until(()=>s.calls.some(x=>x.method==='PUT'&&!x.url.includes('.snapshots/')));const published=d.api.state.settings.lastModifiedAt;d.api.state.workouts[0].notes='new edit';d.api.save();g.resolve();await p;
+ assert.equal(d.api.remoteSyncPaused(),false);assert.equal(d.api.readRemoteWork().pending,true);assert.equal(d.api.ui.remoteStatus,'pending');assert.equal(s.obj.workouts[0].notes,'local');assert.equal(JSON.parse(d.storage.get('liftlog.v1.remote')).lastUploadedModifiedAt,published);
+});
 console.log(`${passed} remote data-management tests passed`);
 })().catch(e=>{console.error(e);process.exitCode=1;});
