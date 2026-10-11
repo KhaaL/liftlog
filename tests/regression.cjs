@@ -653,6 +653,8 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
     })), {...beforeClear,workouts:0,active:null}, 'clear workout data preserves library, routines and settings');
 
     const remoteChecks = await page.evaluate(async () => {
+      // Earlier file recovery deliberately paused sync. Isolate automatic mode.
+      localStorage.removeItem('liftlog.v1.remote-paused');
       const t=window.testAPI, checks=[];
       const check=(ok,label)=>{ if(!ok) throw Error(label); checks.push(label); };
       localStorage.setItem('liftlog.v1.remote',JSON.stringify({endpoint:'https://storage.test',bucket:'test',region:'test',accessKeyId:'test',secretAccessKey:'test',pathStyle:true}));

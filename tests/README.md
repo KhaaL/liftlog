@@ -7,7 +7,7 @@ or later and Playwright, which `package.json` pins as the repository's only
 ```sh
 npm ci                                     # installs the pinned playwright
 npx playwright install --only-shell chromium   # or set BROWSER_PATH instead
-npm test                                   # remote, regression and security suites
+npm test                                   # remote, regression, security and recovery suites
 ```
 
 `npm run test:regression` and `npm run test:security` run one suite each, and
@@ -33,7 +33,7 @@ also mocks remote storage to exercise the real restore/validation path.
   cancellation, hostile IDs through imports and UI actions, remote validation,
   startup recovery download/discard, and failure to save a recovery copy.
 
-`npm run test:remote` runs 21 deterministic data-management scenarios with Node's
+`npm run test:remote` runs 37 deterministic data-management scenarios with Node's
 Web Crypto, native Response/streams, fake S3 responses and isolated in-memory
 localStorage. `remote-harness.cjs` executes the shipped script closure, skips init
 and substitutes presentation only; validation, migrations, coordinator, signer,
@@ -43,6 +43,16 @@ time. Coverage includes CAS races/409/412, stale writers, active workouts and GE
 races, equal revisions, clock rollback, upload-time edits, persistent retry,
 config invalidation, malformed/oversized responses, ETag/bucket errors, quota
 failure, legacy roundtrips, recovery download and destination validation.
+
+The additional recovery scenarios verify persisted pause across reload/config
+changes, older file recovery, queued/in-flight operation invalidation, reviewed
+resume, explicit conditional local publication, changed remote revisions, quota
+and pause-storage failures, active workouts and publication-time edits.
+
+`npm run test:recovery` checks the actual mobile browser controls, older file
+restore and pause after reload/online/foreground recovery, resume warning and
+cancellation, explicit publication snapshots and credential retention. It uses
+synthetic state, fake fetch responses and aborts every unrelated external request.
 
 ## The test seam
 
@@ -61,7 +71,7 @@ the page loads.
 
 ## Continuous integration
 
-`.github/workflows/tests.yml` runs all three suites on every pull request and on
+`.github/workflows/tests.yml` runs all four suites on every pull request and on
 pushes to `main`, inside `mcr.microsoft.com/playwright`. The workflow's first
 job reads the exact Playwright version from `package.json` and picks the image
 tag from it, so bumping `package.json` is the whole upgrade — Dependabot

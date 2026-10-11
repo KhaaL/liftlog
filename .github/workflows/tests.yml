@@ -58,6 +58,9 @@ jobs:
       - name: Security suite
         if: ${{ !cancelled() }}
         run: npm run test:security
+      - name: Local recovery browser suite
+        if: ${{ !cancelled() }}
+        run: npm run test:recovery
       - name: Keep screenshots from a failed run
         if: ${{ failure() }}
         uses: actions/upload-artifact@v7

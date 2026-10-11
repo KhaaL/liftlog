@@ -4948,15 +4948,22 @@ function applyFullBackup(obj){
   let candidate;
   try{ candidate = prepareBackup(obj); }
   catch(e){ toast('Invalid backup — ' + e.message); return; }
+  // Freeze reconciliation before the confirmation opens, including old GETs.
+  try { pauseRemoteSync('Local restore in progress'); }
+  catch(e){ toast(e.message); return false; }
   return coordinateRemote(async ctx => {
-    const ok = await confirmDlg('Import data?','This replaces everything currently stored (exercises, routines, history, settings) with the imported file.','Import & replace',true);
-      assertRemote(ctx);
-      if (!ok) return;
-      if (expected !== localRevisionKey()){ toast('Import cancelled — local data changed during confirmation'); return false; }
-      if (!commitSnapshot(candidate)) { toast('Import failed — local storage unavailable; previous data retained'); return false; }
-      scheduleRemoteBackup();
-      toast('Import complete'); return true;
-    }, loadRemoteConfig() || {}).catch(e => { toast(e.message); return false; });
+    const ok = await confirmDlg('Import data?', 'This replaces local exercises, routines, history and settings. Cloud sync is paused and will stay paused until you choose which copy to keep.', 'Import & replace', true);
+    assertRemote(ctx);
+    if (!ok){ toast('Import cancelled — cloud sync remains paused'); return false; }
+    if (expected !== localRevisionKey()){ toast('Import cancelled — local data changed during confirmation'); return false; }
+    // An explicit restore of different data is a new local edit, not an export.
+    if (backupDataKey(candidate) !== backupDataKey(state))
+      candidate.settings.lastModifiedAt = Math.max(Date.now(), remoteSnapshotTime(state) + 1, remoteSnapshotTime(candidate) + 1);
+    if (!commitSnapshot(candidate)){ toast('Import failed — previous data retained; cloud sync paused'); return false; }
+    scheduleRemoteBackup();
+    setRemoteStatus('paused', 'Restored locally — cloud sync paused');
+    toast('Restored locally — cloud sync paused'); return true;
+  }, loadRemoteConfig() || {}, false, true).catch(e => { toast(e.message); return false; });
 }
 
 /* ============================================================
@@ -4975,6 +4982,34 @@ const REMOTE_OBJECT_KEY_DEFAULT = 'liftlog-backup.json';
 const REMOTE_BACKUP_DELAY = 3000;
 let remoteBackupTimer = 0;
 const REMOTE_WORK_KEY = 'liftlog.v1.remote-work';
+const REMOTE_PAUSE_KEY = 'liftlog.v1.remote-paused';
+let remotePauseBlocked = false;
+/* Separate from credentials and workout state: importing a file, changing a
+   destination or reconnecting after reload must not undo a recovery choice. */
+function remoteSyncPaused(){
+  if (remotePauseBlocked) return true;
+  try { return localStorage.getItem(REMOTE_PAUSE_KEY) != null; }
+  catch(e){ return true; } // unavailable storage fails closed
+}
+function pauseRemoteSync(reason){
+  invalidateRemote();
+  try { localStorage.setItem(REMOTE_PAUSE_KEY, JSON.stringify({reason:reason || 'Paused by you',at:Date.now()})); }
+  catch(e){ remotePauseBlocked = true; setRemoteStatus('error','Cloud sync paused in this page; pause could not be saved. Local restore blocked.'); throw new Error('Could not persist cloud sync pause — local restore blocked'); }
+  setRemoteStatus('paused', reason || 'Cloud sync paused');
+}
+function pauseRemoteSyncAction(){
+  try { pauseRemoteSync('Cloud sync paused'); toast('Cloud sync paused — credentials retained'); }
+  catch(e){ toast(e.message); }
+  render();
+}
+function resumeReviewedSync(ctx){
+  assertRemote(ctx);
+  localStorage.removeItem(REMOTE_PAUSE_KEY);
+  remotePauseBlocked = false;
+  invalidateRemote();
+  ctx.generation = remoteGeneration; ctx.allowPaused = false;
+}
+
 const REMOTE_TIMEOUT = 20000;
 let remoteGeneration = 0, remoteQueue = Promise.resolve(), remoteControllers = new Set();
 function enforceBackupLimits(obj){
@@ -4998,10 +5033,11 @@ function invalidateRemote(){
 }
 function assertRemote(ctx){
   if (ctx.generation !== remoteGeneration || (!ctx.candidate && remoteIdentity(loadRemoteConfig() || {}) !== ctx.identity))
-    throw new Error('Remote configuration changed; request cancelled');
+    throw new Error('Cloud settings or sync mode changed; request cancelled');
+  if (!ctx.allowPaused && remoteSyncPaused()) throw new Error('Cloud sync is paused');
 }
-function coordinateRemote(fn, cfg, candidate){
-  const ctx = { generation:remoteGeneration, identity:remoteIdentity(cfg), candidate:!!candidate };
+function coordinateRemote(fn, cfg, candidate, allowPaused){
+  const ctx = { generation:remoteGeneration, identity:remoteIdentity(cfg), candidate:!!candidate, allowPaused:!!allowPaused || !!candidate };
   const job = remoteQueue.then(async () => { assertRemote(ctx); return fn(ctx); });
   remoteQueue = job.catch(() => {}); return job;
 }
@@ -5105,6 +5141,7 @@ async function s3Request(cfg, method, bodyText, options = {}, ctx){
   validateRemoteConfig(cfg);
   if (method === 'PUT' && (!options.headers || !(options.headers['if-match'] || options.headers['if-none-match'] === '*'))) throw new Error('Unconditional cloud writes are disabled');
   if (ctx) assertRemote(ctx);
+  else if (remoteSyncPaused()) throw new Error('Cloud sync is paused');
   const url = new URL(remoteUrl(cfg));
   const payloadHash = await sha256Hex(bodyText || '');
   const { amz, stamp } = amzNow();
@@ -5159,10 +5196,11 @@ function setRemoteStatus(status, text){
   const el = $('#remote-status');
   if (el){
     const cfg = loadRemoteConfig(), work = readRemoteWork();
-    el.textContent = cfg ? 'Status: Configured — ' + cfg.bucket + (text ? ' · ' + text : '') +
+    const paused = remoteSyncPaused() ? ' · cloud sync paused' : '';
+    el.textContent = cfg ? 'Status: Configured — ' + cfg.bucket + paused + (text ? ' · ' + text : '') +
       (cfg.lastBackupAt ? ' · last backup ' + new Date(cfg.lastBackupAt).toLocaleString() : ' · never backed up yet') +
       ' · backed-up data revision: ' + (cfg.lastUploadedModifiedAt || 'none') + (work && work.pending ? ' · pending work' : '')
-      : 'Status: Not configured';
+      : 'Status: Not configured' + paused;
   }
 }
 
@@ -5185,12 +5223,12 @@ function scheduleRemoteBackup(delay){
   try { const old = readRemoteWork() || {}; writeRemoteWork({ ...old, pending:true, revision:remoteSnapshotTime(state), nextAt:Date.now() + (delay == null ? REMOTE_BACKUP_DELAY : delay) }); }
   catch(e){ setRemoteStatus('error','Cannot persist pending backup; keep this page open'); return; }
   armRemoteRetry();
-  setRemoteStatus('pending', navigator.onLine === false ? 'Waiting for a connection' : 'Changes waiting to back up');
+  setRemoteStatus(remoteSyncPaused() ? 'paused' : 'pending', remoteSyncPaused() ? 'Local changes retained — cloud sync paused' : navigator.onLine === false ? 'Waiting for a connection' : 'Changes waiting to back up');
 }
 function armRemoteRetry(){
   clearTimeout(remoteBackupTimer); remoteBackupTimer = 0;
   const work = readRemoteWork();
-  if (work && work.pending && navigator.onLine !== false)
+  if (!remoteSyncPaused() && work && work.pending && navigator.onLine !== false)
     remoteBackupTimer = setTimeout(autoRemoteBackup, Math.max(0, (work.nextAt || 0) - Date.now()));
 }
 function retryRemoteError(e, ctx){
@@ -5236,6 +5274,7 @@ function commitSnapshot(candidate){
 }
 function installRemoteSnapshot(candidate, remoteAt, expected, ctx){
   if (ctx) assertRemote(ctx);
+  if (remoteSyncPaused()){ setRemoteStatus('paused','Local copy protected — cloud sync paused'); return false; }
   if (state.activeWorkout || (expected != null && expected !== localRevisionKey())){
     writeRemoteWork({ ...(readRemoteWork() || {}), pending:true, deferred:true, revision:remoteSnapshotTime(state) });
     setRemoteStatus('pending','Remote replacement deferred — workout or local edits; recheck after workout'); return false;
@@ -5283,11 +5322,7 @@ async function putRemoteBackup(cfg, ctx){
     if (expected !== localRevisionKey()) continue;
     const payload = backupPayload(); enforceBackupLimits(payload);
     const revision = remoteSnapshotTime(payload);
-    if (remote){
-      const key = (cfg.objectKey || REMOTE_OBJECT_KEY_DEFAULT) + '.snapshots/' + new Date().toISOString().replace(/[:.]/g,'-') + '-' + uid() + '.json';
-      const snapshot = await s3Request({...cfg, objectKey:key}, 'PUT', remote.raw, {headers:{'if-none-match':'*'}}, ctx);
-      if (!snapshot.ok) throw new Error('Snapshot preservation failed: HTTP ' + snapshot.status);
-    }
+    if (remote) await preserveRemoteSnapshot(cfg,remote,ctx);
     const res = await s3Request(cfg, 'PUT', JSON.stringify(payload),
       {headers:remote ? {'if-match':remote.etag} : {'if-none-match':'*'}}, ctx);
     if ([409,412].includes(res.status)) continue; // reread and reconcile; never unconditional
@@ -5301,6 +5336,7 @@ async function putRemoteBackup(cfg, ctx){
 async function autoRemoteBackup(){
   remoteBackupTimer = 0;
   const cfg = loadRemoteConfig();
+  if (remoteSyncPaused()){ setRemoteStatus('paused','Local copy protected — cloud sync paused'); return; }
   if (!cfg || !remoteCryptoAvailable() || navigator.onLine === false) return;
   return coordinateRemote(async ctx => {
     try { await putRemoteBackup(cfg, ctx); }
@@ -5308,6 +5344,7 @@ async function autoRemoteBackup(){
   }, cfg).catch(() => {});
 }
 function remoteBackup(){
+  if (remoteSyncPaused()){ toast('Cloud sync paused — choose Keep local copy & update cloud or Resume automatic sync'); return; }
   const cfg = loadRemoteConfig(); if (!cfg) return;
   clearTimeout(remoteBackupTimer); remoteBackupTimer = 0;
   return remoteRunAction(() => coordinateRemote(async ctx => {
@@ -5316,22 +5353,97 @@ function remoteBackup(){
     } catch(e){ retryRemoteError(e, ctx); throw e; }
   },cfg));
 }
-function remoteRestore(){
+/* An explicit recovery choice remains paused throughout review and execution.
+   It never falls through to timestamp reconciliation after a failed CAS. */
+function reviewedRemoteDirection(mode, remote){
+  if (mode === 'cloud'){ if (!remote) throw new Error('No backup found at that location yet'); return 'cloud'; }
+  if (!remote) return 'local';
+  if (mode === 'local') return backupDataKey(remote.candidate) === backupDataKey(state) ? 'same' : 'local';
+  if (backupDataKey(remote.candidate) === backupDataKey(state)) return 'same';
+  const localAt = remoteSnapshotTime(state);
+  if (!remote.at || (!localAt && loadedExistingState) || remote.at === localAt)
+    throw new Error('Copies conflict or are undated — choose Keep local copy or Use cloud copy');
+  return remote.at > localAt ? 'cloud' : 'local';
+}
+function remoteReviewChoice(mode){
   const cfg = loadRemoteConfig(); if (!cfg) return;
+  try { pauseRemoteSync('Cloud sync paused for review'); }
+  catch(e){ toast(e.message); return; }
   return remoteRunAction(() => coordinateRemote(async ctx => {
-    const expected = localRevisionKey();
-    const remote = await readRemoteBackup(cfg, ctx);
-    if (!remote) throw new Error('No backup found at that location yet');
-    const ok = await confirmDlg('Restore remote data?', 'Replace local data with the remote backup? A local recovery copy will be retained.', 'Restore & replace', true);
-    assertRemote(ctx);
-    if (!ok) return;
-    if (state.activeWorkout || expected !== localRevisionKey()) throw new Error('Restore cancelled — workout or local edits changed during check');
-    if (!commitSnapshot(remote.candidate)) throw new Error('Restore failed — previous data retained');
-    markRemoteSuccess(cfg, remote.at, ctx, 'Restored from remote'); toast('Remote restore complete');
-  }, cfg));
+    try {
+      const expected = localRevisionKey();
+      const reviewed = await readRemoteBackup(cfg,ctx);
+      assertRemote(ctx);
+      if (expected !== localRevisionKey()) throw new Error('Local data changed during review — review again; sync remains paused');
+      const direction = reviewedRemoteDirection(mode,reviewed);
+      if (direction === 'cloud' && state.activeWorkout) throw new Error('Finish or discard your active workout before choosing the cloud copy; sync remains paused');
+      const title = mode === 'automatic' ? 'Resume automatic sync?' : direction === 'cloud' ? 'Use cloud copy?' : 'Keep local copy?';
+      const body = direction === 'cloud' ? 'The cloud copy will replace this device’s local data. A local recovery copy will be saved. Automatic cloud sync will resume.'
+        : direction === 'local' ? 'This device’s local data will become the current cloud backup, replacing the cloud copy if present. The previous cloud backup will be preserved as a dated snapshot. Automatic cloud sync will resume.'
+        : 'Both copies contain the same data. No workout data will be replaced. Automatic cloud sync will resume.';
+      const ok = await confirmDlg(title,body,direction === 'cloud' ? 'Use cloud copy & resume' : direction === 'local' ? 'Keep local & update cloud' : 'Resume sync', direction !== 'same');
+      assertRemote(ctx);
+      if (!ok){ setRemoteStatus('paused','Cloud sync remains paused'); return; }
+      if (expected !== localRevisionKey()) throw new Error('Local data changed during confirmation — review again; sync remains paused');
+      // Confirm against a fresh revision, including missing -> present transitions.
+      const current = await readRemoteBackup(cfg,ctx);
+      if (expected !== localRevisionKey()) throw new Error('Local data changed during confirmation — review again; sync remains paused');
+      if (!!reviewed !== !!current || (reviewed && (reviewed.etag !== current.etag || reviewed.raw !== current.raw)))
+        throw new Error('Cloud changed since review — choose again; sync remains paused');
+      let backedUpRevision;
+      if (direction === 'cloud'){
+        assertRemote(ctx);
+        if (state.activeWorkout) throw new Error('A workout started during review — sync remains paused');
+        if (!commitSnapshot(current.candidate)) throw new Error('Restore failed — previous data retained; sync remains paused');
+        backedUpRevision = current.at;
+      } else if (direction === 'local'){
+        if (current) await preserveRemoteSnapshot(cfg,current,ctx);
+        assertRemote(ctx);
+        if (expected !== localRevisionKey()) throw new Error('Local data changed before publication — review again; sync remains paused');
+        // Explicit adoption of local data is a new revision above the observed cloud.
+        const payload = backupPayload();
+        backedUpRevision = Math.max(Date.now(),remoteSnapshotTime(state) + 1,(current ? current.at : 0) + 1);
+        payload.settings.lastModifiedAt = backedUpRevision;
+        enforceBackupLimits(payload); validateBackup(payload);
+        if (storageRecoveryBlocked) throw new Error('Restore a valid local backup before publishing recovered data');
+        // Persist the rebased revision without resetting the UI or active timer.
+        const local = deepCopy(state); local.settings.lastModifiedAt = backedUpRevision;
+        try { localStorage.setItem(LS_KEY,JSON.stringify(local)); }
+        catch(e){ saveFailed = true; updateSaveBanner(); throw new Error('Publication blocked — local saving failed; sync remains paused'); }
+        clearTimeout(saveTimer); saveTimer = 0; savePending = false; saveFailed = false; updateSaveBanner();
+        state.settings.lastModifiedAt = backedUpRevision;
+        const res = await s3Request(cfg,'PUT',JSON.stringify(payload),{headers:current ? {'if-match':current.etag} : {'if-none-match':'*'}},ctx);
+        if ([409,412].includes(res.status)){
+          await readRemoteBackup(cfg,ctx); // fresh information, never automatic replacement
+          throw new Error('Cloud changed during publication — choose again; sync remains paused');
+        }
+        if (!res.ok) throw new Error('Publication failed: HTTP ' + res.status + ' — sync remains paused');
+      } else backedUpRevision = remoteSnapshotTime(state);
+      const message = direction === 'cloud' ? 'Cloud copy chosen' : direction === 'local' ? 'Local copy published' : 'Up to date';
+      markRemoteSuccess(cfg,backedUpRevision,ctx,message + ' — cloud sync paused');
+      resumeReviewedSync(ctx);
+      const pending = readRemoteWork().pending;
+      setRemoteStatus(pending ? 'pending' : 'synced',pending ? 'Newer local changes pending — sync resumed' : message + ' — sync resumed');
+      armRemoteRetry();
+      toast(direction === 'cloud' ? 'Cloud copy restored — sync resumed' : direction === 'local' ? 'Local copy published — sync resumed' : 'Cloud sync resumed');
+    } catch(e){
+      if (ctx.generation === remoteGeneration) setRemoteStatus('error',e.message);
+      throw e;
+    }
+  },cfg,false,true));
+}
+function remoteRestore(){ return remoteReviewChoice('cloud'); }
+function remotePublishLocal(){ return remoteReviewChoice('local'); }
+function remoteResumeSync(){ return remoteReviewChoice('automatic'); }
+async function preserveRemoteSnapshot(cfg,remote,ctx){
+  const key = (cfg.objectKey || REMOTE_OBJECT_KEY_DEFAULT) + '.snapshots/' + new Date().toISOString().replace(/[:.]/g,'-') + '-' + uid() + '.json';
+  const snapshot = await s3Request({...cfg,objectKey:key},'PUT',remote.raw,{headers:{'if-none-match':'*'}},ctx);
+  if (!snapshot.ok) throw new Error('Snapshot preservation failed: HTTP ' + snapshot.status);
 }
 async function remoteStartupSync(){
-  const cfg = loadRemoteConfig(); if (!cfg || !remoteCryptoAvailable()) return;
+  const cfg = loadRemoteConfig();
+  if (remoteSyncPaused()){ setRemoteStatus('paused','Local copy protected — cloud sync paused'); return; }
+  if (!cfg || !remoteCryptoAvailable()) return;
   if (navigator.onLine === false){ setRemoteStatus('pending','Waiting for a connection'); return; }
   return coordinateRemote(async ctx => {
     setRemoteStatus('checking','Checking remote backup…');
@@ -5349,7 +5461,7 @@ function remoteTestConnection(){
   return remoteRunAction(() => coordinateRemote(async ctx => {
     const remote = await readRemoteBackup(cfg, ctx); assertRemote(ctx);
     toast(remote ? 'Backup readable — write permission unverified' : 'Object missing — write permission unverified');
-  },cfg));
+  },cfg,false,true));
 }
 /* Save is gated on a live connection test: bad credentials or a typo'd
    endpoint should never get silently persisted only to fail on the next
@@ -8105,8 +8217,8 @@ function remoteRestoreRescueHTML(){
   const raw = remoteRestoreRescueRaw();
   if (raw == null) return '';
   return '<div class="setting-block" role="status">' +
-    '<h3>Before the last automatic restore</h3>' +
-    '<p class="desc">The local state that was replaced by a newer remote backup is preserved until you discard it.</p>' +
+    '<h3>Before the last replacement</h3>' +
+    '<p class="desc">The local state saved before the most recent file or cloud replacement. Download it before another restore replaces this recovery copy.</p>' +
     '<div class="form-actions">' +
       '<button type="button" class="btn" data-action="remote-rescue-download">' + IC.down + '<span>Download</span></button>' +
       '<button type="button" class="btn" data-action="remote-rescue-restore">Restore this copy…</button>' +
@@ -8152,25 +8264,30 @@ function remoteStorageHTML(){
   const cryptoOk = remoteCryptoAvailable();
   let html = '<div class="setting-block">' +
     '<h3>Remote storage <span class="hint">(optional, S3-compatible)</span></h3>' +
-    '<p class="desc">The same complete backup is uploaded automatically after changes. On opening Liftlog, a newer remote copy is restored automatically. ' +
+    '<p class="desc">The same complete backup is uploaded automatically after changes. When sync is enabled, a newer cloud copy can replace local data. Local restores pause sync until you choose which copy to keep. ' +
     'Active workouts and edits during remote checks defer replacement. Requests go straight from this device to your storage provider using your own credentials — ' +
     'this app has no server to relay them through. Credentials are stored in this browser’s local storage in plain text.</p>';
   if (!cryptoOk){
     html += '<p class="error-text">Remote storage needs the Web Crypto API, only available in a secure context (https:// or localhost). It is unavailable here.</p></div>';
     return html;
   }
-  const live = ui.remoteStatusText ? ' · ' + esc(ui.remoteStatusText) : '';
+  const paused = remoteSyncPaused();
+  const live = (paused ? ' · Cloud sync paused' : '') + (ui.remoteStatusText ? ' · ' + esc(ui.remoteStatusText) : '');
   html += '<p id="remote-status" class="desc" role="status">Status: ' + (cfg
       ? 'Configured — <strong>' + esc(cfg.bucket) + '</strong>' + live + (cfg.lastBackupAt ? ' · last backup ' + esc(new Date(cfg.lastBackupAt).toLocaleString()) : ' · never backed up yet')
-      : 'Not configured') + (cfg ? ' · backed-up data revision: ' + esc(cfg.lastUploadedModifiedAt || 'none') + (readRemoteWork() && readRemoteWork().pending ? ' · pending work' : '') : '') + '</p>';
+      : 'Not configured' + (paused ? ' · Cloud sync paused' : '')) + (cfg ? ' · backed-up data revision: ' + esc(cfg.lastUploadedModifiedAt || 'none') + (readRemoteWork() && readRemoteWork().pending ? ' · pending work' : '') : '') + '</p>';
   if (cfg){
     html += '<div class="form-actions">' +
       '<button type="button" class="btn" data-action="remote-test"' + (ui.remoteBusy ? ' disabled' : '') + '>Test connection</button>' +
-      '<button type="button" class="btn btn-primary" data-action="remote-backup"' + (ui.remoteBusy ? ' disabled' : '') + '>' + IC.up + '<span>Backup now</span></button>' +
-      '<button type="button" class="btn" data-action="remote-restore"' + (ui.remoteBusy ? ' disabled' : '') + '>' + IC.down + '<span>Restore from remote</span></button>' +
+      (paused
+        ? '<button type="button" class="btn btn-primary" data-action="remote-publish-local"' + (ui.remoteBusy ? ' disabled' : '') + '>Keep local copy & update cloud…</button>' +
+          '<button type="button" class="btn" data-action="remote-resume"' + (ui.remoteBusy ? ' disabled' : '') + '>Resume automatic sync…</button>'
+        : '<button type="button" class="btn btn-primary" data-action="remote-backup"' + (ui.remoteBusy ? ' disabled' : '') + '>' + IC.up + '<span>Sync now</span></button>' +
+          '<button type="button" class="btn" data-action="remote-pause">Pause cloud sync</button>') +
+      '<button type="button" class="btn" data-action="remote-restore"' + (ui.remoteBusy ? ' disabled' : '') + '>' + IC.down + '<span>Use cloud copy…</span></button>' +
       '<button type="button" class="btn" data-action="remote-form-toggle">' + (ui.remoteFormOpen ? 'Hide configuration' : 'Edit configuration') + '</button>' +
       '<button type="button" class="btn btn-danger" data-action="remote-forget">Forget configuration</button>' +
-    '</div>';
+    '</div>' + (paused ? '<p class="hint">Local edits stay on this device. Choose which copy to keep before resuming. Pause survives reloads and configuration changes.</p>' : '<p class="hint">Sync now reconciles both copies; a newer cloud copy can replace local data. Pause cloud sync before recovery.</p>');
   }
   if (!cfg || ui.remoteFormOpen){
     /* Populated once from the saved config (or blank); after that every
@@ -8594,6 +8711,9 @@ const actions = {
   'remote-test'(){ remoteTestConnection(); },
   'remote-backup'(){ remoteBackup(); },
   'remote-restore'(){ remoteRestore(); },
+  'remote-pause'(){ pauseRemoteSyncAction(); },
+  'remote-resume'(){ remoteResumeSync(); },
+  'remote-publish-local'(){ remotePublishLocal(); },
   'remote-forget'(){
     confirmDlg('Forget remote configuration?',
       'This removes the stored endpoint and credentials from this browser. It does not delete anything already uploaded to your bucket.',
