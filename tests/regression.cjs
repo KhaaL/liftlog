@@ -7,7 +7,7 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
     const page = await browser.newPage({ viewport:{ width:390, height:844 } });
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
-    const html = appWithTestAPI(`{ sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, planRoutineImport, applyRoutineImport, exerciseNameKey, exerciseNameSimilarity, sameLoadNumbers, distinctExerciseName, linksBrokenBy, sortedPlans, planDay, defaultRoutineId, newPlanDraft, localDay, importHistory, normalizeImportedSet, normalizeImportedWorkout, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, workoutVolume, progressionStatus, loadCueFor, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, toggleWarmup, cascadeWeight, cascadeReps, parseRepRange, repRangeState, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, compatibleHistoryLink, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, setExerciseArchived, mergeExercises, sameProgressionContract, exerciseLoadLabel, setSummary, remoteStartupSync, autoRemoteBackup, flushSave, save, render, supersetRun, currentMemberIndex, isSettledRow, switchSupersetMember, moveSessionExercise, nextOpenBlock, pairSessionExercises, unpairSessionExercises, reopenExercise, navigate, currentExercise, settleSupersets, pauseTimer, finishWorkout, sampleExercises, sampleRoutines, get timer(){return timer}, get state(){return state}, get ui(){return ui} }`);
+    const html = appWithTestAPI(`{ sampleRoutinesFile, sampleHistoryFile, routinesPayload, historyPayload, backupPayload, applyFullBackup, prepareBackup, validateBackup, importRoutines, planRoutineImport, applyRoutineImport, exerciseNameKey, exerciseNameSimilarity, sameLoadNumbers, distinctExerciseName, linksBrokenBy, sortedPlans, planDay, defaultRoutineId, newPlanDraft, localDay, importHistory, normalizeImportedSet, normalizeImportedWorkout, migrateState, normalizeState, defaultSettings, normalizeRoutineItem, cleanRoutinePairs, keepRoutinePairsAdjacent, routineGroups, routineSummary, workoutSets, workoutPlannedSets, workoutVolume, progressionStatus, loadCueFor, pairRoutineItems, unpairRoutineItems, duplicateRoutine, removeRoutineItem, saveRoutineDraft, saveExerciseDraft, startRoutine, toggleSet, toggleWarmup, cascadeWeight, cascadeReps, parseRepRange, repRangeState, setUnit, htmlRoutineEditor, trendCandidates, exSessions, canonicalExerciseId, unresolvedHistoryExercises, compatibleHistoryLink, setExerciseLink, keepHistoricalExerciseSeparate, addHistoricalExerciseToLibrary, setExerciseArchived, mergeExercises, sameProgressionContract, exerciseLoadLabel, setSummary, remoteStartupSync, autoRemoteBackup, flushSave, save, render, supersetRun, currentMemberIndex, isSettledRow, switchSupersetMember, moveSessionExercise, nextOpenBlock, pairSessionExercises, unpairSessionExercises, reopenExercise, navigate, currentExercise, settleSupersets, pauseTimer, shownTimer, finishWorkout, sampleExercises, sampleRoutines, get timer(){return timer}, get state(){return state}, get ui(){return ui} }`);
     await page.route('https://liftlog.test/**', route => route.fulfill({ contentType:'text/html', body:html }));
     await page.goto('https://liftlog.test/');
     const result = await page.evaluate(async () => {
@@ -686,7 +686,7 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
       return checks;
     });
 
-    /* Supersets: the shared pair rules, the group cursor, rest per round, and
+    /* Supersets: the shared pair rules, the group cursor, rest per member, and
        the session-only lifetime of the link. A fresh page so earlier steps
        cannot leak in. */
     const ss = await browser.newPage({ viewport:{ width:390, height:844 } });
@@ -744,7 +744,8 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
       check(t.prepareBackup(legacy).version === 14, 'v12 data migrates to v14 unchanged');
 
       t.state.settings.autoRest = true;
-      const resting = () => { const on = t.timer.running; t.pauseTimer(); t.timer.remaining = 0; return on; };
+      const resting = () => { const on = t.timer.running; t.pauseTimer(t.timer); t.timer.remaining = 0; return on; };
+      const memberResting = ex => !!(ex.restTimer && ex.restTimer.running);
       t.startRoutine('rt-ss');
       const w = t.state.activeWorkout;
       check(w.exercises[0].supersetOf === w.exercises[1].supersetOf && w.currentExerciseIndex === 0 && w.supersetSide === 0,
@@ -753,25 +754,40 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
       const log = () => t.toggleSet(t.currentExercise().sets.find(s => !s.completed).id);
       log();
       check(t.currentExercise().name === 'Row' && w.currentExerciseIndex === 0 && w.supersetSide === 1 && !resting(),
-        'a set on the first member hands over to the partner without rest');
+        'a set on the first member hands over to the partner without the shared rest');
+      check(memberResting(w.exercises[0]) && !memberResting(w.exercises[1]),
+        'the first member rests on its own timer while the partner works');
+      check(t.shownTimer() === t.timer, 'a member that has not rested yet shows the shared timer');
       check(t.isSettledRow(w, w.exercises[0], 0) === false, 'the waiting member is not treated as settled');
+      const benchRest = w.exercises[0].restTimer, benchEnds = benchRest.endsAt;
       log();
-      check(t.currentExercise().name === 'Bench' && resting(), 'finishing the round rests and returns to the first member');
+      check(t.currentExercise().name === 'Bench' && !resting() && memberResting(w.exercises[1]),
+        'the partner\'s set starts its own rest and returns to the first member');
+      check(benchRest.running && benchRest.endsAt === benchEnds && t.shownTimer() === benchRest,
+        'the first member\'s rest keeps running through the partner\'s set and is the one shown');
+      t.validateBackup(t.backupPayload());
+      check(t.prepareBackup(t.backupPayload()).activeWorkout.exercises[0].restTimer.endsAt === benchEnds,
+        'member rest timers survive a save and reload');
+      t.pauseTimer(w.exercises[0].restTimer); t.pauseTimer(w.exercises[1].restTimer);
       log(); log();
-      check(t.currentExercise().name === 'Bench' && resting() && w.exercises[1].sets.every(s => s.completed),
-        'with the partner finished the remaining sets run straight, with rest');
+      check(t.currentExercise().name === 'Bench' && memberResting(w.exercises[0]) && w.exercises[1].sets.every(s => s.completed),
+        'with the partner finished the remaining sets run straight, on the member\'s rest');
+      t.pauseTimer(w.exercises[0].restTimer);
       t.validateBackup(t.backupPayload());
       const reloaded = t.prepareBackup(t.backupPayload()).activeWorkout;
       check(reloaded.supersetSide === 0 && reloaded.exercises[0].supersetOf, 'the group cursor survives a save and reload');
       log();
       check(t.currentExercise().name === 'Plank' && w.currentExerciseIndex === 2, 'finishing both members moves past the superset');
+      check(resting() && t.shownTimer() === t.timer, 'the superset\'s last set rests on the shared timer the next exercise shows');
       t.state.activeWorkout = null;
       t.startRoutine('rt-ss');
       const w2 = t.state.activeWorkout;
       t.switchSupersetMember(1);
       check(t.currentExercise().name === 'Row', 'the switcher selects the other member');
       t.state.activeWorkout.exercises.splice(2, 0, t.state.activeWorkout.exercises.splice(1, 1)[0]);
-      check(t.settleSupersets(w2) && !w2.exercises.some(ex => ex.supersetOf), 'separated members end the superset for this session');
+      w2.exercises[0].restTimer = {seconds:90,total:90,remaining:90,running:false,endsAt:0,done:false};
+      check(t.settleSupersets(w2) && !w2.exercises.some(ex => ex.supersetOf || ex.restTimer),
+        'separated members end the superset and its rest timers for this session');
       check(t.state.routines[0].items[0].supersetOf === 'ss', 'the saved routine keeps its superset');
       t.state.activeWorkout = null;
       t.startRoutine('rt-ss');
@@ -787,9 +803,11 @@ const { appWithTestAPI, launchBrowser } = require('./harness.cjs');
       const bench = t.currentExercise();
       t.toggleWarmup(bench.sets[0].id);
       t.toggleSet(bench.sets[0].id);
-      check(t.currentExercise() === bench && resting(), 'a superset warm-up stays on its exercise and rests like a straight set');
+      check(t.currentExercise() === bench && memberResting(bench) && t.shownTimer() === bench.restTimer,
+        'a superset warm-up stays on its exercise and rests on its timer');
       t.toggleSet(bench.sets[1].id);
-      check(t.currentExercise().name === 'Row' && !resting(), 'the first working set after a warm-up hands over as usual');
+      check(t.currentExercise().name === 'Row' && !resting() && memberResting(bench),
+        'the first working set after a warm-up hands over as usual');
       t.state.activeWorkout = null;
       t.startRoutine('rt-ss');
       const fresh = t.currentExercise();

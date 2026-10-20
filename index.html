@@ -2330,17 +2330,20 @@ function validateBackup(s){
       fail(path + '.currentExerciseIndex', 'an exercise index from 0 to ' + w.exercises.length);
     if (w.supersetSide != null && (!Number.isInteger(w.supersetSide) || w.supersetSide < 0))
       fail(path + '.supersetSide', 'a nonnegative integer');
-    if (w.timer != null){
-      object(w.timer, path + '.timer');
-      fields(w.timer, path + '.timer', ['seconds', 'total', 'remaining', 'endsAt'], number);
-      fields(w.timer, path + '.timer', ['running', 'done'], bool);
-    }
+    const rest = (t, at) => {
+      if (t == null) return;
+      object(t, at);
+      fields(t, at, ['seconds', 'total', 'remaining', 'endsAt'], number);
+      fields(t, at, ['running', 'done'], bool);
+    };
+    rest(w.timer, path + '.timer');
     const sets = new Set();
     w.exercises.forEach((ex, i) => {
       const at = path + '.exercises[' + i + ']'; object(ex, at);
       if (ex.exerciseId != null) id(ex.exerciseId, at + '.exerciseId');
       fields(ex, at, ['name', 'category', 'unit', 'notes', 'eitherOf', 'supersetOf', 'loadMode', 'equipmentKey', 'movementFamily'], text);
       fields(ex, at, ['plannedSets', 'targetReps', 'targetRepsMin', 'targetRepsMax', 'targetRir', 'targetWeight', 'restSeconds'], number);
+      rest(ex.restTimer, at + '.restTimer');
       bool(ex.skipped, at + '.skipped');
       array(ex.sets, at + '.sets');
       ex.sets.forEach((set, j) => {
@@ -2595,7 +2598,7 @@ function normalizeState(s){
       pointAt(w, currentMemberIndex(w));
     } else {
       delete w.supersetSide;
-      w.exercises.forEach(ex => { delete ex.supersetOf; });
+      w.exercises.forEach(ex => { delete ex.supersetOf; delete ex.restTimer; });
     }
   };
   s.workouts.forEach(w => normalizeWorkout(w, false));
@@ -3250,16 +3253,42 @@ function confirmDlg(title, body, confirmLabel, danger){
    from Settings); `total` is the denominator the drain bar divides by. They are
    separate because +0:30 must extend the countdown without changing the length
    the next rest starts from. */
-const timer = { seconds:90, total:90, remaining:90, running:false, endsAt:0, done:false, beepScheduled:false };
+const timer = { seconds:90, total:90, remaining:90, running:false, endsAt:0, done:false };
+/* `timer` is the session's shared rest, persisted as activeWorkout.timer. A
+   superset member that has logged a set also has its own, stored on the member
+   as `restTimer`: the two members work different muscles, and one shared timer
+   could only rest after the whole round, so each member's rest ran on through
+   its partner's set. Every function here takes the rest it acts on and
+   defaults to the one the action bar shows (shownTimer()). */
+function shownTimer(){
+  const w = state.activeWorkout;
+  if (!w || supersetRun(w, w.currentExerciseIndex).length < 2) return timer;
+  const ex = currentExercise();
+  return ex && ex.restTimer || timer;
+}
+function memberRest(ex){
+  return ex.restTimer || (ex.restTimer = { seconds:0, total:0, remaining:0, running:false, endsAt:0, done:false });
+}
+/* Every rest that can still finish: the shared one and each current superset
+   member's. A member that left its superset loses its rest with it. */
+function allRests(){
+  const w = state.activeWorkout;
+  return [timer].concat(w ? w.exercises.filter(ex => ex.supersetOf && ex.restTimer).map(ex => ex.restTimer) : []);
+}
+function restOwner(rec){
+  const w = state.activeWorkout;
+  return rec === timer || !w ? null : w.exercises.find(ex => ex.restTimer === rec) || null;
+}
 
-function persistTimer(){
-  if (state.activeWorkout){
+function persistTimer(rec){
+  if (!state.activeWorkout) return;
+  if (rec === timer){
     state.activeWorkout.timer = {
       seconds:timer.seconds, total:timer.total, remaining:Math.round(timer.remaining),
       running:timer.running, endsAt:timer.endsAt, done:timer.done
     };
-    save();
   }
+  save();
 }
 /* Every stored field is read back through this rather than `||`: a rest that
    ran out persists `remaining: 0`, and a falsy-zero fallback would restore it
@@ -3267,60 +3296,65 @@ function persistTimer(){
 function timerNum(v, fallback){
   return (v != null && isFinite(v)) ? Number(v) : fallback;
 }
-function restoreTimer(){
-  const t = state.activeWorkout && state.activeWorkout.timer;
-  timer.running = false;
-  timer.seconds = timerNum(t && t.seconds, state.settings.defaultRest);
-  timer.remaining = timerNum(t && t.remaining, timer.seconds);
-  timer.total = timerNum(t && t.total, timer.seconds);
-  timer.done = !!(t && t.done);
+function reviveRest(rec, t){
+  rec.running = false;
+  rec.seconds = timerNum(t && t.seconds, state.settings.defaultRest);
+  rec.remaining = timerNum(t && t.remaining, rec.seconds);
+  rec.total = timerNum(t && t.total, rec.seconds);
+  rec.done = !!(t && t.done);
   if (t && t.running && t.endsAt){
     const rem = (t.endsAt - Date.now()) / 1000;
-    if (rem > 0){ timer.remaining = rem; timer.endsAt = t.endsAt; timer.running = true; timer.done = false; }
-    else { timer.remaining = 0; timer.done = true; }
+    if (rem > 0){ rec.remaining = rem; rec.endsAt = t.endsAt; rec.running = true; rec.done = false; }
+    else { rec.remaining = 0; rec.done = true; }
   }
-  timer.total = Math.max(timer.total, timer.remaining);
-  timer.beepScheduled = timer.running ? scheduleRestBeep(timer.remaining) : false;
+  rec.total = Math.max(rec.total, rec.remaining);
+  if (rec.running) scheduleRestBeep(rec, rec.remaining);
 }
-function loadTimer(sec){
+function restoreTimer(){
   cancelRestBeep();
-  timer.seconds = sec || state.settings.defaultRest;
-  timer.total = timer.seconds;
-  timer.remaining = timer.seconds;
-  timer.running = false; timer.done = false; timer.beepScheduled = false;
-  persistTimer(); drawTimer();
+  reviveRest(timer, state.activeWorkout && state.activeWorkout.timer);
+  allRests().forEach(rec => { if (rec !== timer) reviveRest(rec, Object.assign({}, rec)); });
 }
-function startTimer(){
-  if (timer.remaining <= 0){ timer.remaining = timer.seconds; timer.total = timer.seconds; timer.done = false; }
-  timer.endsAt = Date.now() + timer.remaining * 1000;
-  timer.running = true;
-  timer.beepScheduled = scheduleRestBeep(timer.remaining);
-  persistTimer(); drawTimer();
+function loadTimer(sec, rec = shownTimer()){
+  cancelRestBeep(rec);
+  rec.seconds = sec || state.settings.defaultRest;
+  rec.total = rec.seconds;
+  rec.remaining = rec.seconds;
+  rec.running = false; rec.done = false;
+  persistTimer(rec); drawTimer();
 }
-function pauseTimer(){
-  if (timer.running){ timer.remaining = Math.max(0, (timer.endsAt - Date.now())/1000); }
-  timer.running = false;
-  cancelRestBeep(); timer.beepScheduled = false;
-  persistTimer(); drawTimer();
+function startTimer(rec = shownTimer()){
+  if (rec.remaining <= 0){ rec.remaining = rec.seconds; rec.total = rec.seconds; rec.done = false; }
+  rec.endsAt = Date.now() + rec.remaining * 1000;
+  rec.running = true;
+  scheduleRestBeep(rec, rec.remaining);
+  persistTimer(rec); drawTimer();
+}
+function pauseTimer(rec = shownTimer()){
+  if (rec.running){ rec.remaining = Math.max(0, (rec.endsAt - Date.now())/1000); }
+  rec.running = false;
+  cancelRestBeep(rec);
+  persistTimer(rec); drawTimer();
 }
 /* Extends the countdown only. `total` grows with it so the drain bar stays a
    fraction of a whole; `seconds` is left alone so the next rest still starts
    from the configured length. */
-function addThirty(){
-  timer.remaining += 30;
-  timer.total = Math.max(timer.total, timer.remaining);
-  if (timer.running){
-    timer.endsAt += 30000;
-    timer.beepScheduled = scheduleRestBeep(timer.remaining);
+function addThirty(rec = shownTimer()){
+  rec.remaining += 30;
+  rec.total = Math.max(rec.total, rec.remaining);
+  if (rec.running){
+    rec.endsAt += 30000;
+    scheduleRestBeep(rec, rec.remaining);
   }
-  timer.done = false;
-  persistTimer(); drawTimer();
+  rec.done = false;
+  persistTimer(rec); drawTimer();
 }
 function toggleTimer(){
   if (!state.activeWorkout) return;
-  if (timer.done){ loadTimer(currentRestSeconds()); startTimer(); return; }
-  timer.running ? pauseTimer() : startTimer();
-  announce(timer.running ? 'Rest timer started' : 'Rest timer paused');
+  const rec = shownTimer();
+  if (rec.done){ loadTimer(currentRestSeconds(), rec); startTimer(rec); return; }
+  rec.running ? pauseTimer(rec) : startTimer(rec);
+  announce(rec.running ? 'Rest timer started' : 'Rest timer paused');
 }
 /* Back to a full, stopped rest — including whatever +0:30 added, which is the
    point: the extension is a one-off, so undoing it should not mean waiting it
@@ -3334,8 +3368,8 @@ function resetTimer(){
 /* There is nothing to reset on a full, untouched timer, and nothing to reset
    *to* while it is running — pause first. Everything else (paused part-way,
    extended, or finished) has somewhere to go back to. */
-function canResetTimer(){
-  return !timer.running && (timer.done || timer.remaining < timer.total);
+function canResetTimer(rec = shownTimer()){
+  return !rec.running && (rec.done || rec.remaining < rec.total);
 }
 /* One rest length, and it lives in Settings. Rest used to be per routine item,
    seeded from this setting and then hand-tuned, which meant the same movement
@@ -3345,8 +3379,8 @@ function canResetTimer(){
 function currentRestSeconds(){
   return state.settings.defaultRest;
 }
-function timerRemaining(){
-  return timer.running ? Math.max(0, (timer.endsAt - Date.now())/1000) : timer.remaining;
+function timerRemaining(rec = shownTimer()){
+  return rec.running ? Math.max(0, (rec.endsAt - Date.now())/1000) : rec.remaining;
 }
 /* Under this many seconds the bar turns amber — a peripheral "nearly up"
    signal, so the digits don't have to be read. */
@@ -3356,63 +3390,70 @@ const REST_SOON = 20;
 function paintTimerTime(){
   const timeEl = $('#timer-time');
   if (!timeEl) return;
-  const rem = timerRemaining();
+  const rec = shownTimer(), rem = timerRemaining(rec);
   timeEl.textContent = fmtClock(rem);
   const fill = $('#timer-fill');
-  if (fill) fill.style.width = (timer.total > 0 ? clamp(rem/timer.total*100, 0, 100) : 0) + '%';
+  if (fill) fill.style.width = (rec.total > 0 ? clamp(rem/rec.total*100, 0, 100) : 0) + '%';
   const bar = $('#timer-panel');
-  if (bar) bar.classList.toggle('is-soon', timer.running && rem <= REST_SOON);
+  if (bar) bar.classList.toggle('is-soon', rec.running && rem <= REST_SOON);
 }
 /* Full repaint, runs on state transitions and after every render. */
 function drawTimer(){
+  syncRestBeeps();
   const timeEl = $('#timer-time');
   if (!timeEl) return;
   paintTimerTime();
-  const rem = timerRemaining();
+  const rec = shownTimer(), rem = timerRemaining(rec), owner = restOwner(rec);
   const bar = $('#timer-panel');
   const toggle = $('#timer-toggle');
+  timeEl.setAttribute('aria-label', (owner ? owner.name + ' rest' : 'Rest') + ' time remaining');
   if (bar){
-    bar.classList.toggle('is-running', timer.running);
-    bar.classList.toggle('is-done', timer.done);
+    bar.classList.toggle('is-running', rec.running);
+    bar.classList.toggle('is-done', rec.done);
   }
   if (toggle){
-    const label = timer.running ? 'Pause' : (rem < timer.total && !timer.done ? 'Resume' : 'Start');
-    toggle.innerHTML = (timer.running ? IC.pause : IC.play) + '<span>' + label + '</span>';
-    toggle.setAttribute('aria-label', timer.running ? 'Pause rest timer' : label + ' rest timer');
+    const label = rec.running ? 'Pause' : (rem < rec.total && !rec.done ? 'Resume' : 'Start');
+    toggle.innerHTML = (rec.running ? IC.pause : IC.play) + '<span>' + label + '</span>';
+    toggle.setAttribute('aria-label', rec.running ? 'Pause rest timer' : label + ' rest timer');
   }
   /* Reset is shown and hidden from here rather than from the template because
      pause and resume repaint through drawTimer() without a render() — a button
      that only existed in htmlActionBar() would never appear on a pause. The
      class goes on the bar as well so the stylesheet can make room for the
      fourth control on a narrow phone without knowing when it appears. */
-  const canReset = canResetTimer();
+  const canReset = canResetTimer(rec);
   const reset = $('#timer-reset');
   if (reset) reset.hidden = !canReset;
   if (bar) bar.classList.toggle('is-resettable', canReset);
 }
 /* One place the rest-finished transition happens, so the wall-clock tick and a
-   late wake-up cannot both run it. */
-function completeRest(){
-  if (!timer.running) return;
-  timer.running = false; timer.remaining = 0; timer.done = true;
-  persistTimer();
-  announce('Rest complete.');
+   late wake-up cannot both run it. A superset member's rest names its
+   exercise: it can finish while the partner is on screen. */
+function completeRest(rec){
+  if (!rec.running) return;
+  rec.running = false; rec.remaining = 0; rec.done = true;
+  persistTimer(rec);
+  const owner = restOwner(rec);
+  announce(owner ? owner.name + ' rest complete.' : 'Rest complete.');
   /* the beep was scheduled in the audio clock at start; only fall back to an
      immediate one if that could not be arranged */
-  if (!timer.beepScheduled) beep();
-  timer.beepScheduled = false;
+  if (!restBeeps.has(rec)) beep();
+  restBeeps.delete(rec);
   buzz();
   drawTimer();
 }
+function settleRests(){
+  allRests().forEach(rec => { if (rec.running && rec.endsAt <= Date.now()) completeRest(rec); });
+}
 function tickTimer(){
   if (!state.activeWorkout && !timer.running) return;
-  if (timer.running){
-    if ((timer.endsAt - Date.now())/1000 <= 0) completeRest();
-    else paintTimerTime();
-  }
+  settleRests();
+  if (shownTimer().running) paintTimerTime();
 }
 let audioCtx = null;
-let scheduledBlips = [];
+/* rest record → its queued alarm oscillators, kept off the records so they
+   stay plain stored data */
+const restBeeps = new Map();
 function ensureAudio(){
   if (audioCtx) return audioCtx;
   const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -3446,23 +3487,32 @@ function alarmAt(ctx, t0){
 /* The 250 ms tick is throttled in a backgrounded tab, so the end-of-rest beep
    is queued in the audio clock the moment rest starts instead. Web Audio
    scheduling is sample-accurate and unaffected by timer throttling, so the
-   beep lands on time even with the tab in the background. Returns whether the
-   beep is now queued, so completeRest() knows not to sound a second one. */
-function scheduleRestBeep(delaySec){
-  cancelRestBeep();
-  if (!state.settings.sound) return false;
+   beep lands on time even with the tab in the background. A queued beep is
+   recorded in restBeeps, so completeRest() knows not to sound a second one. */
+function scheduleRestBeep(rec, delaySec){
+  cancelRestBeep(rec);
+  if (!state.settings.sound) return;
   const ctx = ensureAudio();
-  if (!ctx) return false;
+  if (!ctx) return;
   try{
     if (ctx.state === 'suspended') ctx.resume();
     const t = ctx.currentTime + Math.max(0, delaySec);
-    scheduledBlips = alarmAt(ctx, t);
-    return true;
-  }catch(e){ return false; }
+    restBeeps.set(rec, alarmAt(ctx, t));
+  }catch(e){ /* not queued — completeRest() beeps instead */ }
 }
-function cancelRestBeep(){
-  scheduledBlips.forEach(o => { try{ o.stop(); }catch(e){ /* already stopped */ } });
-  scheduledBlips = [];
+/* One rest's queued alarm, or with no argument every one. */
+function cancelRestBeep(rec){
+  (rec ? [rec] : [...restBeeps.keys()]).forEach(r => {
+    (restBeeps.get(r) || []).forEach(o => { try{ o.stop(); }catch(e){ /* already stopped */ } });
+    restBeeps.delete(r);
+  });
+}
+/* A rest that is no longer in the session (its member left the superset, was
+   removed, or the workout ended) must not sound an alarm later. */
+function syncRestBeeps(){
+  if (!restBeeps.size) return;
+  const live = allRests();
+  [...restBeeps.keys()].forEach(rec => { if (!live.includes(rec)) cancelRestBeep(rec); });
 }
 /* Immediate fallback for when the beep could not be scheduled ahead of time.
    Same pattern, so the alarm sounds the same whichever path plays it. */
@@ -3805,29 +3855,28 @@ function enterAt(w, idx){
 function settleSupersets(w){
   const members = new Map();
   w.exercises.forEach((ex, i) => {
-    if (typeof ex.supersetOf !== 'string' || !ex.supersetOf){ delete ex.supersetOf; return; }
+    if (typeof ex.supersetOf !== 'string' || !ex.supersetOf){ delete ex.supersetOf; delete ex.restTimer; return; }
     if (!members.has(ex.supersetOf)) members.set(ex.supersetOf, []);
     members.get(ex.supersetOf).push(i);
   });
   let ended = false;
   members.forEach(idx => {
     if (idx.length >= 2 && idx[idx.length - 1] - idx[0] === idx.length - 1) return;
-    idx.forEach(i => delete w.exercises[i].supersetOf);
+    idx.forEach(i => { delete w.exercises[i].supersetOf; delete w.exercises[i].restTimer; });
     ended = true;
   });
   return ended;
 }
 /* Whose turn it is after a set in the current superset: the next member, in
-   order, that still has work. `wrapped` means the round is over — the one
-   point at which a superset rests. Null outside a superset or once every
-   member is finished. */
+   order, that still has work. Null outside a superset or once every member is
+   finished. */
 function supersetTurn(w){
   const run = supersetRun(w, w.currentExerciseIndex);
   if (run.length < 2) return null;
   const side = run.indexOf(currentMemberIndex(w));
   for (let k = 1; k <= run.length; k++){
     const j = (side + k) % run.length, ex = w.exercises[run[j]];
-    if (!ex.skipped && !allSetsDone(ex)) return { index:run[j], wrapped:j <= side };
+    if (!ex.skipped && !allSetsDone(ex)) return { index:run[j] };
   }
   return null;
 }
@@ -3880,10 +3929,12 @@ function toggleSet(setId){
   else s.completedAt = null;
   let finished = s.completed && allSetsDone(ex);
   const removed = finished ? settleEitherOf(w, ex) : null;
-  /* In a superset a logged set hands over to the partner, and rest waits for
-     the end of the round. The superset is finished only when every member is.
-     A warm-up is not part of the round: it stays on this exercise and rests
-     as a straight set would — unless it was this member's last open set. */
+  /* In a superset a logged set hands over to the partner and starts this
+     member's own rest, which runs while the partner works. The superset is
+     finished only when every member is; its last set rests on the shared
+     timer, which is what the next exercise shows. A warm-up is not part of
+     the round: it stays on this exercise — unless it was this member's last
+     open set. */
   const inSuperset = s.completed && supersetRun(w, w.currentExerciseIndex).length > 1;
   const turn = inSuperset ? supersetTurn(w) : null;
   if (inSuperset) finished = !turn;
@@ -3893,9 +3944,10 @@ function toggleSet(setId){
   if (removed) toast('Either of: removed ' + removed.name + ' from this workout');
   if (s.completed){
     announce('Set ' + (i+1) + ' of ' + ex.sets.length + ' complete.' + (handOver ? ' Now: ' + handOver.name + '.' : ''));
-    if (state.settings.autoRest && (!turn || turn.wrapped || holdForWarmup)){
-      loadTimer(currentRestSeconds());
-      startTimer();
+    if (state.settings.autoRest){
+      const rest = inSuperset && !finished ? memberRest(ex) : timer;
+      loadTimer(currentRestSeconds(), rest);
+      startTimer(rest);
     }
   }
   /* checking the last open box leaves nothing to log here, so move on rather
@@ -4189,7 +4241,7 @@ function unpairSessionExercises(key){
   const w = state.activeWorkout; if (!w || !key) return false;
   const cur = w.exercises[currentMemberIndex(w)] || null;
   let removed = false;
-  w.exercises.forEach(ex => { if (ex.supersetOf === key){ delete ex.supersetOf; removed = true; } });
+  w.exercises.forEach(ex => { if (ex.supersetOf === key){ delete ex.supersetOf; delete ex.restTimer; removed = true; } });
   if (!removed) return false;
   if (cur) pointAt(w, w.exercises.indexOf(cur));
   save();
@@ -4206,7 +4258,7 @@ function finishWorkout(){
     w.finishedAt = Date.now();
     /* how the plan was performed stays with the session in progress */
     delete w.supersetSide;
-    w.exercises.forEach(ex => { delete ex.supersetOf; });
+    w.exercises.forEach(ex => { delete ex.supersetOf; delete ex.restTimer; });
     /* drop rows never touched, then exercises left with nothing to show */
     w.exercises.forEach(ex => {
       ex.sets = ex.sets.filter(s => s.completed || s.weight != null || s.reps != null || s.durationSeconds != null);
@@ -4399,7 +4451,7 @@ const PAIR_KINDS = {
     desc:'Choose two exercises already in this routine. Completing either one removes the other from that workout only.',
     current:'Current pairs', join:' or ', unpair:'Unpair', empty:'Add two unpaired exercises to create another pair.' },
   supersetOf:{ title:'Superset', second:'Alternate with', add:'Create superset',
-    desc:'Choose two exercises already in this routine. In a workout you alternate between them set by set, resting after each round.',
+    desc:'Choose two exercises already in this routine. In a workout you alternate between them set by set, and each has its own rest timer.',
     current:'Current supersets', join:' + ', unpair:'Split', empty:'Add two unpaired exercises to create a superset.' }
 };
 /* …and both places that pair: the routine being edited, and the workout in
@@ -4422,7 +4474,7 @@ const PAIR_SCOPES = {
     pair:(a, b) => pairSessionExercises(a, b),
     unpair:key => unpairSessionExercises(key),
     opener:() => 'session-superset-open',
-    copy:{ desc:'Choose two exercises with sets still to do. You alternate between them set by set, resting after each round. ' +
+    copy:{ desc:'Choose two exercises with sets still to do. You alternate between them set by set, and each has its own rest timer. ' +
       'This workout only: the routine keeps its plan.', empty:'A superset needs two unpaired exercises with sets still to do.' }
   }
 };
@@ -5905,7 +5957,7 @@ function schemaHelpHTML(){
       ['items[].repsMax', 'integer', 'Upper rep target, clamped to the same range. Values below <code>repsMin</code> are reordered.'],
       ['items[].targetRir', 'integer | null', 'Optional target reps in reserve, clamped to 0\u201310. When set, RIR is shown while logging this exercise.'],
       ['items[].eitherOf', 'optional string', 'Exactly two different exercises in a routine share a key to form an either-of pair. They are placed together; completing one removes the other from that workout only. Invalid or incomplete pairs become independent exercises.'],
-      ['items[].supersetOf', 'optional string', 'Exactly two different exercises in a routine share a key to form a superset. They are placed together; a workout alternates between them set by set and rests after each round. An item cannot be in an either-of pair and a superset at once. Invalid or incomplete supersets become independent exercises. Finished workouts do not record supersets.'],
+      ['items[].supersetOf', 'optional string', 'Exactly two different exercises in a routine share a key to form a superset. They are placed together; a workout alternates between them set by set, and each member rests on its own timer. An item cannot be in an either-of pair and a superset at once. Invalid or incomplete supersets become independent exercises. Finished workouts do not record supersets.'],
       ['items[].weight', 'number | null', 'Planned load, or added load for a bodyweight exercise. <code>null</code> uses last time\u2019s figure.'],
       ['exercises[]', 'optional', 'Definitions for the ids above, including broad <code>category</code>, <code>movementFamily</code>, <code>loadMode</code>, optional <code>equipmentKey</code>, <code>archived</code>, notes and URL.'],
       ['exercises[].unit', 'enum', 'One of ' + units + '. <code>kg</code> and <code>lb</code> both mean weighted; a created Library exercise follows this browser’s global weight unit.'],
@@ -6720,7 +6772,7 @@ function htmlSupersetNote(w, ex, run){
         'aria-label="Switch to ' + esc(o.name) + ', ' + done + ' of ' + o.sets.length + ' sets done">' +
         esc(o.name) + ' <span class="muted xs">' + done + '/' + o.sets.length + '</span></button>';
     }).join('') +
-    '<span class="muted xs">Rest after each round</span></div>';
+    '<span class="muted xs">Each has its own rest</span></div>';
 }
 
 /* What is inside the session-overview sheet: every exercise in the workout, in
@@ -6834,7 +6886,7 @@ function htmlActionBar(){
     '<div class="ab-drain" aria-hidden="true"><i id="timer-fill"></i></div>' +
     '<div class="ab-rows">' +
       '<div class="ab-row ab-timer">' +
-        '<output id="timer-time" class="ab-time" aria-label="Rest time remaining">' + fmtClock(timer.remaining) + '</output>' +
+        '<output id="timer-time" class="ab-time" aria-label="Rest time remaining">' + fmtClock(timerRemaining()) + '</output>' +
         '<button type="button" class="btn" id="timer-toggle" data-action="timer-toggle">' + IC.play + '<span>Start</span></button>' +
         '<button type="button" class="btn ab-icon" id="timer-reset" data-action="timer-reset" ' +
           'aria-label="Reset rest timer" title="Reset rest timer"' + (canResetTimer() ? '' : ' hidden') + '>' + IC.reset + '</button>' +
@@ -9111,7 +9163,8 @@ const changeHandlers = {
        under way. An idle timer takes the new value at once; one that is
        running or paused part-way keeps its own countdown and picks the new
        length up on the next rest. */
-    if (!timer.running && !timer.done && timer.remaining >= timer.total) loadTimer(v);
+    const rest = shownTimer();
+    if (!rest.running && !rest.done && rest.remaining >= rest.total) loadTimer(v, rest);
     toast('Rest between sets: ' + fmtClock(v));
   },
   'workout-time'(t){
@@ -9338,8 +9391,8 @@ function init(){
     remoteStartupSync();
     wakeLockDenied = false;
     syncWakeLock();
-    if (timer.running && (timer.endsAt - Date.now()) / 1000 <= 0) completeRest();
-    else drawTimer();
+    settleRests();
+    drawTimer();
   });
   window.addEventListener('pagehide', () => { flushSave(); if (readRemoteWork()) autoRemoteBackup(); });
   window.addEventListener('online', remoteStartupSync);
