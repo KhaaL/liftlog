@@ -419,8 +419,9 @@ state
 ├─ workouts[]      logged sessions, newest first              — the log
 │   └─ exercises[] { exerciseId, name, category, movementFamily, unit, loadMode,
 │                    equipmentKey, targetRepsMin, targetRepsMax,
-│                    targetRir?, skipped, eitherOf?, supersetOf?, sets[] }
-│                    — supersetOf only while active; activeWorkout also has supersetSide
+│                    targetRir?, skipped, eitherOf?, supersetOf?, restTimer?, sets[] }
+│                    — supersetOf and restTimer only while active; activeWorkout also
+│                      has supersetSide and the shared rest, timer
 │       └─ sets[]  { id, weight, addedWeight?, addedWeightUnit?, reps, durationSeconds, rpe, rir,
 │                    unit, completed, completedAt,
 │                    countForVolume?, countForPR? }   — absent means "counts"
@@ -533,6 +534,16 @@ permanent:
   head. A rest length changed in Settings reaches an idle session timer
   immediately and a running or paused one on its next rest, because cutting a
   rest already under way is not what editing a preference should mean.
+- **Each superset member rests on its own timer.** The two members work
+  different muscles, so a logged set starts that member's rest
+  (`activeWorkout.exercises[].restTimer`) and hands over to the partner while
+  it runs. One shared rest after the whole round made the first member's rest
+  its partner's set plus the timer. The action bar shows the current member's
+  rest (`shownTimer()`), or the shared `activeWorkout.timer` when that member
+  has not rested yet; every running rest sounds its own alarm. The superset's
+  last set rests on the shared timer, which is what the next exercise shows.
+  Straight sets use only the shared timer. A member's rest ends with its
+  superset, and finished workouts keep neither.
 - **`rpe` and `rir` are independent fields on a set, but only one shows as an
   input at a time.** `settings.effortMetric` (`'none' | 'rpe' | 'rir'`) is the
   global default. A routine item's optional `targetRir` overrides that default
